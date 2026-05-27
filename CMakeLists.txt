@@ -19,15 +19,6 @@ endif()
 set(MODE "release" CACHE STRING "Set compilation flags, useful for debugging")
 set(FC "" CACHE STRING "Set the fortran compiler to use (can be auto-detected for most cases)")
 
-if (NOT DEFINED PETSC_DIR OR PETSC_DIR STREQUAL "")
-	set(PETSC_DIR $ENV{PETSC_DIR} CACHE PATH "Path to PETSC installation")
-endif()
-if (NOT DEFINED PETSC_ARCH OR PETSC_ARCH STREQUAL "")
-	set(PETSC_ARCH $ENV{PETSC_ARCH} CACHE PATH "System architecture for PETSC installation")
-endif()
-if (NOT DEFINED AMGX_DIR OR AMGX_DIR STREQUAL "")
-	set(AMGX_DIR $ENV{AMGX_DIR} CACHE PATH "Path to NVIDIA AmgX installation")
-endif()
 if (NOT DEFINED FFTW_DIR OR FFTW_DIR STREQUAL "")
 	set(FFTW_DIR $ENV{FFTW_DIR} CACHE PATH "Path to FFTW installation")
 endif()
@@ -90,10 +81,6 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/tests EXCLUDE_FROM_ALL)
 ########## Set up the sources #########
 FILE(GLOB_RECURSE SOURCE_FILES  ${PROJECT_SOURCE_DIR}/src/*.F90)
 
-# remove the two wind solvers, which will later be conditionally added back in
-# depending on library support
-list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_petsc.F90)
-list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_amgx.F90)
 FILE(GLOB_RECURSE ra_mo_files  ${PROJECT_SOURCE_DIR}/src/physics/ra_mo_*.F90)
 list(REMOVE_ITEM SOURCE_FILES ${ra_mo_files})
 
@@ -300,12 +287,9 @@ list(APPEND CMAKE_MESSAGE_INDENT "  ")
 
 include(GNUInstallDirs)
 
-# set root of location to find PETSc's pkg-config
-set(PETSC "${PETSC_DIR}/${PETSC_ARCH}")
-set(ENV{PKG_CONFIG_PATH} "$ENV{PKG_CONFIG_PATH}:${PETSC}/lib/pkgconfig")
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${PETSC} ${AMGX_DIR} ${FFTW_DIR} ${NETCDF_DIR}  ${MPI_DIR} ${FSM_DIR} ${SNOWPACK_DIR})
-set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "${PETSC}/lib/pkgconfig/" ${AMGX_DIR} ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR} ${SNOWPACK_DIR})
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${FFTW_DIR} ${NETCDF_DIR}  ${MPI_DIR} ${FSM_DIR} ${SNOWPACK_DIR})
+set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR} ${SNOWPACK_DIR})
 
 find_package(PkgConfig REQUIRED)
 include(FetchContent)
@@ -417,91 +401,9 @@ if(OPENACC)
 		list(APPEND SOURCE_FILES ${ra_mo_files})
 
 		message(STATUS "rte-rrtmgp library configured successfully")
-
-
-		# Link AmgX library if available
-		if(DEFINED AMGX_DIR AND NOT AMGX_DIR STREQUAL "")
-			find_library(AMGX_LIBRARY NAMES amgx PATHS ${AMGX_DIR}/lib ${AMGX_DIR}/lib64 NO_DEFAULT_PATH)
-			if(AMGX_LIBRARY)
-				message(STATUS "Found AmgX library: ${AMGX_LIBRARY}")
-				# Store the actual include directory path
-				set(AMGX_INCLUDE_DIR "${AMGX_DIR}/include" CACHE PATH "Path to AmgX include directory")
-			else()
-				message(WARNING "AmgX library not found in ${AMGX_DIR}. Variational wind solver will not be available for this GPU build.")
-			endif()
-		else()
-			# Try to auto-detect AmgX from NVIDIA HPC SDK
-			if(DEFINED ENV{NVHPC_ROOT})
-				set(NVHPC_AMGX_PATH "$ENV{NVHPC_ROOT}/math_libs")
-				find_library(AMGX_LIBRARY NAMES amgx 
-					PATHS 
-						${NVHPC_AMGX_PATH}/lib64
-						${NVHPC_AMGX_PATH}/lib
-					NO_DEFAULT_PATH)
-				if(AMGX_LIBRARY)
-					message(STATUS "Auto-detected AmgX from NVIDIA HPC SDK: ${AMGX_LIBRARY}")
-					set(AMGX_DIR ${NVHPC_AMGX_PATH} CACHE PATH "Path to NVIDIA AmgX installation (auto-detected)" FORCE)
-					set(AMGX_INCLUDE_DIR "${NVHPC_AMGX_PATH}/include" CACHE PATH "Path to AmgX include directory")
-				else()
-					message(WARNING "AMGX_DIR not set and auto-detection failed. Variational wind solver will not be available.")
-					message(WARNING "  To enable AmgX, set AMGX_DIR or ensure NVHPC_ROOT is set correctly.")
-				endif()
-			else()
-				message(WARNING "AMGX_DIR not set. Variational wind solver will not be available for this GPU build. Set AMGX_DIR to enable.")
-			endif()
-		endif()
 		
-		# If AmgX was found, add source files and set preprocessor definition
-		if(AMGX_LIBRARY)
-			add_definitions(-DUSE_AMGX)
-			list(APPEND SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_amgx.F90)
-			list(APPEND SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/mpi_comm_wrapper.c)
-			message(STATUS "AmgX support enabled - added wind_iterative_amgx.F90 and mpi_comm_wrapper.c")
-		endif()
 	endif()
 endif()
-#########################################################
-
-if(NOT AMGX_LIBRARY)
-	find_package(PETSc)
-	if (PETSC_FOUND)
-		if (${PETSC_VERSION} VERSION_GREATER_EQUAL 3.23)
-			message(FATAL_ERROR "PETSc version ${PETSC_VERSION} is greater than or equal to 3.23, code currently only supports versions less than 3.23.")
-		endif()
-		add_definitions(-DUSE_PETSC)
-		list(APPEND SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_petsc.F90)
-		set_source_files_properties(
-			${PROJECT_SOURCE_DIR}/src/physics/wind.F90
-			PROPERTIES OBJECT_DEPENDS
-			${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/hicar_lib.dir/src/physics/wind_iterative_petsc.F90.o
-		)
-	endif()
-endif()
-#########################################################
-
-# HICAR native iterative wind solver (pipelined BiCGStab + Block-Jacobi).
-# Pure OpenACC + MPI — no external solver library required.
-# Used as the wind solver when:
-#   1) HICAR_NATIVE_SOLVER=ON is requested explicitly (overrides AMGX/PETSc), OR
-#   2) Neither AMGX nor PETSc was found (automatic fallback).
-option(HICAR_NATIVE_SOLVER "Use HICAR's native iterative wind solver instead of AMGX/PETSc" OFF)
-
-if(HICAR_NATIVE_SOLVER OR (NOT AMGX_LIBRARY AND NOT PETSC_FOUND))
-	add_definitions(-DUSE_HICAR_SOLVER)
-	list(APPEND SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/wind_iterative_hicar.F90)
-	# Note: CMake's Fortran scanner handles `use` dependencies automatically from
-	# the source code, so no explicit OBJECT_DEPENDS is needed. Previously had one
-	# that created a ninja dep cycle (Fortran.dd -> wind.F90.o.ddi -> wind_iterative_hicar.F90.o -> Fortran.dd).
-	if(HICAR_NATIVE_SOLVER AND (AMGX_LIBRARY OR PETSC_FOUND))
-		message(STATUS "HICAR native wind solver REQUESTED (overrides AMGX/PETSc dispatch)")
-		# Drop the other backends' macros so wind.F90 dispatch picks native
-		remove_definitions(-DUSE_AMGX)
-		remove_definitions(-DUSE_PETSC)
-	else()
-		message(STATUS "HICAR native wind solver enabled (no external solver found)")
-	endif()
-endif()
-#########################################################
 
 if (NOT DEFINED NOAHMP_LIBRARY)
 	# Now fetch Noah-MP repo
@@ -535,24 +437,6 @@ add_executable(HICAR ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
 set_property(TARGET hicar_lib PROPERTY EXCLUDE_FROM_DEFAULT_BUILD FALSE)
 set_property(TARGET HICAR PROPERTY EXCLUDE_FROM_DEFAULT_BUILD FALSE)
 
-
-if(AMGX_LIBRARY)
-	# Enable C, C++, and CUDA languages for AmgX support
-	enable_language(C CXX CUDA)
-	
-	# Find CUDA libraries required by AmgX
-	find_package(CUDAToolkit REQUIRED)
-	
-	# Link AmgX library, C++ standard library, and CUDA libraries (all required for AmgX)
-	# AmgX requires: cudart (runtime), cublas (linear algebra), cusparse (sparse matrices), cusolver (dense linear solvers)
-	target_link_libraries(hicar_lib PUBLIC ${AMGX_LIBRARY} stdc++ CUDA::cudart CUDA::cublas CUDA::cusparse CUDA::cusolver)
-	target_include_directories(hicar_lib PUBLIC ${AMGX_INCLUDE_DIR})
-	
-	message(STATUS "Linked AmgX and CUDA libraries to hicar_lib")
-elseif(PETSC_FOUND)
-	target_link_libraries(hicar_lib PUBLIC ${PETSC_LIBRARIES})
-	target_include_directories(hicar_lib PUBLIC ${PETSC_INCLUDES})
-endif()
 
 if(OpenMP_CXX_FOUND)
         target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_CXX)
@@ -690,7 +574,6 @@ if (OpenACC_Fortran_FOUND AND OPENACC)
 		message(STATUS "Found NCCL: ${NCCL_LIBRARY}")
 		add_definitions(-DUSE_NCCL)
 		# NCCL requires CUDA runtime (cudaSetDevice, cudaFree, cudaStream*, etc.)
-		# This may already be available if AMGX is linked, but we need it regardless.
 		if(NOT TARGET CUDA::cudart)
 			enable_language(CUDA)
 			find_package(CUDAToolkit REQUIRED)
@@ -861,11 +744,6 @@ if (CUFFT_LIBRARY)
 	message(STATUS "  cuFFT:  ${CUFFT_LIBRARY}")
 endif()
 message(STATUS "  MPI:    ${MPI_LIBRARIES}")
-if(DEFINED AMGX_DIR AND NOT AMGX_DIR STREQUAL "" AND AMGX_LIBRARY)
-	message(STATUS "  AmgX:   ${AMGX_LIBRARY}")
-elseif(DEFINED PETSC_DIR AND NOT PETSC_DIR STREQUAL "" AND PETSC_LIBRARIES)
-	message(STATUS "  PETSc:  ${PETSC_LIBRARIES}")
-endif()
 if (FSM)
 	message(STATUS "  FSM:    ${FSM_DIR}")
 else()
@@ -994,9 +872,6 @@ else()
         COMMAND ${CMAKE_COMMAND} -S ${PROJECT_SOURCE_DIR} -B ${_DEBUG_BUILD_DIR}
             -DMODE=debug
             -DFC=${FC}
-            -DPETSC_DIR=${PETSC_DIR}
-            -DPETSC_ARCH=${PETSC_ARCH}
-            -DAMGX_DIR=${AMGX_DIR}
             -DFFTW_DIR=${FFTW_DIR}
             -DNETCDF_DIR=${NETCDF_DIR}
             -DMPI_DIR=${MPI_DIR}

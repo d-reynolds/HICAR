@@ -11,13 +11,7 @@ module wind
 
     use linear_theory_winds, only : linear_perturb, setup_linwinds
     ! use wind_iterative,      only : calc_iter_winds, init_iter_winds
-#ifdef USE_AMGX
-    use wind_iterative_amgx,     only : calc_iter_winds_amgx, init_iter_winds_amgx
-#elif defined USE_PETSC
-    use wind_iterative_petsc,      only : calc_iter_winds_petsc, init_iter_winds_petsc
-#elif defined USE_HICAR_SOLVER
-    use wind_iterative_hicar,    only : calc_iter_winds_hicar, init_iter_winds_hicar
-#endif
+    use wind_iterative,    only : calc_iter_winds, init_iter_winds
     use iso_fortran_env, only : output_unit
     use icar_constants
     use domain_interface,  only : domain_t
@@ -781,13 +775,7 @@ contains
 
                 call calc_divergence(div,domain,horz_only=.False.,use_dqdt=.True.)
 
-#ifdef USE_AMGX
-                call calc_iter_winds_amgx(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
-#elif defined USE_PETSC
-                call calc_iter_winds_petsc(domain,options,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
-#elif defined USE_HICAR_SOLVER
-                call calc_iter_winds_hicar(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
-#endif
+                call calc_iter_winds(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
                 !Exchange u and v, since the outer points are not updated in above function
                 call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
                 call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
@@ -1243,16 +1231,7 @@ contains
             call setup_linwinds(domain, options, .False., options%adv%advect_density)
         endif
         if (options%physics%windtype==kITERATIVE_WINDS) then
-#ifdef USE_AMGX
-            call init_iter_winds_amgx(domain,options)
-#elif defined USE_PETSC
-            call init_iter_winds_petsc(domain,options)
-#elif defined USE_HICAR_SOLVER
-            call init_iter_winds_hicar(domain,options)
-#else
-            write(*,*) "ERROR: iterative winds selected but model not compiled with AMGX, PETSc, or HICAR native solver."
-            stop
-#endif
+            call init_iter_winds(domain,options)
         endif
 
         if (options%wind%thermal) call init_thermal_winds(domain, options)

@@ -17,7 +17,7 @@
 !!  Dylan Reynolds (dylan.reynolds@slf.ch)
 !!------------------------------------------------------------
 
-module wind_iterative_hicar
+module wind_iterative
     use iso_c_binding
     use domain_interface,  only : domain_t
     use icar_constants,    only : STD_OUT_PE, kVARS
@@ -36,9 +36,9 @@ module wind_iterative_hicar
 
     implicit none
     private
-    public :: init_iter_winds_hicar, calc_iter_winds_hicar, finalize_hicar
+    public :: init_iter_winds, calc_iter_winds, finalize_iter_winds
 
-    logical :: initialized_hicar = .false.
+    logical :: initialized_iter_winds = .false.
     logical :: structure_uploaded = .false.
 
     real, parameter :: deg2rad = 0.017453293
@@ -56,7 +56,7 @@ module wind_iterative_hicar
     ! Net: similar total time, but fewer outer iters means fewer halo exchanges
     ! and allreduces — strict win at multi-rank scale.
     !
-    ! Adaptive retry: if a solve diverges/stagnates, calc_iter_winds_hicar bumps
+    ! Adaptive retry: if a solve diverges/stagnates, calc_iter_winds bumps
     ! this up to MAX_PREC_SWEEPS, retrying after each bump. On successful
     ! convergence we reset to BASE_PREC_SWEEPS for the next call. Mirrors the
     ! AMGX module's prec_max_iters retry. Per-nest state is cached.
@@ -114,7 +114,7 @@ module wind_iterative_hicar
     integer :: east_neighbor = -1, west_neighbor = -1, north_neighbor = -1, south_neighbor = -1
 
     ! Multi-nest cache: each nest's full state lives in its own slot. On nest
-    ! context switch (nest_manager.F90:switch_nest_context), init_iter_winds_hicar
+    ! context switch (nest_manager.F90:switch_nest_context), init_iter_winds
     ! saves the active state and restores the target. O(1) switching once each
     ! nest has been visited once. Mirrors the AMGX module's cache (which is
     ! itself based on the long-standing physics module pattern in HICAR).
@@ -193,7 +193,7 @@ contains
     !! the first time and otherwise returns. Calling for a second
     !! nest will currently overwrite state for the first.
     !!------------------------------------------------------------
-    subroutine init_iter_winds_hicar(domain, options)
+    subroutine init_iter_winds(domain, options)
         implicit none
         type(domain_t),  intent(in) :: domain
         type(options_t), intent(in) :: options
@@ -215,7 +215,7 @@ contains
             nccl_rc = nccl_comm_init(nccl_comm, nprocs, my_rank_in_comm, &
                                       domain%compute_comms%MPI_VAL, device_num)
             if (nccl_rc /= 0 .and. STD_OUT_PE) then
-                print*, "WARNING: nccl_comm_init failed in wind_iterative_hicar, rc=", nccl_rc
+                print*, "WARNING: nccl_comm_init failed in wind_iterative, rc=", nccl_rc
             endif
             nccl_stream = transfer(acc_get_cuda_stream(acc_async_sync), nccl_stream)
             nccl_initialized = .true.
@@ -257,12 +257,12 @@ contains
         n_rows_global = mx * my * mz
         n_rows        = xm * ym * zm
 
-        initialized_hicar  = .true.
+        initialized_iter_winds  = .true.
         structure_uploaded = .false.
         active_nest_indx   = target_nest
 
         if (STD_OUT_PE) print*, "HICAR native wind solver initialised for nest ", target_nest
-    end subroutine init_iter_winds_hicar
+    end subroutine init_iter_winds
 
 
     !>------------------------------------------------------------
@@ -270,7 +270,7 @@ contains
     !! Signature matches calc_iter_winds_amgx so wind.F90 dispatch
     !! is a one-line swap.
     !!------------------------------------------------------------
-    subroutine calc_iter_winds_hicar(domain, alpha_in, div_in, adv_den)
+    subroutine calc_iter_winds(domain, alpha_in, div_in, adv_den)
         implicit none
         type(domain_t), intent(inout) :: domain
         real, dimension(ims:ime, domain%kms:domain%kme, jms:jme), intent(in) :: alpha_in, div_in
@@ -465,8 +465,8 @@ contains
             endif
         endif
 
-        call calc_updated_winds_hicar(domain, adv_den)
-    end subroutine calc_iter_winds_hicar
+        call calc_updated_winds(domain, adv_den)
+    end subroutine calc_iter_winds
 
 
     !>------------------------------------------------------------
@@ -1405,7 +1405,7 @@ contains
     !! Direct port of calc_updated_winds from wind_iterative_amgx.F90:1117-1423,
     !! but consumes x_sol in 3D form (no flat→3D reshape needed).
     !!------------------------------------------------------------
-    subroutine calc_updated_winds_hicar(domain, adv_den)
+    subroutine calc_updated_winds(domain, adv_den)
         implicit none
         type(domain_t), intent(inout) :: domain
         logical,        intent(in)    :: adv_den
@@ -1705,12 +1705,12 @@ contains
 
         deallocate(u_temp, v_temp, lambda_3d, u_dlambdz, v_dlambdz, dlambdz)
         deallocate(rho, rho_u, rho_v, rho_w)
-    end subroutine calc_updated_winds_hicar
+    end subroutine calc_updated_winds
 
 
     !>------------------------------------------------------------
     !! Single-precision halo exchange for lambda_3d (used by
-    !! calc_updated_winds_hicar). Direct mirror of
+    !! calc_updated_winds). Direct mirror of
     !! exchange_lambda_halos in wind_iterative_amgx.F90:2214-2310.
     !!------------------------------------------------------------
     subroutine exchange_lambda_halos_real(lambda_3d, domain)
@@ -1776,11 +1776,11 @@ contains
     !>------------------------------------------------------------
     !! Cleanup: device delete + host deallocate.
     !!------------------------------------------------------------
-    subroutine finalize_hicar()
+    subroutine finalize_iter_winds()
         implicit none
         integer :: n
 
-        if (.not. initialized_hicar) return
+        if (.not. initialized_iter_winds) return
 
         ! Finalize all cached nests by restoring each one and cleaning it up.
         ! Mirrors finalize_amgx pattern.
@@ -1804,15 +1804,15 @@ contains
         endif
 #endif
 
-        initialized_hicar  = .false.
+        initialized_iter_winds  = .false.
         structure_uploaded = .false.
         active_nest_indx   = -1
-    end subroutine finalize_hicar
+    end subroutine finalize_iter_winds
 
 
     !>------------------------------------------------------------
     !! Clean up the currently-active state (device data + host alloc).
-    !! Used by finalize_hicar both for the live state and for each
+    !! Used by finalize_iter_winds both for the live state and for each
     !! cached nest after restoring it.
     !!------------------------------------------------------------
     subroutine finalize_active_state()
@@ -2486,4 +2486,4 @@ contains
     end subroutine restore_from_cache
 
 
-end module wind_iterative_hicar
+end module wind_iterative

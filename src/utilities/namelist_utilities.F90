@@ -2649,7 +2649,7 @@ contains
             case ("wind")
                 description = "Wind solver to use: "//achar(10)//BLNK_CHR_N// &
                                                    "'none'               = no wind solver,"//achar(10)//BLNK_CHR_N// &
-                                                   "'variational solver' = Mass-conserving wind solver based on variational calculus technique, requires PETSc(cpu) or AMGX(gpu)"
+                                                   "'variational solver' = Mass-conserving wind solver based on variational calculus technique"
                 default = "variational solver"
                 if (present(val_keys)) then
                     val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "variational solver", trim(str(kITERATIVE_WINDS))]
@@ -3855,13 +3855,13 @@ contains
                 default = "0"
                 group = "Wind"
             case ("wind_iterations")
-                description = "Number of iterations to use for the iterative wind solver (wind='variational solver')"
+                description = "number of times to iteratively call the wind solver per update (wind='variational solver')"
                 min = 0
                 max = 10
                 default = "2"
                 group = "Wind"
             case ("wind_solver_iterations")
-                description = "Number of iterations for the actual wind solver(AMGX/PETSc) to use (wind='variational solver')"
+                description = "Number of iterations for the actual wind solver to use (wind='variational solver')"
                 min = 100
                 max = 5000
                 default = "1500"

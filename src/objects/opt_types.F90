@@ -42,8 +42,8 @@ module options_types
         integer :: roughness
         logical :: wind_only
         type(time_delta_t) :: update_dt  ! how often winds are updated
-        integer :: wind_iterations      ! number of time to iterate for option
-        integer :: wind_solver_iterations ! number of iterations for the actual wind solver(AMGX/PETSc) to use (wind='variational solver')
+        integer :: wind_iterations      ! number of times to iteratively call the wind solver per update
+        integer :: wind_solver_iterations ! number of iterations for the actual wind solver to use (wind='variational solver')
         real :: smooth_wind_distance    ! distance over which to smooth the forcing wind field (m)
 
     end type wind_type
