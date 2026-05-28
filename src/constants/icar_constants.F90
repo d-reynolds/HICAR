@@ -91,7 +91,6 @@ module icar_constants
         integer :: shortwave
         integer :: shortwave_direct
         integer :: shortwave_diffuse
-        integer :: shortwave_direct_above
         integer :: longwave
         integer :: albedo
         integer :: soil_albedo_dir

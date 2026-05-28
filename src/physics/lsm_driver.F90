@@ -210,13 +210,13 @@ contains
        if (options%physics%watersurface > 0) then
             call options%alloc_vars( &
                          [kVARS%sst, kVARS%ustar, kVARS%surface_pressure, kVARS%water_vapor,            &
-                         kVARS%temperature, kVARS%sensible_heat, kVARS%latent_heat, kVARS%land_mask,    &
+                         kVARS%temperature, kVARS%lakemask, kVARS%sensible_heat, kVARS%latent_heat, kVARS%land_mask,    &
                          kVARS%QFX, kVARS%chs, kVARS%veg_type,                  &
                          kVARS%humidity_2m, kVARS%temperature_2m, kVARS%skin_temperature, kVARS%u_10m, kVARS%v_10m])
 
              call options%restart_vars( &
                          [kVARS%sst, kVARS%potential_temperature, kVARS%water_vapor, kVARS%skin_temperature,        &
-                         kVARS%surface_pressure, kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m,  &
+                         kVARS%surface_pressure, kVARS%lakemask, kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m,  &
                          kVARS%QFX,                                                                                 &
                          kVARS%humidity_2m, kVARS%temperature_2m])
         endif

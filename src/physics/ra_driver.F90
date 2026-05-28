@@ -707,7 +707,7 @@ contains
         !! MJ added: the vars requested if we have terrain shading
         if (options%rad%terrain_shading) then
             call options%alloc_vars( [kVARS%slope_angle, kVARS%aspect_angle, kVARS%svf, kVARS%hlm, kVARS%shortwave_direct, &
-                                      kVARS%shortwave_diffuse, kVARS%shortwave_direct_above, &
+                                      kVARS%shortwave_diffuse, &
                                       kVARS%shortwave_terrain, kVARS%terrain, kVARS%albedo, &
                                       kVARS%neighbor_terrain, kVARS%neighbor_slope_angle, kVARS%neighbor_aspect_angle])
         endif
@@ -1714,34 +1714,31 @@ contains
             associate(shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
                       shortwave_direct => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d, &
                       shortwave_diffuse => domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
-                      shortwave_direct_above => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct_above)%v)%data_2d, &
                       hlm => domain%vars_3d(domain%var_indx(kVARS%hlm)%v)%data_3d)
             
             !$acc parallel loop gang vector collapse(2) present(shortwave_cached, shortwave_diffuse, shortwave_direct, &
-            !$acc&      hlm, shortwave, shortwave_direct_above, solar_elevation_store, solar_azimuth_store, cos_project_angle) wait(1)
+            !$acc&      hlm, shortwave, solar_elevation_store, solar_azimuth_store, cos_project_angle) wait(1)
             do j = jts,jte
                 do i = its,ite
                     shortwave_direct(i,j) = max( shortwave_cached(i,j) - shortwave_diffuse(i,j),0.0)
 
-                    ! determin maximum allowed direct swr
-                    trans_atm_dir = max(min(shortwave_direct(i,j)/&
-                                    (solar_constant*sin(solar_elevation_store(i,j)+1.e-4)),1.),0.)  ! atmospheric transmissivity for direct sw radiation
-                    max_dir_1     = solar_constant*exp(log(1.-0.165)/max(sin(solar_elevation_store(i,j)),1.e-4))            
-                    max_dir_2     = solar_constant*trans_atm_dir                          
-                    max_dir       = min(max_dir_1,max_dir_2)                     ! applying both above criteria 1 and 2                    
-                    
                     !!
                     zdx=floor(solar_azimuth_store(i,j)*(180./piconst)/4.0) !! MJ added= we have 90 by 4 deg for hlm ...zidx is the right index based on solar azimuthal angle
 
                     zdx = max(min(zdx,zdx_max),1)
                     elev_th=(90.-hlm(i,zdx,j))*DEGRAD !! MJ added: it is the solar elevation threshold above which we see the sun from the pixel  
                     if (solar_elevation_store(i,j)>=elev_th) then
-                        shortwave_direct_above(i,j)=min(shortwave_direct(i,j),max_dir)
+                        ! determin maximum allowed direct swr
+                        trans_atm_dir = max(min(shortwave_direct(i,j)/&
+                                        (solar_constant*sin(solar_elevation_store(i,j)+1.e-4)),1.),0.)  ! atmospheric transmissivity for direct sw radiation
+                        max_dir_1     = solar_constant*exp(log(1.-0.165)/max(sin(solar_elevation_store(i,j)),1.e-4))            
+                        max_dir_2     = solar_constant*trans_atm_dir                          
+                        max_dir       = min(max_dir_1,max_dir_2)                     ! applying both above criteria 1 and 2                    
+
                         shortwave_direct(i,j) = min(shortwave_direct(i,j)/            &
                                                                max(sin(solar_elevation_store(i,j)),0.01),max_dir) * &
                                                                max(cos_project_angle(i,j),0.)
                     else
-                        shortwave_direct_above(i,j)=0.
                         shortwave_direct(i,j)=0.
                     endif
                     shortwave(i,j) = shortwave_diffuse(i,j) + shortwave_direct(i,j)
