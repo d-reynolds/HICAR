@@ -495,9 +495,17 @@ if (NETCDF_FOUND)
 		find_library(NETCDF_C_LIBRARY NAMES netcdf
 			HINTS ${NETCDF_DIR} ENV NETCDF_DIR ENV NETCDF_C_DIR ENV NETCDF
 			PATH_SUFFIXES lib lib64)
+		# Replace -lnetcdf with the absolute path at the *same position* so that
+		# libnetcdf.a stays before -lpnetcdf and -lhdf5 in link order.  APPEND
+		# would push it past those libraries, breaking single-pass archive resolution.
+		list(FIND NETCDF_LIBRARIES -lnetcdf _netcdf_c_pos)
 		list(REMOVE_ITEM NETCDF_LIBRARIES -lnetcdf)
 		if(NETCDF_C_LIBRARY)
-			list(APPEND NETCDF_LIBRARIES ${NETCDF_C_LIBRARY})
+			if(_netcdf_c_pos GREATER -1)
+				list(INSERT NETCDF_LIBRARIES ${_netcdf_c_pos} ${NETCDF_C_LIBRARY})
+			else()
+				list(APPEND NETCDF_LIBRARIES ${NETCDF_C_LIBRARY})
+			endif()
 			message(STATUS "Resolved netcdf-c library: ${NETCDF_C_LIBRARY}")
 		else()
 			message(FATAL_ERROR

@@ -1468,6 +1468,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%shortwave) then
             var_meta%name        = "rsds"
+            var_meta%maxval    = 1400.0
+            var_meta%minval    = 0.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "surface_downwelling_shortwave_flux_in_air"), &
                                attribute_t("units",         "W m-2"),                                     &
@@ -1480,6 +1482,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%shortwave_direct) then
             var_meta%name        = "swtb"
+            var_meta%maxval    = 1400.0
+            var_meta%minval    = 0.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("long_name", "Surface direct downwelling shortwave flux"), &
                                attribute_t("long_name",     "direct shortwave radiation"), &
@@ -1491,6 +1495,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%shortwave_diffuse) then
             var_meta%name        = "swtd"
+            var_meta%maxval    = 1400.0
+            var_meta%minval    = 0.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("long_name", "Surface diffuse downwelling shortwave flux"), &
                                attribute_t("long_name",     "diffuse shortwave radiation"), &
@@ -1502,6 +1508,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%shortwave_terrain) then
             var_meta%name        = "swtr"
+            var_meta%maxval    = 800.0
+            var_meta%minval    = 0.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("long_name", "Surface terrain-reflected shortwave flux"), &
                                attribute_t("long_name",     "terrain reflected shortwave radiation"), &
@@ -1523,6 +1531,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%longwave) then
             var_meta%name        = "lwtr"
+            var_meta%maxval    = 500.0
+            var_meta%minval    = 0.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "surface_net_downward_longwave_flux"), &
                                attribute_t("units",         "W m-2"),                                    &
@@ -2870,6 +2880,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%temperature_2m) then
             var_meta%name        = "taix"
+            var_meta%maxval    = 340.0
+            var_meta%minval    = 180.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "air_temperature"),                     &
                                attribute_t("long_name",     "Bulk air temperature at 2m"),          &
@@ -2921,6 +2933,8 @@ contains
         !!------------------------------------------------------------
         else if (var_idx==kVARS%humidity_2m) then
             var_meta%name        = "hus2m"
+            var_meta%maxval    = 1.0
+            var_meta%minval    = 0.0
             var_meta%dimensions  = two_d_t_dimensions
             var_meta%attributes  = [attribute_t("standard_name", "specific_humidity"),                   &
                                attribute_t("long_name",     "Specific humidity at 2m"),              &

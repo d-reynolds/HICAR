@@ -235,11 +235,11 @@ contains
                     t_factor_in=t_fac, q_id_in=q_id, flux_corr_in=flux_corr_n, apply_cz_diff_in=apply_cz_diff_n)
             enddo
 
-            if (RK3_step < 3) then
-                ! Single batch exchange for all advected variables after each RK3 step
-                call domain%halo_3d_send()
-                call domain%halo_3d_retrieve()
-            endif
+            ! if (RK3_step < 3) then
+            ! Single batch exchange for all advected variables after each RK3 step
+            call domain%halo_3d_send()
+            call domain%halo_3d_retrieve()
+            ! endif
         enddo
 
         ! ---- theta currently holds the RK3-advected perturbation

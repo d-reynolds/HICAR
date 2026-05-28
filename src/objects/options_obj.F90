@@ -1393,7 +1393,7 @@ contains
         
         ! if nz wasn't specified in the namelist, we assume a HUGE number of levels
         ! so now we have to figure out what the actual number of levels read was
-        if (ALL(dz_levels(:,n_indx)==kREAL_NO_VAL) .and. ( (sleve(n_indx) .eqv. .True. .and. auto_level(n_indx)==0) .or. (sleve(n_indx) .eqv. .False.) ) ) then
+        if (ALL(dz_levels(:,n_indx)==kREAL_NO_VAL) .and. ( ( (sleve(n_indx) .eqv. .True.) .and. (domain_options%auto_level==0) ) .or. (sleve(n_indx) .eqv. .False.) ) ) then
             if (STD_OUT_PE) write(*,*) "  WARNING: dz_levels not specified in namelist for domain: ", n_indx
             if (n_indx == 1) then
                 stop 'dz_levels must be specified in namelist for at least the first domain'
@@ -1402,7 +1402,7 @@ contains
             endif
             dz_levels(:,n_indx) = dz_levels(:,1)
         endif
-        if ((domain_options%nz==MAXLEVELS) .and. (auto_level(n_indx) == 0)) then
+        if ((domain_options%nz==MAXLEVELS) .and. (domain_options%auto_level == 0)) then
             do this_level=1,MAXLEVELS-1
                 if (dz_levels(this_level+1,n_indx)<=0) then
                     domain_options%nz=this_level
