@@ -13,46 +13,46 @@ module debug_module
 
 contains
 
-    subroutine domain_check(domain, error_msg, fix)
+    subroutine domain_check(domain, error_msg)
         implicit none
         type(domain_t),     intent(inout)   :: domain
         character(len=*),   intent(in)      :: error_msg
-        logical,            intent(in), optional :: fix
-        logical :: fix_data
 
-        fix_data = .False.
-        if (present(fix)) fix_data = fix
-
-        if (domain%var_indx(kVARS%potential_temperature)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%water_vapor)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%cloud_water_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%ice_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%ice_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice_number)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%snow_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%snow_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%snow_number)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%rain_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%rain_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%rain_number)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%graupel_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%graupel_mass)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%graupel_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%graupel_number)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%ice1_a)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice1_a)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%ice1_c)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice1_c)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%ice2_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice2_mass)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%ice2_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice2_number)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%ice2_a)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice2_a)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%ice2_c)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice2_c)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%ice3_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_mass)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%ice3_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_number)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%ice3_a)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_a)%v), msg=error_msg, fix=fix_data)
-        if (domain%var_indx(kVARS%ice3_c)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_c)%v), msg=error_msg, fix=fix_data)
+        if (domain%var_indx(kVARS%potential_temperature)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%water_vapor)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%cloud_water_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%cloud_water_mass)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%ice_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice_mass)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%ice_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice_number)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%snow_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%snow_mass)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%snow_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%snow_number)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%rain_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%rain_mass)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%rain_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%rain_number)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%graupel_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%graupel_mass)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%graupel_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%graupel_number)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%ice1_a)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice1_a)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%ice1_c)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice1_c)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%ice2_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice2_mass)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%ice2_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice2_number)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%ice2_a)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice2_a)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%ice2_c)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice2_c)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%ice3_mass)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_mass)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%ice3_number)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_number)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%ice3_a)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_a)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%ice3_c)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%ice3_c)%v), msg=error_msg)
         !if (domain%var_indx(kVARS%sensible_heat)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v), msg=error_msg) ! check for NaN's only.
         !if (domain%var_indx(kVARS%latent_heat)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v), msg=error_msg)
         if (domain%var_indx(kVARS%skin_temperature)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v), msg=error_msg)
         if (domain%var_indx(kVARS%roughness_z0)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v), msg=error_msg)
         if (domain%var_indx(kVARS%surface_pressure)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%surface_pressure)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%longwave)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%longwave)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%shortwave)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%shortwave)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%shortwave_diffuse)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%temperature_2m)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%temperature_2m)%v), msg=error_msg)
+        if (domain%var_indx(kVARS%humidity_2m)%v > 0) call check_var(domain%vars_2d(domain%var_indx(kVARS%humidity_2m)%v), msg=error_msg)
         if (domain%var_indx(kVARS%exner)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%exner)%v), msg=error_msg)
         if (domain%var_indx(kVARS%pressure_interface)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v), msg=error_msg)
         if (domain%var_indx(kVARS%pressure)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%pressure)%v), msg=error_msg)
-        if (domain%var_indx(kVARS%density)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%density)%v), msg=error_msg, fix=fix_data)
+        if (domain%var_indx(kVARS%density)%v > 0) call check_var(domain%vars_3d(domain%var_indx(kVARS%density)%v), msg=error_msg)
         call domain_check_winds(domain, error_msg)
 
     end subroutine domain_check
@@ -83,11 +83,11 @@ contains
 
     end subroutine domain_check_winds
 
-    subroutine check_var(var, msg, fix, dqdt, is, ie, js, je)
+    subroutine check_var(var, msg, dqdt, is, ie, js, je)
         implicit none
-        type(variable_t),                intent(inout)      :: var
+        type(variable_t),                intent(in)      :: var
         character(len=*),   intent(in)                      :: msg
-        logical,            intent(in),    optional         :: fix, dqdt
+        logical,            intent(in),    optional         :: dqdt
         ! Optional i/j bounds restrict the check to a sub-region (e.g. the tile /
         ! interior). Default is the full memory array. Callers pass these to avoid
         ! tripping on stale halo cells that are never used downstream.
@@ -113,7 +113,10 @@ contains
         if (var%three_d) then
             !$acc update host(var%data_3d)
             var_3d = var%data_3d
-            if (do_dqdt) var_3d = var%dqdt_3d
+            if (do_dqdt) then
+                var_3d = var%dqdt_3d
+                !$acc update host(var%dqdt_3d)
+            endif
             lis = lbound(var_3d,1); lie = ubound(var_3d,1)
             lks = lbound(var_3d,2); lke = ubound(var_3d,2)
             ljs = lbound(var_3d,3); lje = ubound(var_3d,3)
@@ -124,7 +127,10 @@ contains
         else if (var%two_d) then
             !$acc update host(var%data_2d)
             var_2d = var%data_2d
-            if (do_dqdt) var_2d = var%dqdt_2d
+            if (do_dqdt) then
+                var_2d = var%dqdt_2d
+                !$acc update host(var%dqdt_2d)
+            endif
             lis = lbound(var_2d,1); lie = ubound(var_2d,1)
             ljs = lbound(var_2d,2); lje = ubound(var_2d,2)
             if (present(is)) then; lis = is; lie = ie; ljs = js; lje = je; endif
@@ -214,20 +220,7 @@ contains
             if (var%three_d) call io_write(trim(file_name), trim(name),var_3d)
             if (var%two_d)   call io_write(trim(file_name), trim(name),var_2d)
 
-            if (present(fix)) then
-                if (fix) then
-                    write(*,*) "Fixing..."
-                    if (var%three_d) then
-                        where(var%data_3d > greater_than) var%data_3d = greater_than
-                        where(var%data_3d < less_than)    var%data_3d = less_than
-                    elseif (var%two_d) then
-                        where(var%data_2d > greater_than) var%data_2d = greater_than
-                        where(var%data_2d < less_than)    var%data_2d = less_than
-                    endif
-                endif
-            else
-                error stop
-            endif
+            stop
         endif
 
     end subroutine check_var

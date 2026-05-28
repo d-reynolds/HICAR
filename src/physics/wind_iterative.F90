@@ -280,6 +280,7 @@ contains
         real    :: alpha_min, alpha_max
         logical :: varying_alpha
         integer :: status, n_iters
+        integer :: nan_count
         real(c_double) :: res0, res_final
 
         ! Copy alpha and div into module-resident arrays on GPU
@@ -292,6 +293,38 @@ contains
                 enddo
             enddo
         enddo
+
+        ! Debug: if the input divergence contains any NaN, dump the min/max of the
+        ! state fields that feed the divergence so the source can be traced.
+        nan_count = 0
+        !$acc parallel loop gang vector collapse(3) reduction(+:nan_count) present(div)
+        do j = j_s, j_e
+            do k = k_s, k_e
+                do i = i_s, i_e
+                    if (div(i,k,j) /= div(i,k,j)) nan_count = nan_count + 1
+                enddo
+            enddo
+        enddo
+        if (nan_count > 0) then
+            associate(density     => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,     &
+                      pressure    => domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,    &
+                      temperature => domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d, &
+                      qv          => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,  &
+                      u           => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,            &
+                      v           => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,            &
+                      w_grid      => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+                !$acc update host(density, pressure, temperature, qv, u, v, w_grid)
+                write(*,*) '--------------- HICAR wind solver: NaN in input divergence (rank=', &
+                           solver_rank, ', count=', nan_count, ') ---------------'
+                write(*,*) "  density:     min=", minval(density),     " max=", maxval(density)
+                write(*,*) "  pressure:    min=", minval(pressure),    " max=", maxval(pressure)
+                write(*,*) "  temperature: min=", minval(temperature), " max=", maxval(temperature)
+                write(*,*) "  qv:          min=", minval(qv),          " max=", maxval(qv)
+                write(*,*) "  u:           min=", minval(u),           " max=", maxval(u)
+                write(*,*) "  v:           min=", minval(v),           " max=", maxval(v)
+                write(*,*) "  w:           min=", minval(w_grid),      " max=", maxval(w_grid)
+            end associate
+        endif
 
         if (.not. structure_uploaded) then
             ! First call: build coefficient arrays (CPU host needs alpha)
