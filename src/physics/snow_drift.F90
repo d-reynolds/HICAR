@@ -65,6 +65,17 @@ module snow_drift
     real, save :: GAMMA_RATIO_S, GAMMA_RATIO_I, GAMMA_RATIO_T
     real, save :: SC_THIRD   ! Sc^(1/3) = (NU_AIR/DV_AIR)^(1/3)
 
+    ! Combined gamma factor for lambda computation
+    !   lambda = (ns/qs * LAMBDA_FACTOR)^(1/3)
+    ! where LAMBDA_FACTOR = RHO_ICE * pi * Gamma(alpha+3) / (6*Gamma(alpha))
+    real, save :: LAMBDA_FACTOR
+    ! Fall-speed gamma ratios per Mitchell regime:
+    !   VQ_GR_* = Gamma(3*b_m + 2 + alpha) / (Gamma(alpha) * Gamma(alpha+3))
+    !   VN_GR_* = Gamma(3*b_m - 1 + alpha) / Gamma(alpha)
+    ! Used in Vq/Vn computation in the Thomas-solver and couple kernels.
+    real, save :: VQ_GR_S, VQ_GR_I, VQ_GR_T
+    real, save :: VN_GR_S, VN_GR_I, VN_GR_T
+
     ! -----------------------------------------------
     ! Module-level fine mesh arrays (allocated in snow_drift_init)
     ! -----------------------------------------------
@@ -81,6 +92,15 @@ module snow_drift
     real, allocatable, save :: subl_mass_2d(:,:)                ! (ims:ime, jms:jme) accumulated sublimation mass
     real, allocatable, save :: qs_flux_cache(:,:)            ! (ims:ime, jms:jme) cached interface flux tendency to qs
     real, allocatable, save :: ns_flux_cache(:,:)            ! (ims:ime, jms:jme) cached interface flux tendency to ns
+
+    ! Persistent scratch hoisted out of snow_drift_integrate (was re-allocated
+    ! every call — see equivalent pattern in advect.F90:599).  Lifetime is
+    ! init -> nest-switch (re-allocated by the re-init block in snow_drift_init).
+    real, allocatable, save :: rho_fm(:,:,:), qs_fm_old(:,:,:), ns_fm_old(:,:,:)
+    real, allocatable, save :: div(:,:,:)
+    real, allocatable, save :: jaco_fm(:,:,:), jaco_u_fm(:,:,:), jaco_v_fm(:,:,:)
+    real, allocatable, save :: U_m_fm(:,:,:), V_m_fm(:,:,:), denom_fm(:,:,:)
+    real, allocatable, save :: layer_mass_remaining_2d(:,:), dep_mass_salt_2d(:,:), susp_budget_2d(:,:)
 
     ! Halo exchange variable indices for batch exchange
     type(index_type), save :: exch_vars_fm(2)
@@ -143,7 +163,10 @@ contains
         real    :: z_top, dlog_z, z_bot, fm_top, lowest_susp_level
 
         if (module_initialized) then
-            !$acc exit data delete(snc_dz,snc_Z,subl_mass_2d,kH_fm,wind_fm,v_fm,u_fm, qv_fm,t_fm,w_fm,qs_flux_cache,ns_flux_cache)
+            !$acc exit data delete(snc_dz,snc_Z,subl_mass_2d,kH_fm,wind_fm,v_fm,u_fm, qv_fm,t_fm,w_fm,qs_flux_cache,ns_flux_cache, &
+            !$acc                  rho_fm,qs_fm_old,ns_fm_old,div,jaco_fm,jaco_u_fm,jaco_v_fm, &
+            !$acc                  U_m_fm,V_m_fm,denom_fm, &
+            !$acc                  layer_mass_remaining_2d,dep_mass_salt_2d,susp_budget_2d)
             deallocate(snc_Z)
             deallocate(snc_dz)
             deallocate(u_fm)
@@ -156,6 +179,10 @@ contains
             deallocate(subl_mass_2d)
             deallocate(qs_flux_cache)
             deallocate(ns_flux_cache)
+            deallocate(rho_fm, qs_fm_old, ns_fm_old, div)
+            deallocate(jaco_fm, jaco_u_fm, jaco_v_fm)
+            deallocate(U_m_fm, V_m_fm, denom_fm)
+            deallocate(layer_mass_remaining_2d, dep_mass_salt_2d, susp_budget_2d)
             module_initialized = .False.
         endif
 
@@ -188,12 +215,35 @@ contains
         allocate(qs_flux_cache(ims:ime, jms:jme))
         allocate(ns_flux_cache(ims:ime, jms:jme))
 
+        ! Persistent scratch hoisted from snow_drift_integrate.  Bounds match
+        ! the original per-call local arrays.
+        allocate(rho_fm   (ims:ime,     1:snc_N_loc, jms:jme))
+        allocate(qs_fm_old(ims:ime,     1:snc_N_loc, jms:jme))
+        allocate(ns_fm_old(ims:ime,     1:snc_N_loc, jms:jme))
+        allocate(div      (ims:ime,     kms:kme,     jms:jme))
+        allocate(jaco_fm  (ims:ime,     1:snc_N_loc, jms:jme))
+        allocate(jaco_u_fm(ims:ime,     1:snc_N_loc, jms:jme))
+        allocate(jaco_v_fm(ims:ime,     1:snc_N_loc, jms:jme))
+        allocate(U_m_fm   (its-2:ite+3, 1:snc_N_loc, jts-2:jte+3))
+        allocate(V_m_fm   (its-2:ite+3, 1:snc_N_loc, jts-2:jte+3))
+        allocate(denom_fm (ims:ime,     1:snc_N_loc, jms:jme))
+        allocate(layer_mass_remaining_2d(its:ite, jts:jte))
+        allocate(dep_mass_salt_2d       (its:ite, jts:jte))
+        allocate(susp_budget_2d         (its:ite, jts:jte))
+
         ! Initialize to zero
         u_fm        = 0.0
         v_fm        = 0.0
         wind_fm     = 0.0
         Kh_fm       = 0.0
         subl_mass_2d = 0.0
+
+        ! jaco_*_fm are constants for the suspension scheme (no grid mapping
+        ! distortion on the fine mesh), set once here instead of being broadcast
+        ! every call.
+        jaco_fm     = 1.0
+        jaco_u_fm   = 1.0
+        jaco_v_fm   = 1.0
 
         lowest_susp_level = options%sm%lowest_susp_level
         ! Build logarithmic fine mesh from lowest_susp_level to approximate first model level height
@@ -213,7 +263,11 @@ contains
             enddo
         end do
 
-        !$acc enter data copyin(snc_dz,snc_Z,subl_mass_2d,kH_fm,wind_fm,v_fm,u_fm) create(qv_fm,t_fm,w_fm,qs_flux_cache,ns_flux_cache)
+        !$acc enter data copyin(snc_dz,snc_Z,subl_mass_2d,kH_fm,wind_fm,v_fm,u_fm, &
+        !$acc                   jaco_fm,jaco_u_fm,jaco_v_fm) &
+        !$acc            create(qv_fm,t_fm,w_fm,qs_flux_cache,ns_flux_cache, &
+        !$acc                   rho_fm,qs_fm_old,ns_fm_old,div,U_m_fm,V_m_fm,denom_fm, &
+        !$acc                   layer_mass_remaining_2d,dep_mass_salt_2d,susp_budget_2d)
         ! Initialize fine mesh exchange variable indices for batch halo exchange
         exch_vars_fm(1)%v = domain%var_indx(kVARS%qs_fm)%v
         exch_vars_fm(1)%id = domain%vars_3d(exch_vars_fm(1)%v)%id
@@ -225,6 +279,17 @@ contains
         GAMMA_RATIO_I = gamma(1.0 + 1.5*MITCHELL_BM_I + alpha) / gamma(alpha)
         GAMMA_RATIO_T = gamma(1.0 + 1.5*MITCHELL_BM_T + alpha) / gamma(alpha)
         SC_THIRD = (NU_AIR / DV_AIR)**(1.0/3.0)
+
+        ! Combined gamma factor for lambda = (ns/qs * LAMBDA_FACTOR)^(1/3)
+        LAMBDA_FACTOR = RHO_ICE * PI_CONST * gamma(alpha + 3.0) / (6.0 * gamma(alpha))
+        ! Fall-speed gamma ratios per Mitchell regime (constants — pulled out of
+        ! the per-(i,k,j) hot loop, which used to call gamma() 6 times per cell)
+        VQ_GR_S = gamma(3.0*MITCHELL_BM_S + 2.0 + alpha) / (gamma(alpha) * gamma(alpha + 3.0))
+        VQ_GR_I = gamma(3.0*MITCHELL_BM_I + 2.0 + alpha) / (gamma(alpha) * gamma(alpha + 3.0))
+        VQ_GR_T = gamma(3.0*MITCHELL_BM_T + 2.0 + alpha) / (gamma(alpha) * gamma(alpha + 3.0))
+        VN_GR_S = gamma(3.0*MITCHELL_BM_S - 1.0 + alpha) / gamma(alpha)
+        VN_GR_I = gamma(3.0*MITCHELL_BM_I - 1.0 + alpha) / gamma(alpha)
+        VN_GR_T = gamma(3.0*MITCHELL_BM_T - 1.0 + alpha) / gamma(alpha)
 
         module_initialized = .true.
 
@@ -606,15 +671,10 @@ contains
         real :: Vn_iface_down(0:snc_N_loc), Vn_iface_up(0:snc_N_loc)
         real :: V_net_q, V_net_n, dt_thomas
 
-        ! Advection work arrays
-
-        real, allocatable :: rho_fm(:,:,:), div(:,:,:)
-        real, allocatable :: U_m_fm(:,:,:), V_m_fm(:,:,:), denom_fm(:,:,:)
-        real, allocatable :: qs_fm_old(:,:,:), ns_fm_old(:,:,:)
-        real, allocatable :: jaco_fm(:,:,:), jaco_u_fm(:,:,:), jaco_v_fm(:,:,:)
-        ! Per-column erosion budgets (allocated/deallocated inside this routine)
-        real, allocatable :: layer_mass_remaining_2d(:,:), dep_mass_salt_2d(:,:), susp_budget_2d(:,:)
+        ! Advection work arrays and per-column erosion budgets are now module-level
+        ! (allocated once in snow_drift_init, reused every call).  See snow_drift.F90:84.
         real    :: t_fac, cumulative_swe, layer_mass, layer_mass_remaining
+        real    :: vq_gr_loc, vn_gr_loc      ! per-iteration gamma-ratio selection
         real    :: salt_request, denom, max_entrain
         integer :: flux_corr, max_iters, n_snow
         logical :: using_snowpack, saltation_doorschot
@@ -655,60 +715,46 @@ contains
         ! Operator A — 3D advection on fine mesh (Eq. 21c) via RK3
         ! ===================================================================
 
-        ! Build density field on fine mesh (broadcast surface density to all levels)
-        allocate(rho_fm(ims:ime, 1:snc_N_loc, jms:jme))
-        allocate(qs_fm_old(ims:ime, snc_N_loc, jms:jme))
-        allocate(ns_fm_old(ims:ime, snc_N_loc, jms:jme))
-        allocate(div(ims:ime, kms:kme, jms:jme))
-        allocate(jaco_fm  (ims:ime, 1:snc_N_loc, jms:jme))
-        allocate(jaco_u_fm(ims:ime, 1:snc_N_loc, jms:jme))
-        allocate(jaco_v_fm(ims:ime, 1:snc_N_loc, jms:jme))
-        allocate(layer_mass_remaining_2d(its:ite, jts:jte))
-        allocate(dep_mass_salt_2d       (its:ite, jts:jte))
-        allocate(susp_budget_2d         (its:ite, jts:jte))
+        ! All fine-mesh scratch arrays are now module-level allocatables, set
+        ! up in snow_drift_init.  No per-call allocate/deallocate.
 
         ! Halo exchange before saving initial state for RK3 advection
         call exch_fine_mesh_3d(domain)
 
         using_snowpack = (options%physics%snowmodel == kSM_SNOWPACK)
         saltation_doorschot = (options%sm%saltation_model == kSALTATION_DOORSCHOT)
-        !$acc data create(rho_fm, qs_fm_old, ns_fm_old, div, jaco_fm, jaco_u_fm, jaco_v_fm, &
-        !$acc&            layer_mass_remaining_2d, dep_mass_salt_2d, susp_budget_2d)
 
-        ! Zero sublimation accumulator for this step
-        !$acc parallel loop gang vector collapse(2) default(present)
-        do j = jms, jme
-            do i = ims, ime
+        ! Init kernels fused into a single parallel block.  jaco_*_fm = 1.0 was
+        ! a per-call constant broadcast — now seeded once in snow_drift_init.
+        ! subl_mass_2d/bs_subl zeroing is tile-restricted (the sublimation
+        ! kernel only writes inside its:ite, jts:jte).
+        !$acc parallel default(present)
+        !$acc loop gang vector collapse(2)
+        do j = jts, jte
+            do i = its, ite
                 subl_mass_2d(i,j) = 0.0
                 bs_subl(i,j) = 0.0
             enddo
         enddo
-        !$acc parallel loop gang vector collapse(3) default(present)
+        !$acc loop gang vector collapse(3)
         do j = jms, jme
             do k = 1, snc_N_loc
                 do i = ims, ime
                     rho_fm(i,k,j) = density(i,kts,j)
-                    jaco_fm(i,k,j)   = 1.0!jacobian(i,kts,j)
-                    jaco_u_fm(i,k,j) = 1.0!jacobian_u(i,kts,j)
-                    jaco_v_fm(i,k,j) = 1.0!jacobian_v(i,kts,j)
                     ! Save initial states for RK3
                     qs_fm_old(i,k,j) = qs_fm(i,k,j)
                     ns_fm_old(i,k,j) = ns_fm(i,k,j)
                 enddo
             enddo
         enddo
+        !$acc end parallel
 
         call calc_divergence(div, domain, horz_only=.True., use_dqdt=.False., advect_density=.False.)
 
-        ! Allocate fine-mesh wind/denom arrays here (not inside adv_std_compute_wind_2d_fm)
-        ! and manage their device lifecycle directly on these local variables.
-        ! This avoids NVHPC OpenACC issues with !$acc enter/exit data on allocatable
-        ! dummy arguments, which can leave stale device mappings across calls and
-        ! cause "partially present" errors when nest contexts switch.
-        allocate(U_m_fm  (its-2:ite+3, 1:snc_N_loc, jts-2:jte+3))
-        allocate(V_m_fm  (its-2:ite+3, 1:snc_N_loc, jts-2:jte+3))
-        allocate(denom_fm(ims:ime,     1:snc_N_loc, jms:jme))
-        !$acc enter data create(U_m_fm, V_m_fm, denom_fm)
+        ! U_m_fm, V_m_fm, denom_fm are module-level scratch (allocated and mapped
+        ! to the device in snow_drift_init).  Repeating !$acc enter data create
+        ! per call inflated the dynamic refcount and risked partial-present
+        ! errors on nest switch — see feedback_openacc_enter_data_refcount.md.
 
         ! Compute 3D fine-mesh wind Courant numbers (U_m_fm, V_m_fm, denom_fm)
         call adv_std_compute_wind_2d_fm(u_fm, v_fm, rho_fm, &
@@ -877,23 +923,25 @@ contains
                     ! --- Compute settling velocities and effective interface velocities ---
                     !$acc loop
                     do k = 1, snc_N_loc
-                        lambda = ((max(ns_fm(i,k,j),1e-10) * RHO_ICE * PI_CONST * gamma(alpha + 3.0)) &
-                                / (max(qs_fm(i,k,j), 1e-10) * 6.0 * gamma(alpha)) )**(1.0/3.0)
+                        lambda = (max(ns_fm(i,k,j), 1e-10) / max(qs_fm(i,k,j), 1e-10) * LAMBDA_FACTOR)**(1.0/3.0)
                         eta = rho_air * NU_AIR
                         phi_best = (4.0/3.0) * rho_air * (RHO_ICE - rho_air) * gravity / (eta * eta)
                         X_best = phi_best * (alpha/lambda)**3
 
                         if (X_best <= MITCHELL_X1) then
                             am_loc = MITCHELL_AM_S;  bm_loc = MITCHELL_BM_S
+                            vq_gr_loc = VQ_GR_S;     vn_gr_loc = VN_GR_S
                         else if (X_best <= MITCHELL_X2) then
                             am_loc = MITCHELL_AM_I;  bm_loc = MITCHELL_BM_I
+                            vq_gr_loc = VQ_GR_I;     vn_gr_loc = VN_GR_I
                         else
                             am_loc = MITCHELL_AM_T;  bm_loc = MITCHELL_BM_T
+                            vq_gr_loc = VQ_GR_T;     vn_gr_loc = VN_GR_T
                         endif
 
                         V_coef = am_loc * eta * phi_best**(bm_loc) / rho_air
-                        Vq(k) = V_coef * gamma(3*bm_loc + 2 + alpha) / (gamma(alpha) * gamma(alpha + 3)) * lambda**(1-3*bm_loc)
-                        Vn(k) = V_coef * gamma(3*bm_loc - 1 + alpha) / (gamma(alpha)) * lambda**(1-3*bm_loc)
+                        Vq(k) = V_coef * vq_gr_loc * lambda**(1-3*bm_loc)
+                        Vn(k) = V_coef * vn_gr_loc * lambda**(1-3*bm_loc)
                         Vq(k) = max(SETTLE_MIN, min(Vq(k), 2.0))
                         Vn(k) = max(SETTLE_MIN, min(Vn(k), 2.0))
                     enddo
@@ -1093,8 +1141,8 @@ contains
                     sigma_i = rh - 1.0
 
                     if (qs_fm(i,k,j) > 0.0 .and. ns_fm(i,k,j) > 0.0) then
-                        ! Mean volume diameter
-                        D_m = max( alpha/( (max(ns_fm(i,k,j), 1.0e-10) * RHO_ICE * PI_CONST * gamma(alpha + 3.0)) / (max(qs_fm(i,k,j), 1.0e-10) * 6.0 * gamma(alpha)))**(1.0/3.0), 20.0E-6)
+                        ! Mean volume diameter — lambda = (ns/qs * LAMBDA_FACTOR)^(1/3), D_m = alpha/lambda
+                        D_m = max( alpha/( max(ns_fm(i,k,j), 1.0e-10) / max(qs_fm(i,k,j), 1.0e-10) * LAMBDA_FACTOR)**(1.0/3.0), 20.0E-6)
 
                         ! Gamma distribution slope parameter (alpha=3)
                         lambda = alpha / D_m
@@ -1180,18 +1228,13 @@ contains
 
             enddo
         enddo
-        !$acc end data
 
 
         end associate
-        ! Cleanup advection arrays — handle U_m_fm/V_m_fm/denom_fm directly here
-        ! (on the local variables) to avoid NVHPC dummy-argument tracking issues.
-        !$acc exit data delete(U_m_fm, V_m_fm, denom_fm)
-        deallocate(U_m_fm, V_m_fm, denom_fm)
-        ! Module-level flux_x_fm/flux_y_fm cleanup is still in adv_std module
+        ! All fine-mesh scratches are now module-level and persist across calls
+        ! (allocated in snow_drift_init, freed by the re-init block on nest switch).
+        ! Module-level flux_x_fm/flux_y_fm cleanup is still in adv_std module.
         call adv_std_clean_wind_arrays_fm()
-        deallocate(rho_fm, qs_fm_old, ns_fm_old, jaco_fm, jaco_u_fm, jaco_v_fm)
-        deallocate(layer_mass_remaining_2d, dep_mass_salt_2d, susp_budget_2d)
 
     end subroutine snow_drift_integrate
 
@@ -1211,6 +1254,7 @@ contains
         real    :: max_flux_q, max_flux_n
         real    :: lambda, eta, phi_best, X_best
         real    :: am_loc, bm_loc, V_coef, Vq_settle, Vn_settle, Vq_down, Vn_down
+        real    :: vq_gr_loc, vn_gr_loc
 
         associate( &
             density     => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
@@ -1260,8 +1304,7 @@ contains
 
                 if (qs(i,kts,j) > BS_QS_MIN) then
                     ! Lambda from atmospheric mass and number (same as Operator B)
-                    lambda = ((ns(i,kts,j) * RHO_ICE * PI_CONST * gamma(alpha + 3.0)) / &
-                              (max(qs(i,kts,j), BS_QS_MIN) * 6.0 * gamma(alpha)))**(1.0/3.0)
+                    lambda = (ns(i,kts,j) / max(qs(i,kts,j), BS_QS_MIN) * LAMBDA_FACTOR)**(1.0/3.0)
 
                     ! Best number parameter (Mitchell 1996)
                     eta = rho_air * NU_AIR
@@ -1273,16 +1316,19 @@ contains
                     ! Select Mitchell (1996) regime coefficients
                     if (X_best <= MITCHELL_X1) then
                         am_loc = MITCHELL_AM_S;  bm_loc = MITCHELL_BM_S
+                        vq_gr_loc = VQ_GR_S;     vn_gr_loc = VN_GR_S
                     else if (X_best <= MITCHELL_X2) then
                         am_loc = MITCHELL_AM_I;  bm_loc = MITCHELL_BM_I
+                        vq_gr_loc = VQ_GR_I;     vn_gr_loc = VN_GR_I
                     else
                         am_loc = MITCHELL_AM_T;  bm_loc = MITCHELL_BM_T
+                        vq_gr_loc = VQ_GR_T;     vn_gr_loc = VN_GR_T
                     endif
 
                     V_coef = am_loc * eta * phi_best**(bm_loc) / rho_air
 
-                    Vq_settle = V_coef * gamma(3*bm_loc + 2 + alpha) / (gamma(alpha) * gamma(alpha + 3)) * lambda**(1-3*bm_loc)
-                    Vn_settle = V_coef * gamma(3*bm_loc - 1 + alpha) / (gamma(alpha)) * lambda**(1-3*bm_loc)
+                    Vq_settle = V_coef * vq_gr_loc * lambda**(1-3*bm_loc)
+                    Vn_settle = V_coef * vn_gr_loc * lambda**(1-3*bm_loc)
                     Vq_settle = max(SETTLE_MIN, min(Vq_settle, 2.0))
                     Vn_settle = max(SETTLE_MIN, min(Vn_settle, 2.0))
                 endif

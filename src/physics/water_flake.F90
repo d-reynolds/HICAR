@@ -271,11 +271,14 @@ contains
     !! calling kernel is a flat gang-vector loop over the tile.
     !!
     !! Sign convention: per FLake's upstream interface, Q_*_flk is positive
-    !! when heat leaves the surface (cooling). SH+LH from water_simple are
-    !! computed as positive when heat leaves the water → matches directly.
-    !! Net LW = glw - emiss·σ·T_sfc^4 (positive INTO surface) is subtracted
-    !! from the assembled Q_w, then reassigned to Q_ice or Q_snow based on
-    !! the current surface state (water / ice / ice+snow).
+    !! DOWNWARD — heat INTO the surface, i.e. heating the lake. This is fixed
+    !! by flake_driver itself: d_T_mnw_dt = (Q_w_flk + I_w_flk - ...)/(rho c D)
+    !! puts Q_w_flk on the same footing as the (positive = heating) solar term
+    !! I_w_flk, and the ice-creation test `Q_w_flk < 0` means "surface losing
+    !! heat". SH and LH are computed positive UPWARD (heat leaving the water);
+    !! net LW = glw - emiss·σ·T_sfc^4 is positive downward (into surface). So
+    !! the net non-solar downward flux is lw_net - sh - lh, and that is what
+    !! gets assigned to Q_w / Q_ice / Q_snow based on the current surface state.
     !!------------------------------------------------------------
     subroutine flake_cell_step(                                                  &
             depth_w, depth_bs, T_bs, fetch, lat_deg,                             &
@@ -344,10 +347,16 @@ contains
         s%dMsnowdt_flk = dMsnowdt
         s%I_atm_flk    = real(swdown, ireals)    ! incident SW (no albedo - flake_radflux applies)
 
-        ! ----- 5. Surface heat flux partition (FLake sign: positive = heat OUT) -----
-        ! Assemble the net surface heat-loss term as if the surface were water,
-        ! then reassign to ice or snow channel based on actual surface state.
-        q_surface_net = sh + lh - lw_net    ! lw_net was positive-into-surface; this is positive-out
+        ! ----- 5. Surface heat flux partition (FLake sign: positive = heat INTO surface / downward) -----
+        ! FLake's Q_*_flk convention is positive DOWNWARD (into the surface =
+        ! heating the lake): flake_driver uses d_T_mnw_dt = (Q_w_flk + ...)/...
+        ! with Q_w_flk on the same sign footing as the solar heating term, and
+        ! tests `Q_w_flk < 0` for ice creation (surface losing heat). sh and lh
+        ! are positive UPWARD (heat leaving the water); lw_net is positive
+        ! downward (into surface). The net non-solar downward flux is therefore
+        ! lw_net - sh - lh. Feeding the un-negated sh+lh-lw_net here inverts the
+        ! coupling and drives a runaway warm bias (T_sfc -> 50 C, LH -> 1e4+).
+        q_surface_net = lw_net - sh - lh    ! positive = heat INTO surface (downward)
         if (s%h_ice_p_flk >= h_Ice_min_flk .and. s%h_snow_p_flk >= h_Snow_min_flk) then
             s%Q_snow_flk = q_surface_net
             s%Q_ice_flk  = 0.0_ireals

@@ -1603,7 +1603,6 @@ contains
                 description = "Debugging flag (T/F)"
                 default = ".False."
                 group = "General"
-                type = 1
             case ("interactive")
                 description = "Interactive flag, prints out model progress during physics timesteps (T/F)"
                 default = ".True."

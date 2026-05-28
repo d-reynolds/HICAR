@@ -510,6 +510,11 @@ contains
                 if ( SWE_(j,i)+SWE_pre(hi,hj) > 0 .and. .not.(options%physics%watersurface>0 .and. domain%vars_2d(domain%var_indx(kVARS%land_mask)%v)%data_2di(hi,hj)==kLC_WATER)) then
                     if (ieee_is_nan(H_(j,i)) .or. ieee_is_nan(LE_(j,i)) .or. ieee_is_nan(Tsrf(j,i)) .or. ieee_is_nan(KH_(j,i))) then
                         write(*,*) 'WARNING: FSM NaN at (j,i)=', j, i, ' H=', H_(j,i), ' LE=', LE_(j,i), ' Tsrf=', Tsrf(j,i), ' KH=', KH_(j,i)
+                        write(*,*) ' SWE_pre=', SWE_pre(hi,hj), ' SWE_post=', SWE_(j,i), ' fsnow=', fsnow(j,i), ' Nsnow=', Nsnow(j,i)
+                        write(*,*) ' Check input variables: Ta=', Ta(j,i), ' Qa=', Qa(j,i), ' Ua=', Ua(j,i), ' Udir=', Udir(j,i), ' Sdir=', Sdir(j,i), ' Sdif=', Sdif(j,i), ' LW=', LW(j,i), ' Ps=', Ps(j,i)
+                        write(*,*) ' Check snow state variables: Tsnow=', Tsnow(:,j,i), ' Sice=', Sice(:,j,i), ' Sliq=', Sliq(:,j,i), ' Ds=', Ds(:,j,i)
+                        write(*,*) ' More state variables: ', ' albedo=', albs(j,i), ' snowdepth=', snowdepth_(j,i), ' Sliq_out=', Sliq_out_(j,i), ' meltflux_out=', meltflux_out_(j,i)
+                        write(*,*) ' theta=', theta(:,j,i), ' Tsoil=', Tsoil(:,j,i)
                         stop
                     endif
                     !If we are covering pixel for the first time, save current (bare) roughness length for later

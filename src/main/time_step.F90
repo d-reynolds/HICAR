@@ -112,15 +112,15 @@ contains
         ! In practical experience, the WRF case
         ! is often sufficiently stable. So, to allow for faster time steps, we make this the
         ! maximum limiting wind speed condition.
-        maxwind = min(maxwind3d,maxwind1d*sqrt3)
+        maxwind = maxwind3d!min(maxwind3d,maxwind1d*sqrt3)
 
-        if (maxwind == maxwind1d*sqrt3) then
-            !get index of maxval in maxwind1d, breaking into i, j, and k indices
-            indx = findloc(CFL_wind1d,maxwind1d)
-        else
-            !get index of maxval in maxwind3d, breaking into i, j, and k indices
-            indx = findloc(CFL_wind3d,maxwind3d)
-        endif
+        ! if (maxwind == maxwind1d*sqrt3) then
+        !     !get index of maxval in maxwind1d, breaking into i, j, and k indices
+        !     indx = findloc(CFL_wind1d,maxwind1d)
+        ! else
+        !get index of maxval in maxwind3d, breaking into i, j, and k indices
+        indx = findloc(CFL_wind3d,maxwind3d)
+        ! endif
 
         max_i = indx(1)+its-1
         max_k = indx(2)
@@ -387,7 +387,7 @@ contains
 
                 call domain%rad_timer%start()
                 call rad(domain, options, real(dt%seconds()))
-                if (options%general%debug) call domain_check(domain, "rad(domain")
+                if (options%general%debug) call domain_check(domain, "rad")
                 call domain%rad_timer%stop()
 
 
@@ -421,7 +421,7 @@ contains
                 call domain%adv_timer%start()
                 call advect(domain, options, real(dt%seconds()),domain%flux_timer, domain%flux_corr_timer, domain%sum_timer, domain%adv_wind_timer)
                 !call domain%enforce_limits()
-                if (options%general%debug) call domain_check(domain, "advect(domain")
+                if (options%general%debug) call domain_check(domain, "advect")
                 call domain%adv_timer%stop()
 
                 call domain%lsm_timer%start()
