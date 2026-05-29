@@ -7,7 +7,6 @@ HICAR relies upon four external libraries:
 
 - MPI
 - FFTW
-- PETSc
 - Parallel NetCDF
 
 The easiest way to install all dependencies on a Linux system is to call:
@@ -33,20 +32,6 @@ HICAR has been tested using packed FFTW3 distributions. This can be installed on
 ```bash
 sudo apt-get install libfftw3-dev
 ```
-
-## PETSc
-
-HICAR has been tested using both packaged PETSc distributions, and by building PETSc from source. Packages can be installed on a linux system with:
-
-```bash
-sudo apt-get install petsc-dev
-```
-
-While information on installing PETSc from source (or other packaged distributions) can be found at: <https://petsc.org/release/install/>
-
-When installing PETSc from source, be aware that the default installation option is to install the library in debug mode. Information on how to install optimized PETSc is found under the section <https://petsc.org/release/install/install/#compilers>
-
-**After installing PETSc, either from source or as a package, read the information about setting the environment variables `PETSC_DIR` and `PETSC_ARCH` here: <https://petsc.org/release/install/multibuild/>**
 
 ## NetCDF
 
@@ -113,7 +98,6 @@ mkdir build
 cd build
 export NETCDF_DIR=/path/to/netcdf/root
 export FFTW_DIR=/path/to/fftw/root
-export PETSC_DIR=/path/to/petsc/root
 export PATH=/path/to/netcdf/bin:${PATH}                               # This line is needed to find the nc-config command installed with NetCDF, which
                                                                       # is used to determine the correct libraries to link to.
 export LD_LIBRARY_PATH=/path/to/netcdf/root:${LD_LIBRARY_PATH}      # This line is quite important when NetCDF has been manually installed and linked
@@ -136,8 +120,6 @@ cd build
 # exact module names will vary, these are relevant for the CSCS HPC Daint
 module load daint-mc                     
 module load CMake
-module load cray-petsc                   # Load PETSc
-module load cray-tpsl                    # Load scientific libraries needed for PETSc
 module load cray-fftw                    # Load FFTW
 module load cray-netcdf-hdf5parallel     # Load Parallel NetCDF
 
@@ -179,10 +161,6 @@ Full list of user options, not including standard cmake options, are:
 The following flags are used to help cmake locate installed dependencies. Though not explicitly necesarry, they help cmake find dependencies, especially if they have been installed to unusual locations on the system.
 
 ```bash
-    PETSC_DIR=         # Path to PETSC installation. If not set, defaults to environment variable, if set
-
-    PETSC_ARCH=        # System architecture for PETSC installation. If not set, defaults to environment variable, if set
-
     FFTW_DIR=          # Path to FFTW installation. If not set, defaults to environment variable, if set
 
     NETCDF_DIR=        # Path to NETCDF installation. If not set, defaults to environment variable, if set

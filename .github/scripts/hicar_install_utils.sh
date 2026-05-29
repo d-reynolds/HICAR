@@ -17,7 +17,6 @@ if [ $# -eq 0 ] || [ $# -eq 1 -a \( "$1" == "-h" -o "$1" == "--help" \) ]; then
     echo "  ${bold}execute_test_run${normal}: run CLI, unit, and integration tests"
     echo "  ${bold}install_zlib${normal}: install zlib"
     echo "  ${bold}install_hdf5${normal}: install hdf5"
-    echo "  ${bold}install_PETSc${normal}: install PETSc"
     echo "  ${bold}install_PnetCDF${normal}: install PnetCDF"
     echo "  ${bold}install_netcdf_c${normal}: install netcdf-c"
     echo "  ${bold}install_netcdf_fortran${normal}: install netcdf-fortran"
@@ -196,30 +195,6 @@ function install_netcdf_fortran {
     make install
 }
 
-function install_PETSc {
-    cd $WORKDIR
-
-    if [ ! -d "$WORKDIR/petsc" ]; then
-        git clone -b release https://gitlab.com/petsc/petsc.git petsc
-    fi
-
-    cd petsc
-    git pull # obtain new release fixes (since a prior clone or pull)
-    git checkout release-3.22
-    # check if make file exists and if not, run configure
-    if [ ! -f "Makefile" ]; then
-        ./configure --prefix=$INSTALLDIR --with-debugging=0 --download-fblaslapack=1 #&> config.log
-    fi
-
-    make -j 8
-    make install
-    # if a human_run, then run the tests
-    # otherwise, skip the tests
-    if [ $HUMAN_RUN -eq 1 ]; then
-        make check
-    fi
-
-}
 
 
 function hicar_dependencies {
@@ -228,9 +203,7 @@ function hicar_dependencies {
     sudo apt-get install mpich
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
-    # sudo apt-get install petsc-dev
 
-    install_PETSc
     install_zlib
     install_hdf5
     install_PnetCDF
@@ -254,7 +227,6 @@ function hicar_install {
     fi
     export NETCDF_DIR=${INSTALLDIR}
     export FFTW_DIR=/usr
-    export PETSC_DIR=${INSTALLDIR}
     export PATH=${INSTALLDIR}/bin:$PATH
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
     cmake ../ -DFSM=OFF -DMODE=debug
@@ -308,8 +280,6 @@ do
             install_zlib;;
         install_hdf5)
             install_hdf5;;
-        install_PETSc)
-	    install_PETSc;;
         install_PnetCDF)
             install_PnetCDF;;
         install_netcdf_c)
