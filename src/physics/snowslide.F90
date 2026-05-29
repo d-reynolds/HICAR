@@ -42,8 +42,9 @@ module module_snowslide
     ! in snowslide_init pushes the data over after allocation + fill.
     !$acc declare create(dem_local, slope_local, shd_local, index_sorted)
 
-    ! Working arrays for routing (persist between calls for timing logic)
-    type(variable_t) :: SD_0_var, Sice_0_var    ! For halo exchange
+    ! Scratch variable_t used by fold_slide_halo as the exch_var buffer for the
+    ! mass-conserving cross-rank deposit transfer.
+    type(variable_t) :: Sice_0_var
 
     ! Number of routing iterations per snowslide call. Cadence (how often
     ! snowslide_step is invoked) is managed by the caller — see
@@ -179,8 +180,7 @@ contains
         ! from every subsequent snowslide GPU region.
         !$acc update device(dem_local, slope_local, shd_local, index_sorted)
 
-        ! Initialize variable_t objects for halo exchange
-        call SD_0_var%initialize(kVARS%density, domain%grid2d)
+        ! Initialize the scratch variable_t used as the fold_slide_halo buffer
         call Sice_0_var%initialize(kVARS%density, domain%grid2d)
 
         ! Detect layer representation and max layers
@@ -212,38 +212,41 @@ contains
         type(options_t), intent(in)    :: options
 
         real, allocatable :: SD_0(:,:), Sice_0(:,:)
-        real, allocatable :: dSWE_slide_local(:,:)
+        real, allocatable :: swe_init(:,:)      ! per-owned-cell SWE at entry (kg/m²)
         logical, allocatable :: snow_depo(:,:)
-        integer :: iter
-        integer :: i_s, i_e, j_s, j_e
-
-        i_s = 2;  i_e = Nx_local - 1
-        j_s = 2;  j_e = Ny_local - 1
+        integer :: iter, i, j, i_dom, j_dom
+        integer :: vidx_swe
 
         allocate(SD_0(Nx_local, Ny_local));      SD_0 = 0.0
         allocate(Sice_0(Nx_local, Ny_local));    Sice_0 = 0.0
-        allocate(dSWE_slide_local(Nx_local, Ny_local)); dSWE_slide_local = 0.0
+        allocate(swe_init(Nx_local, Ny_local));  swe_init = 0.0
         allocate(snow_depo(Nx_local, Ny_local)); snow_depo = .False.
+
+        vidx_swe = domain%var_indx(kVARS%snow_water_equivalent)%v
 
         call sync_snow_to_host(domain)
 
+        ! Snapshot per-owned-cell SWE at entry, using the same per-model formula
+        ! the reconcile routines use to recompute snow_water_equivalent. dSWE_slide
+        ! is then the true net change (final - initial) — exactly mass conserving
+        ! per cell, independent of routing/fold bookkeeping.
+        !$acc update host(domain%vars_2d(vidx_swe)%data_2d)
+        swe_init = domain%vars_2d(vidx_swe)%data_2d(its-1:ite+1,jts-1:jte+1)
+
         ! ================================================================
         ! Iteration loop. Each iteration:
-        !   Step 1: Route interior only — erode + deposit, buffer accumulates
-        !   Step 2: Exchange domain Ds halos — neighbor sees our state
-        !   Step 3: Exchange SD_0 halos — neighbor sees buffer deposits
-        !   Step 4: Route buffer+halo — buffer erodes, halo deposits cascade in
-        ! After all iterations: SNOW_LAYERING applies remaining SD_0
+        !   1. Refresh the ghost ring of the snowpack — read-only neighbor
+        !      elevation context for routing direction.
+        !   2. Route all owned cells: erode + deposit. Cross-boundary deposits
+        !      land in the local ghost ring as outgoing flux.
+        !   3. fold_slide_halo: transmit ghost-ring outgoing flux to the
+        !      neighbor's owned edge (mass-conserving scatter-add) and clear the
+        !      ring. Each iteration advances a cross-rank avalanche one cell.
+        ! After the loop: reconcile applies the accumulated owned-cell deposits.
         ! ================================================================
         do iter = 1, n_slide_iters
 
-            ! ---- Step 1: Route interior only ----
-            call snowslide_route(domain, dem_local, slope_local, shd_local, &
-                                 index_sorted, Nx_local, Ny_local, &
-                                 SD_0, Sice_0, dSWE_slide_local, &
-                                 snow_depo, .True.)
-
-            ! ---- Step 2: Exchange domain Ds halos ----
+            ! ---- Refresh ghost-ring snowpack for neighbor elevation ----
             call sync_snow_halo_to_device(domain)
             call domain%halo%exch_var(domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v),corners=.True.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%Ds)%v),corners=.True.)
@@ -256,27 +259,18 @@ contains
             end if
             call sync_snow_halo_to_host(domain)
 
-            ! ---- Step 3: Exchange SD_0/Sice_0 halos ----
-            call exch_slide_halo(domain, SD_0, Sice_0)
-
-            ! Flag halo cells that received deposits from neighbor
-            where(SD_0 > 0.0) snow_depo = .True.
-            snow_depo(i_s:i_e, j_s:j_e) = .False.
-
+            ! ---- Route all owned cells ----
             call snowslide_route(domain, dem_local, slope_local, shd_local, &
                                  index_sorted, Nx_local, Ny_local, &
-                                 SD_0, Sice_0, dSWE_slide_local, &
-                                 snow_depo, .False.)
+                                 SD_0, Sice_0, snow_depo)
+
+            ! ---- Transmit cross-boundary flux to neighbor owned edges ----
+            call fold_slide_halo(domain, SD_0, Sice_0, snow_depo)
 
         end do
 
-        domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d(its:ite, jts:jte) = &
-            domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d(its:ite, jts:jte) + &
-            dSWE_slide_local(i_s:i_e, j_s:j_e)
-        !$acc update device(domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d(its:ite, jts:jte))
-
         ! ================================================================
-        ! After all iterations: apply remaining deposits via SNOW_LAYERING
+        ! After all iterations: apply accumulated deposits via reconcile
         ! ================================================================
         if (options%physics%snowmodel == kSM_FSM) then
 #ifdef FSM
@@ -331,7 +325,26 @@ contains
 #endif
         end if
 
-        deallocate(SD_0, Sice_0, dSWE_slide_local, snow_depo)
+        ! ================================================================
+        ! Recompute dSWE_slide as the true net SWE change (final - initial).
+        ! Both reconcile routines leave snow_water_equivalent updated on device
+        ! using the same formula as the entry snapshot, so the difference is the
+        ! mass redistributed into/out of each owned cell — conserving across
+        ! ranks because cross-boundary flux is now owned by the neighbor.
+        ! ================================================================
+        !$acc update host(domain%vars_2d(vidx_swe)%data_2d)
+        !$acc update host(domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d)
+        do j = 2, Ny_local - 1
+            do i = 2, Nx_local - 1
+                i_dom = its + (i - 2);  j_dom = jts + (j - 2)
+                domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d(i_dom, j_dom) = &
+                    domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d(i_dom, j_dom) + &
+                    (domain%vars_2d(vidx_swe)%data_2d(i_dom, j_dom) - swe_init(i, j))
+            end do
+        end do
+        !$acc update device(domain%vars_2d(domain%var_indx(kVARS%dSWE_slide)%v)%data_2d)
+
+        deallocate(SD_0, Sice_0, swe_init, snow_depo)
 
     end subroutine snowslide_step
 
@@ -457,8 +470,7 @@ contains
     !!----------------------------------------------------------
     subroutine snowslide_route(domain, dem, slope, shd, &
                                idx_sorted, Nx, Ny, &
-                               snowdepth0, Sice0, dSWE_slide, &
-                               snow_depo, interior_only)
+                               snowdepth0, Sice0, snow_depo)
         implicit none
 
         type(domain_t), intent(inout) :: domain
@@ -470,9 +482,7 @@ contains
 
         real, intent(inout)    :: snowdepth0(Nx, Ny)    ! Fresh avalanche deposit depth (m)
         real, intent(inout)    :: Sice0(Nx, Ny)         ! Fresh avalanche deposit mass (kg/m²)
-        real, intent(inout)    :: dSWE_slide(Nx, Ny)    ! SWE change from slides (kg/m²)
         logical, intent(inout) :: snow_depo(Nx, Ny)     ! Cells receiving deposits
-        logical, intent(in)    :: interior_only         ! If true, skip buffer and halo cells
 
         ! D8 neighbor offsets (ordering matches original S,N,W,E,SW,SE,NW,NE layout)
         integer, parameter :: di(8) = [-1,  1,  0,  0, -1, -1,  1,  1]
@@ -491,8 +501,13 @@ contains
             i = idx_sorted(n, 1)
             j = idx_sorted(n, 2)
 
-            ! Skip buffer and halo cells when routing interior only
-            if (interior_only .and. (i <= 2 .or. i >= Nx-1 .or. j <= 2 .or. j >= Ny-1)) cycle
+            ! Only owned cells (interior + buffer) may erode. The ghost ring
+            ! (i==1/Nx, j==1/Ny) is read-only context for neighbor elevation; it
+            ! is never an erosion source, so a neighbor rank's snowpack copy is
+            ! never eroded here. Owned cells may still DEPOSIT into the ghost ring
+            ! (cross-boundary flux); fold_slide_halo transmits those to the
+            ! neighbor's owned edge for mass-conserving cross-rank avalanching.
+            if (i < 2 .or. i > Nx-1 .or. j < 2 .or. j > Ny-1) cycle
 
             if (slope(i,j) < slope_min) cycle
 
@@ -524,9 +539,10 @@ contains
 
             ! Erode snow: first from fresh deposits, then from pack layers
             call erode_snow(domain, i, j, snowdepth_available, snowdepth0(i,j), Sice0(i,j), swe_available)
-            dSWE_slide(i,j) = dSWE_slide(i,j) - swe_available
 
-            ! Transport to 8 neighbors weighted by elevation difference
+            ! Transport to 8 neighbors weighted by elevation difference. Owned
+            ! neighbors accumulate directly; ghost-ring neighbors accumulate
+            ! outgoing cross-boundary flux that fold_slide_halo will transmit.
             do d = 1, 8
                 if (w(d) <= epsilon(w(d))) cycle
                 ni = i + di(d)
@@ -535,7 +551,6 @@ contains
                 Sice0(ni,nj)      = Sice0(ni,nj) + dswe
                 snowdepth0(ni,nj) = snowdepth0(ni,nj) + dswe / rho_deposit
                 snow_depo(ni,nj)  = .TRUE.
-                dSWE_slide(ni,nj) = dSWE_slide(ni,nj) + dswe
             end do
         end do
 
@@ -1517,30 +1532,114 @@ contains
 
 
     !>----------------------------------------------------------
-    !! MPI halo exchange for snowslide deposit arrays
+    !! Mass-conserving cross-rank transfer of cross-boundary deposits.
+    !!
+    !! After routing, owned cells have deposited cross-boundary avalanche flux
+    !! into the local ghost ring (Sice_0/SD_0 at i==1/Nx_local, j==1/Ny_local).
+    !! That flux is destined for the neighbor rank's owned edge cells. exch_var
+    !! is a GATHER (my interior edge -> neighbor halo); its transpose, the
+    !! SCATTER-ADD we need (my halo deposits -> neighbor interior edge, summed),
+    !! is realized with NO new halo code by: mirror-copy halo->interior-edge of a
+    !! scratch var, run the forward exch_var, then add the values exch_var
+    !! delivered into my halo back into my owned edge.
+    !!
+    !! Because the full edge (incl corner cells) is packed by each cardinal send,
+    !! a corner cell is transmitted to three ranks. We therefore fold in three
+    !! direction groups (N/S, E/W, diagonals); each group's ADD reads only its
+    !! own halo cells, so the spurious cross-direction sends exch_var also makes
+    !! are simply never read. Within a group no scratch cell carries two values
+    !! bound for different ranks, so there is no collision.
+    !!
+    !! Only the SWE field is folded; deposit depth is reconstructed as
+    !! mass / rho_deposit (every cross-boundary deposit is laid at rho_deposit).
+    !! The local ghost ring is zeroed afterward — its outgoing flux has been
+    !! consumed (transmitted to, and now owned by, the neighbor rank).
     !!----------------------------------------------------------
-    subroutine exch_slide_halo(domain, SD_0, Sice_0)
+    subroutine fold_slide_halo(domain, SD_0, Sice_0, snow_depo)
         implicit none
         type(domain_t), intent(inout) :: domain
-        real, dimension(Nx_local, Ny_local), intent(inout) :: SD_0, Sice_0
+        real,    dimension(Nx_local, Ny_local), intent(inout) :: SD_0, Sice_0
+        logical, dimension(Nx_local, Ny_local), intent(inout) :: snow_depo
 
-        ! Copy interior to variable_t for halo exchange
-        SD_0_var%data_2d(its:ite, jts:jte) = SD_0(2:Nx_local-1, 2:Ny_local-1)
-        Sice_0_var%data_2d(its:ite, jts:jte) = Sice_0(2:Nx_local-1, 2:Ny_local-1)
+        integer :: i, j, i_dom, j_dom
 
-        !$acc update device(SD_0_var%data_2d, Sice_0_var%data_2d)
+        ! Sice_0_var%data_2d is the scratch buffer exch_var operates on; it spans
+        ! the var memory bounds (its-1:ite+1, jts-1:jte+1). Referenced by full
+        ! name (not an associate alias) so the !$acc update directives bind to
+        ! the device mapping created in snowslide_init.
 
-        call domain%halo%exch_var(SD_0_var, corners=.True.)
+        ! ---- Pass 1: North/South (var j-edges, full i-range its..ite) ----
+        Sice_0_var%data_2d = 0.0
+        do i = 2, Nx_local - 1
+            i_dom = its + (i - 2)
+            Sice_0_var%data_2d(i_dom, jte) = Sice_0(i, Ny_local)   ! north outgoing -> north interior edge
+            Sice_0_var%data_2d(i_dom, jts) = Sice_0(i, 1)          ! south outgoing -> south interior edge
+        end do
+        !$acc update device(Sice_0_var%data_2d)
+        call domain%halo%exch_var(Sice_0_var, corners=.False.)
+        !$acc update host(Sice_0_var%data_2d)
+        do i = 2, Nx_local - 1
+            i_dom = its + (i - 2)
+            call deposit_fold(Sice_0_var%data_2d(i_dom, jte+1), SD_0, Sice_0, snow_depo, i, Ny_local-1)  ! from north
+            call deposit_fold(Sice_0_var%data_2d(i_dom, jts-1), SD_0, Sice_0, snow_depo, i, 2)           ! from south
+        end do
+
+        ! ---- Pass 2: East/West (var i-edges, full j-range jts..jte) ----
+        Sice_0_var%data_2d = 0.0
+        do j = 2, Ny_local - 1
+            j_dom = jts + (j - 2)
+            Sice_0_var%data_2d(ite, j_dom) = Sice_0(Nx_local, j)   ! east outgoing -> east interior edge
+            Sice_0_var%data_2d(its, j_dom) = Sice_0(1, j)          ! west outgoing -> west interior edge
+        end do
+        !$acc update device(Sice_0_var%data_2d)
+        call domain%halo%exch_var(Sice_0_var, corners=.False.)
+        !$acc update host(Sice_0_var%data_2d)
+        do j = 2, Ny_local - 1
+            j_dom = jts + (j - 2)
+            call deposit_fold(Sice_0_var%data_2d(ite+1, j_dom), SD_0, Sice_0, snow_depo, Nx_local-1, j)  ! from east
+            call deposit_fold(Sice_0_var%data_2d(its-1, j_dom), SD_0, Sice_0, snow_depo, 2,          j)  ! from west
+        end do
+
+        ! ---- Pass 3: Diagonals (4 corners) ----
+        Sice_0_var%data_2d = 0.0
+        Sice_0_var%data_2d(ite, jte) = Sice_0(Nx_local, Ny_local)   ! NE outgoing
+        Sice_0_var%data_2d(its, jte) = Sice_0(1,        Ny_local)   ! NW outgoing
+        Sice_0_var%data_2d(ite, jts) = Sice_0(Nx_local, 1)          ! SE outgoing
+        Sice_0_var%data_2d(its, jts) = Sice_0(1,        1)          ! SW outgoing
+        !$acc update device(Sice_0_var%data_2d)
         call domain%halo%exch_var(Sice_0_var, corners=.True.)
+        !$acc update host(Sice_0_var%data_2d)
+        call deposit_fold(Sice_0_var%data_2d(ite+1, jte+1), SD_0, Sice_0, snow_depo, Nx_local-1, Ny_local-1)  ! from NE
+        call deposit_fold(Sice_0_var%data_2d(its-1, jte+1), SD_0, Sice_0, snow_depo, 2,          Ny_local-1)  ! from NW
+        call deposit_fold(Sice_0_var%data_2d(ite+1, jts-1), SD_0, Sice_0, snow_depo, Nx_local-1, 2)           ! from SE
+        call deposit_fold(Sice_0_var%data_2d(its-1, jts-1), SD_0, Sice_0, snow_depo, 2,          2)           ! from SW
 
-        !$acc update host(SD_0_var%data_2d, Sice_0_var%data_2d)
+        ! Outgoing flux has been transmitted to the neighbor ranks: clear the
+        ! local ghost ring so it is not re-folded or reconciled locally.
+        Sice_0(1, :) = 0.0;  Sice_0(Nx_local, :) = 0.0
+        Sice_0(:, 1) = 0.0;  Sice_0(:, Ny_local) = 0.0
+        SD_0  (1, :) = 0.0;  SD_0  (Nx_local, :) = 0.0
+        SD_0  (:, 1) = 0.0;  SD_0  (:, Ny_local) = 0.0
 
-        ! Copy back full domain INCLUDING halo to local arrays
-        ! its-1:ite+1 includes the halo cells populated by MPI exchange
-        SD_0(1:Nx_local, 1:Ny_local) = SD_0_var%data_2d(its-1:ite+1, jts-1:jte+1)
-        Sice_0(1:Nx_local, 1:Ny_local) = Sice_0_var%data_2d(its-1:ite+1, jts-1:jte+1)
+    end subroutine fold_slide_halo
 
-    end subroutine exch_slide_halo
+
+    !>----------------------------------------------------------
+    !! Add one folded-in (received) cross-boundary mass into an owned cell:
+    !! credit the SWE, reconstruct depth at rho_deposit, flag the deposit.
+    !!----------------------------------------------------------
+    subroutine deposit_fold(mass_in, SD_0, Sice_0, snow_depo, li, lj)
+        implicit none
+        real,    intent(in)    :: mass_in
+        real,    dimension(Nx_local, Ny_local), intent(inout) :: SD_0, Sice_0
+        logical, dimension(Nx_local, Ny_local), intent(inout) :: snow_depo
+        integer, intent(in)    :: li, lj
+
+        if (mass_in <= 0.0) return
+        Sice_0(li, lj) = Sice_0(li, lj) + mass_in
+        SD_0  (li, lj) = SD_0  (li, lj) + mass_in / rho_deposit
+        snow_depo(li, lj) = .True.
+    end subroutine deposit_fold
 
 
     !>----------------------------------------------------------

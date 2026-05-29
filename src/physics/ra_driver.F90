@@ -403,6 +403,16 @@ contains
     !! cells each, with NS strips first and then EW (so corner regions
     !! are filled from the already-extended NS data). Pure MPI Isend +
     !! Recv + Wait, with CUDA-aware buffers via `acc host_data`.
+    !!
+    !! Each phase is a *directional relay*, not a symmetric exchange: to
+    !! grow the south halo we recv from the south neighbour and forward our
+    !! own band to the north neighbour, so the front telescopes one tile per
+    !! phase. The forwarded band marches across the tile by `width` each
+    !! phase, anchored at the (contiguous) tile boundary, so paired ranks
+    !! stay aligned by global index for any (incl. non-uniform) tile size.
+    !! A symmetric send+recv with a single neighbour only moves data one
+    !! tile and, for R_cells > tile_w, fills the deep halo with bounced-back
+    !! near-edge data -> reflected-SW tiling along sub-domain boundaries.
     !!----------------------------------------------------------
     subroutine extend_neighborhood_2d(domain, nbr_2d)
         implicit none
@@ -412,6 +422,7 @@ contains
         real, allocatable :: send_buf(:), recv_buf(:)
         integer :: phase, n_phases, tile_w_i, tile_w_j, min_tile_w, width
         integer :: i_lo, i_hi, j_lo, j_hi  ! current valid extent in nbr_2d
+        integer :: pn, ps, pe, pw          ! marching pack-pointers for the four relay streams
         integer :: send_len, recv_width, max_recv_len, buf_size, ierr
         integer :: i, j
         type(MPI_Status) :: stat
@@ -433,6 +444,17 @@ contains
         i_lo = its; i_hi = ite
         j_lo = jts; j_hi = jte
 
+        ! Pack-pointers for the four relay streams. Each marks the band of `width`
+        ! rows/columns we forward to the *opposite* neighbour this phase. They march
+        ! inward (across the tile, then into the already-relayed halo) by `width`
+        ! every phase so that successive phases carry progressively-more-distant
+        ! data. Anchored at the (contiguous) tile edge, so global indices stay
+        ! aligned between paired ranks regardless of tile size.
+        pn = jte   ! feed-NORTH  band top    (fills our SOUTH halo via recv-from-south)
+        ps = jts   ! feed-SOUTH  band bottom (fills our NORTH halo via recv-from-north)
+        pe = ite   ! feed-EAST   band right  (fills our WEST  halo via recv-from-west)
+        pw = its   ! feed-WEST   band left   (fills our EAST  halo via recv-from-east)
+
         ! Allocate work buffers sized for the largest possible strip exchange
         buf_size = max(ide - ids + 1, jde - jds + 1) * (min_tile_w + 2 * R_cells)
         allocate(send_buf(buf_size), recv_buf(buf_size))
@@ -442,42 +464,57 @@ contains
             width = min(min_tile_w, R_cells - (phase - 1) * min_tile_w)
             if (width <= 0) exit
 
-            ! === NS exchanges first: extend j range ===
+            ! === NS streams first: extend j range (corners are filled by the EW
+            !     streams below, which span the now-extended j range). ===
+            !
+            ! Each stream is a directional *relay*, not a symmetric exchange: to
+            ! fill our SOUTH halo we receive from the SOUTH neighbour and forward
+            ! our own band to the NORTH neighbour, so data telescopes one extra
+            ! tile per phase. A symmetric send+recv with a single neighbour (the
+            ! previous implementation) can only move data one tile and, for
+            ! R_cells > tile_w, re-injects near-edge data into the deep halo,
+            ! producing reflected-SW tiling along MPI sub-domain boundaries.
 
-            ! --- South exchange ---
-            if (.not. domain%halo%south_boundary) then
-                recv_width = max(0, min(width, j_lo - domain%jhs))
-                send_len = (i_hi - i_lo + 1) * width
+            ! --- Fill SOUTH halo: recv from south neighbour, relay our band north ---
+            if (.not. domain%halo%south_boundary .or. .not. domain%halo%north_boundary) then
+                send_len     = (i_hi - i_lo + 1) * width
                 max_recv_len = send_len
-                ! Pack: send our southernmost `width` rows to south neighbor
-                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
-                do j = j_lo, j_lo + width - 1
-                    do i = i_lo, i_hi
-                        send_buf((j - j_lo) * (i_hi - i_lo + 1) + (i - i_lo) + 1) = nbr_2d(i, j)
+                recv_width   = max(0, min(width, j_lo - domain%jhs))
+                ! Pack the band [pn-width+1 : pn] to forward north (marches south by `width`).
+                if (.not. domain%halo%north_boundary) then
+                    !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
+                    do j = max(pn - width + 1, domain%jhs), pn
+                        do i = i_lo, i_hi
+                            send_buf((j - (pn - width + 1)) * (i_hi - i_lo + 1) + (i - i_lo) + 1) = nbr_2d(i, j)
+                        end do
                     end do
-                end do
+                endif
                 !$acc host_data use_device(send_buf, recv_buf)
 #ifdef USE_NCCL
                 call nccl_group_start()
-                ierr = nccl_send_float(c_loc(send_buf), int(send_len, c_int), &
-                                       domain%halo%south_neighbor, &
-                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
-                ierr = nccl_recv_float(c_loc(recv_buf), int(max_recv_len, c_int), &
-                                       domain%halo%south_neighbor, &
-                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
+                if (.not. domain%halo%north_boundary) &
+                    ierr = nccl_send_float(c_loc(send_buf), int(send_len, c_int), &
+                                           domain%halo%north_neighbor, &
+                                           domain%halo%nccl_comm, domain%halo%nccl_stream)
+                if (.not. domain%halo%south_boundary) &
+                    ierr = nccl_recv_float(c_loc(recv_buf), int(max_recv_len, c_int), &
+                                           domain%halo%south_neighbor, &
+                                           domain%halo%nccl_comm, domain%halo%nccl_stream)
                 call nccl_group_end()
 #else
-                call MPI_Isend(send_buf, send_len, MPI_REAL, &
-                               domain%halo%south_neighbor, 100 + phase, &
-                               domain%compute_comms, send_req, ierr)
-                call MPI_Recv(recv_buf, max_recv_len, MPI_REAL, &
-                              domain%halo%south_neighbor, 200 + phase, &
-                              domain%compute_comms, stat, ierr)
-                call MPI_Wait(send_req, stat, ierr)
+                if (.not. domain%halo%north_boundary) &
+                    call MPI_Isend(send_buf, send_len, MPI_REAL, &
+                                   domain%halo%north_neighbor, 100 + phase, &
+                                   domain%compute_comms, send_req, ierr)
+                if (.not. domain%halo%south_boundary) &
+                    call MPI_Recv(recv_buf, max_recv_len, MPI_REAL, &
+                                  domain%halo%south_neighbor, 100 + phase, &
+                                  domain%compute_comms, stat, ierr)
+                if (.not. domain%halo%north_boundary) call MPI_Wait(send_req, stat, ierr)
 #endif
                 !$acc end host_data
                 ! Unpack only the rows we have space for (closest to our domain)
-                if (recv_width > 0) then
+                if (.not. domain%halo%south_boundary .and. recv_width > 0) then
                     !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_2d)
                     do j = j_lo - recv_width, j_lo - 1
                         do i = i_lo, i_hi
@@ -489,40 +526,48 @@ contains
                     j_lo = j_lo - recv_width
                 endif
             endif
+            pn = pn - width
 
-            ! --- North exchange ---
-            if (.not. domain%halo%north_boundary) then
-                recv_width = max(0, min(width, domain%jhe - j_hi))
-                send_len = (i_hi - i_lo + 1) * width
+            ! --- Fill NORTH halo: recv from north neighbour, relay our band south ---
+            if (.not. domain%halo%south_boundary .or. .not. domain%halo%north_boundary) then
+                send_len     = (i_hi - i_lo + 1) * width
                 max_recv_len = send_len
-                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
-                do j = j_hi - width + 1, j_hi
-                    do i = i_lo, i_hi
-                        send_buf((j - (j_hi - width + 1)) * (i_hi - i_lo + 1) + (i - i_lo) + 1) = nbr_2d(i, j)
+                recv_width   = max(0, min(width, domain%jhe - j_hi))
+                ! Pack the band [ps : ps+width-1] to forward south (marches north by `width`).
+                if (.not. domain%halo%south_boundary) then
+                    !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
+                    do j = ps, min(ps + width - 1, domain%jhe)
+                        do i = i_lo, i_hi
+                            send_buf((j - ps) * (i_hi - i_lo + 1) + (i - i_lo) + 1) = nbr_2d(i, j)
+                        end do
                     end do
-                end do
+                endif
                 !$acc host_data use_device(send_buf, recv_buf)
 #ifdef USE_NCCL
                 call nccl_group_start()
-                ierr = nccl_send_float(c_loc(send_buf), int(send_len, c_int), &
-                                       domain%halo%north_neighbor, &
-                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
-                ierr = nccl_recv_float(c_loc(recv_buf), int(max_recv_len, c_int), &
-                                       domain%halo%north_neighbor, &
-                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
+                if (.not. domain%halo%south_boundary) &
+                    ierr = nccl_send_float(c_loc(send_buf), int(send_len, c_int), &
+                                           domain%halo%south_neighbor, &
+                                           domain%halo%nccl_comm, domain%halo%nccl_stream)
+                if (.not. domain%halo%north_boundary) &
+                    ierr = nccl_recv_float(c_loc(recv_buf), int(max_recv_len, c_int), &
+                                           domain%halo%north_neighbor, &
+                                           domain%halo%nccl_comm, domain%halo%nccl_stream)
                 call nccl_group_end()
 #else
-                call MPI_Isend(send_buf, send_len, MPI_REAL, &
-                               domain%halo%north_neighbor, 200 + phase, &
-                               domain%compute_comms, send_req, ierr)
-                call MPI_Recv(recv_buf, max_recv_len, MPI_REAL, &
-                              domain%halo%north_neighbor, 100 + phase, &
-                              domain%compute_comms, stat, ierr)
-                call MPI_Wait(send_req, stat, ierr)
+                if (.not. domain%halo%south_boundary) &
+                    call MPI_Isend(send_buf, send_len, MPI_REAL, &
+                                   domain%halo%south_neighbor, 200 + phase, &
+                                   domain%compute_comms, send_req, ierr)
+                if (.not. domain%halo%north_boundary) &
+                    call MPI_Recv(recv_buf, max_recv_len, MPI_REAL, &
+                                  domain%halo%north_neighbor, 200 + phase, &
+                                  domain%compute_comms, stat, ierr)
+                if (.not. domain%halo%south_boundary) call MPI_Wait(send_req, stat, ierr)
 #endif
                 !$acc end host_data
                 ! Unpack only the rows we have space for (closest to our domain)
-                if (recv_width > 0) then
+                if (.not. domain%halo%north_boundary .and. recv_width > 0) then
                     !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_2d)
                     do j = j_hi + 1, j_hi + recv_width
                         do i = i_lo, i_hi
@@ -532,44 +577,52 @@ contains
                     j_hi = j_hi + recv_width
                 endif
             endif
+            ps = ps + width
 
-            ! === EW exchanges: extend i range, using the now-extended j range ===
-            ! This automatically fills corner regions because the strips span j_lo:j_hi
-            ! which includes data received from the NS exchanges above.
+            ! === EW streams: extend i range using the now-extended j range, which
+            !     automatically fills corner regions (the strips span j_lo:j_hi,
+            !     including data received from the NS streams above). ===
 
-            ! --- West exchange ---
-            if (.not. domain%halo%west_boundary) then
-                recv_width = max(0, min(width, i_lo - domain%ihs))
-                send_len = width * (j_hi - j_lo + 1)
+            ! --- Fill WEST halo: recv from west neighbour, relay our band east ---
+            if (.not. domain%halo%west_boundary .or. .not. domain%halo%east_boundary) then
+                send_len     = width * (j_hi - j_lo + 1)
                 max_recv_len = send_len
-                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
-                do j = j_lo, j_hi
-                    do i = i_lo, i_lo + width - 1
-                        send_buf((j - j_lo) * width + (i - i_lo) + 1) = nbr_2d(i, j)
+                recv_width   = max(0, min(width, i_lo - domain%ihs))
+                ! Pack the band [pe-width+1 : pe] to forward east (marches west by `width`).
+                if (.not. domain%halo%east_boundary) then
+                    !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
+                    do j = j_lo, j_hi
+                        do i = max(pe - width + 1, domain%ihs), pe
+                            send_buf((j - j_lo) * width + (i - (pe - width + 1)) + 1) = nbr_2d(i, j)
+                        end do
                     end do
-                end do
+                endif
                 !$acc host_data use_device(send_buf, recv_buf)
 #ifdef USE_NCCL
                 call nccl_group_start()
-                ierr = nccl_send_float(c_loc(send_buf), int(send_len, c_int), &
-                                       domain%halo%west_neighbor, &
-                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
-                ierr = nccl_recv_float(c_loc(recv_buf), int(max_recv_len, c_int), &
-                                       domain%halo%west_neighbor, &
-                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
+                if (.not. domain%halo%east_boundary) &
+                    ierr = nccl_send_float(c_loc(send_buf), int(send_len, c_int), &
+                                           domain%halo%east_neighbor, &
+                                           domain%halo%nccl_comm, domain%halo%nccl_stream)
+                if (.not. domain%halo%west_boundary) &
+                    ierr = nccl_recv_float(c_loc(recv_buf), int(max_recv_len, c_int), &
+                                           domain%halo%west_neighbor, &
+                                           domain%halo%nccl_comm, domain%halo%nccl_stream)
                 call nccl_group_end()
 #else
-                call MPI_Isend(send_buf, send_len, MPI_REAL, &
-                               domain%halo%west_neighbor, 300 + phase, &
-                               domain%compute_comms, send_req, ierr)
-                call MPI_Recv(recv_buf, max_recv_len, MPI_REAL, &
-                              domain%halo%west_neighbor, 400 + phase, &
-                              domain%compute_comms, stat, ierr)
-                call MPI_Wait(send_req, stat, ierr)
+                if (.not. domain%halo%east_boundary) &
+                    call MPI_Isend(send_buf, send_len, MPI_REAL, &
+                                   domain%halo%east_neighbor, 300 + phase, &
+                                   domain%compute_comms, send_req, ierr)
+                if (.not. domain%halo%west_boundary) &
+                    call MPI_Recv(recv_buf, max_recv_len, MPI_REAL, &
+                                  domain%halo%west_neighbor, 300 + phase, &
+                                  domain%compute_comms, stat, ierr)
+                if (.not. domain%halo%east_boundary) call MPI_Wait(send_req, stat, ierr)
 #endif
                 !$acc end host_data
                 ! Unpack only the columns we have space for (closest to our domain)
-                if (recv_width > 0) then
+                if (.not. domain%halo%west_boundary .and. recv_width > 0) then
                     !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_2d)
                     do j = j_lo, j_hi
                         do i = i_lo - recv_width, i_lo - 1
@@ -580,40 +633,48 @@ contains
                     i_lo = i_lo - recv_width
                 endif
             endif
+            pe = pe - width
 
-            ! --- East exchange ---
-            if (.not. domain%halo%east_boundary) then
-                recv_width = max(0, min(width, domain%ihe - i_hi))
-                send_len = width * (j_hi - j_lo + 1)
+            ! --- Fill EAST halo: recv from east neighbour, relay our band west ---
+            if (.not. domain%halo%west_boundary .or. .not. domain%halo%east_boundary) then
+                send_len     = width * (j_hi - j_lo + 1)
                 max_recv_len = send_len
-                !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
-                do j = j_lo, j_hi
-                    do i = i_hi - width + 1, i_hi
-                        send_buf((j - j_lo) * width + (i - (i_hi - width + 1)) + 1) = nbr_2d(i, j)
+                recv_width   = max(0, min(width, domain%ihe - i_hi))
+                ! Pack the band [pw : pw+width-1] to forward west (marches east by `width`).
+                if (.not. domain%halo%west_boundary) then
+                    !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
+                    do j = j_lo, j_hi
+                        do i = pw, min(pw + width - 1, domain%ihe)
+                            send_buf((j - j_lo) * width + (i - pw) + 1) = nbr_2d(i, j)
+                        end do
                     end do
-                end do
+                endif
                 !$acc host_data use_device(send_buf, recv_buf)
 #ifdef USE_NCCL
                 call nccl_group_start()
-                ierr = nccl_send_float(c_loc(send_buf), int(send_len, c_int), &
-                                       domain%halo%east_neighbor, &
-                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
-                ierr = nccl_recv_float(c_loc(recv_buf), int(max_recv_len, c_int), &
-                                       domain%halo%east_neighbor, &
-                                       domain%halo%nccl_comm, domain%halo%nccl_stream)
+                if (.not. domain%halo%west_boundary) &
+                    ierr = nccl_send_float(c_loc(send_buf), int(send_len, c_int), &
+                                           domain%halo%west_neighbor, &
+                                           domain%halo%nccl_comm, domain%halo%nccl_stream)
+                if (.not. domain%halo%east_boundary) &
+                    ierr = nccl_recv_float(c_loc(recv_buf), int(max_recv_len, c_int), &
+                                           domain%halo%east_neighbor, &
+                                           domain%halo%nccl_comm, domain%halo%nccl_stream)
                 call nccl_group_end()
 #else
-                call MPI_Isend(send_buf, send_len, MPI_REAL, &
-                               domain%halo%east_neighbor, 400 + phase, &
-                               domain%compute_comms, send_req, ierr)
-                call MPI_Recv(recv_buf, max_recv_len, MPI_REAL, &
-                              domain%halo%east_neighbor, 300 + phase, &
-                              domain%compute_comms, stat, ierr)
-                call MPI_Wait(send_req, stat, ierr)
+                if (.not. domain%halo%west_boundary) &
+                    call MPI_Isend(send_buf, send_len, MPI_REAL, &
+                                   domain%halo%west_neighbor, 400 + phase, &
+                                   domain%compute_comms, send_req, ierr)
+                if (.not. domain%halo%east_boundary) &
+                    call MPI_Recv(recv_buf, max_recv_len, MPI_REAL, &
+                                  domain%halo%east_neighbor, 400 + phase, &
+                                  domain%compute_comms, stat, ierr)
+                if (.not. domain%halo%west_boundary) call MPI_Wait(send_req, stat, ierr)
 #endif
                 !$acc end host_data
                 ! Unpack only the columns we have space for (closest to our domain)
-                if (recv_width > 0) then
+                if (.not. domain%halo%east_boundary .and. recv_width > 0) then
                     !$acc parallel loop gang vector collapse(2) present(recv_buf, nbr_2d)
                     do j = j_lo, j_hi
                         do i = i_hi + 1, i_hi + recv_width
@@ -623,6 +684,7 @@ contains
                     i_hi = i_hi + recv_width
                 endif
             endif
+            pw = pw + width
 
         end do
 
