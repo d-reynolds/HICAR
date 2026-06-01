@@ -857,19 +857,23 @@ contains
         ! Irecv at write_file uses these to consume just the leading-dim
         ! slice (1:n_out_*) of the write_buffer with stride n_w_*. If there
         ! is no restart-only tail (n_out == n_w), fall back to flat MPI_REAL.
-        if (this%n_out_3d > 0 .and. this%n_out_3d < this%n_w_3d) then
+        if (this%n_out_3d > 0 .and. this%n_out_3d <= this%n_w_3d) then
             call MPI_Type_vector(this%nx_re*this%nz_w*this%ny_re, this%n_out_3d, this%n_w_3d, &
                                  MPI_REAL, this%recv_type_3d_out, ierr)
             call MPI_Type_commit(this%recv_type_3d_out, ierr)
-        else
+        elseif (this%n_out_3d == 0) then
             this%recv_type_3d_out = MPI_REAL
+        else
+            error stop "Invalid n_out_3d > n_w_3d: " // trim(str(this%n_out_3d)) // " > " // trim(str(this%n_w_3d))
         endif
-        if (this%n_out_2d > 0 .and. this%n_out_2d < this%n_w_2d) then
+        if (this%n_out_2d > 0 .and. this%n_out_2d <= this%n_w_2d) then
             call MPI_Type_vector(this%nx_re*this%ny_re, this%n_out_2d, this%n_w_2d, &
                                  MPI_REAL, this%recv_type_2d_out, ierr)
             call MPI_Type_commit(this%recv_type_2d_out, ierr)
-        else
+        elseif (this%n_out_2d == 0) then
             this%recv_type_2d_out = MPI_REAL
+        else
+            error stop "Invalid n_out_2d > n_w_2d: " // trim(str(this%n_out_2d)) // " > " // trim(str(this%n_w_2d))
         endif
 
         ! Plain per-child receive buffers for nest forcing — filled by

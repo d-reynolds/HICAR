@@ -310,19 +310,23 @@ contains
         ! with stride n_w_* between blocks. If there is no restart-only
         ! tail (n_out == n_w) we keep using MPI_REAL — a flat send is
         ! cheaper than going through the type machinery.
-        if (n_out_3d > 0 .and. n_out_3d < n_w_3d) then
+        if (n_out_3d > 0 .and. n_out_3d <= n_w_3d) then
             call MPI_Type_vector(nx_re*nz_w*ny_re, n_out_3d, n_w_3d, &
                                  MPI_REAL, this%send_type_3d_out, ierr)
             call MPI_Type_commit(this%send_type_3d_out, ierr)
-        else
+        elseif (n_out_3d == 0) then
             this%send_type_3d_out = MPI_REAL
+        else
+            error stop "Invalid n_out_3d > n_w_3d: " // trim(str(n_out_3d)) // " > " // trim(str(n_w_3d))
         endif
-        if (n_out_2d > 0 .and. n_out_2d < n_w_2d) then
+        if (n_out_2d > 0 .and. n_out_2d <= n_w_2d) then
             call MPI_Type_vector(nx_re*ny_re, n_out_2d, n_w_2d, &
                                  MPI_REAL, this%send_type_2d_out, ierr)
             call MPI_Type_commit(this%send_type_2d_out, ierr)
-        else
+        elseif (n_out_2d == 0) then
             this%send_type_2d_out = MPI_REAL
+        else
+            error stop "Invalid n_out_2d > n_w_2d: " // trim(str(n_out_2d)) // " > " // trim(str(n_w_2d))
         endif
 
     end subroutine setup_MPI_windows
