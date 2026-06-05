@@ -39,7 +39,12 @@ jobs:
   gpu-build-and-test:
     runs-on: [self-hosted, gpu, nvhpc]
     env:
+      # Use the full NVHPC toolchain: HICAR's CMake applies the GPU flags
+      # (-acc=gpu, -gpu=..., -Minfo=accel) to its C/C++ sources too (e.g.
+      # nccl_wrapper.c), which only nvc/nvc++ accept — system cc/g++ reject them.
       FC: nvfortran
+      CC: nvc
+      CXX: nvc++
       HICAR_MODE: release
     steps:
       - name: Checkout

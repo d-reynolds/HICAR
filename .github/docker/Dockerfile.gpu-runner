@@ -83,6 +83,14 @@ RUN OMPI_FC=nvfortran CC=mpicc FC=mpif90 F77=mpif90 \
 # Clean the source trees to keep the image small (installed libs are kept).
 RUN rm -rf ${WORKDIR}
 
+# --- Build-time tools for HICAR's CMake configure (used at CI run time) -------
+# pkg-config is required by tests/CMakeLists.txt / FindFFTW. Kept as its own layer
+# AFTER the heavy dependency build so adding a build tool doesn't invalidate the
+# cached C-library layers. Add further HICAR build deps here if CMake needs them.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
 # --- Python deps for the comparison engine -----------------------------------
 # Ubuntu 22.04 ships an old system pip (no --break-system-packages, and no PEP-668
 # restriction that would require it). Upgrade pip first for clean recent wheels.
