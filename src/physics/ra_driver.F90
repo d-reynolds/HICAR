@@ -369,9 +369,11 @@ contains
                 if (di == 0 .and. dj == 0) cycle
                 dist_cells = sqrt(real(di*di + dj*dj))
                 if (dist_cells > real(R)) cycle
-                ! Azimuth from neighbor (di,dj) back toward the target (0,0)
-                ! atan2(-dj, -di) gives the angle from neighbor pointing to center
-                az = atan2(real(-dj), real(-di))
+                ! Compass bearing (0 = N, clockwise) from neighbor (di,dj) back toward the target (0,0).
+                ! Vector neighbor->target = (-di,-dj) in (east, north); bearing = atan2(east, north).
+                ! Same convention as slope aspect (downhill-facing bearing) and solar_azimuth, so the
+                ! facing test cos(aspect_n - azimuth_offset) peaks when the neighbor faces the target.
+                az = atan2(real(-di), real(-dj))
                 azimuth_offset(di,dj) = az
                 inv_dist2_offset(di,dj) = 1.0 / (dist_cells * dist_cells)
             end do

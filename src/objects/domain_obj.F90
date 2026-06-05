@@ -2484,16 +2484,18 @@ contains
                             dzdy_val = (terrain(i,j+1) - terrain(i,j-1)) / (2.0 * this%dx)
                         endif
 
-                        ! Aspect angle in radians: atan2(dzdy, dzdx)
-                        ! This gives direction perpendicular to contour lines (0 = E, π/2 = N, π = W, -π/2 = S)
+                        ! Aspect angle in radians, as a COMPASS BEARING of the downhill (slope-facing)
+                        ! direction: 0 = N, increasing clockwise (90 = E, 180 = S, 270 = W).
+                        ! Downhill vector = -grad(z) = (-dz/dx, -dz/dy) in (east, north); bearing = atan2(east, north).
+                        ! This matches solar_azimuth (NOAA, CW-from-N) and the azimuth_offset used in ra_driver.
                         if (this%var_indx(kVARS%neighbor_aspect_angle)%v > 0) then
-                            this%vars_2d(this%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d(i,j) = atan2(dzdy_val, dzdx_val)
+                            this%vars_2d(this%var_indx(kVARS%neighbor_aspect_angle)%v)%data_2d(i,j) = atan2(-dzdx_val, -dzdy_val)
                         endif
 
                         if (this%var_indx(kVARS%aspect_angle)%v > 0 &
                                 .and. i <= this%grid%ime .and. j <= this%grid%jme &
                                 .and. i >= this%grid%ims .and. j >= this%grid%jms) then
-                            this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d(i,j) = atan2(dzdy_val, dzdx_val)
+                            this%vars_2d(this%var_indx(kVARS%aspect_angle)%v)%data_2d(i,j) = atan2(-dzdx_val, -dzdy_val)
                         endif
                     enddo
                 enddo
