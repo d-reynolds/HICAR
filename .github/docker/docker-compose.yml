@@ -1,0 +1,41 @@
+# Deploy the HICAR self-hosted GPU CI runner on the GPU box.
+#
+#   1. Build the image (on the GPU box, once):
+#        docker compose -f .github/docker/docker-compose.yml build
+#   2. Create .github/docker/runner.env from runner.env.example and fill in
+#        REPO_URL and GH_PAT (or RUNNER_TOKEN).
+#   3. Launch:
+#        docker compose -f .github/docker/docker-compose.yml up -d
+#
+# The runner registers with labels [self-hosted, gpu, nvhpc] and picks up jobs
+# from gpu.yml. `restart: always` re-registers after each ephemeral job.
+services:
+  hicar-gpu-runner:
+    build:
+      # Context is the parent `.github` dir so both scripts/ and docker/ are visible.
+      context: ..
+      dockerfile: docker/Dockerfile.gpu-runner
+      args:
+        # Latest 26.x NVHPC; cuda_multi picks a CUDA <= the host driver at runtime.
+        # CONFIRM the exact tag on NGC and the VER/CUDA paths inside the image
+        # (see .github/docker/README.md). These are best-guess defaults.
+        NVHPC_TAG: 26.1-devel-cuda_multi-ubuntu22.04
+        NVHPC_VER: "26.1"
+        NVHPC_CUDA: "12.8"
+    image: hicar-gpu-runner:latest
+    env_file:
+      - runner.env
+    restart: always
+    # Requires the NVIDIA Container Toolkit on the host.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # IPC/shm headroom for MPI + CUDA.
+    shm_size: "2gb"
+    ulimits:
+      memlock: -1
+      stack: 67108864

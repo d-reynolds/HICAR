@@ -95,9 +95,9 @@ function install_hdf5 {
     echo install_hdf5
     cd $WORKDIR
 
-    export CPPFLAGS=-I$INSTALLDIR/include 
+    export CPPFLAGS=-I$INSTALLDIR/include
     export LDFLAGS=-L$INSTALLDIR/lib
-    export CC=mpicc
+    export CC=${CC:-mpicc}
 
     if [ ! -d "$WORKDIR/hdf5-1.14.3" ]; then
         wget --no-check-certificate -q https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.14/hdf5-1.14.3/src/hdf5-1.14.3.tar.gz
@@ -146,9 +146,9 @@ function install_netcdf_c {
     echo install_netcdf_c
     cd $WORKDIR
 
-    export CPPFLAGS=-I$INSTALLDIR/include 
+    export CPPFLAGS=-I$INSTALLDIR/include
     export LDFLAGS=-L$INSTALLDIR/lib
-    export CC=mpicc
+    export CC=${CC:-mpicc}
     export LIBS=-ldl
 
     if [ ! -d "$WORKDIR/netcdf-c-4.9.2" ]; then
@@ -188,7 +188,7 @@ function install_netcdf_fortran {
 
     # check if make file exists and if not, run configure
     if [ ! -f "Makefile" ]; then
-        CC=mpicc FC=mpif90 F77=mpif77 ./configure --prefix=${INSTALLDIR} --disable-shared
+        CC=${CC:-mpicc} FC=${FC:-mpif90} F77=${F77:-mpif77} ./configure --prefix=${INSTALLDIR} --disable-shared
     fi
 
     make -j 8
@@ -229,7 +229,7 @@ function hicar_install {
     export FFTW_DIR=/usr
     export PATH=${INSTALLDIR}/bin:$PATH
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
-    cmake ../ -DFSM=OFF -DMODE=debug
+    cmake ../ -DFSM=OFF -DMODE=${HICAR_MODE:-debug} ${HICAR_CMAKE_EXTRA:-}
     make ${JN}
     make install
     

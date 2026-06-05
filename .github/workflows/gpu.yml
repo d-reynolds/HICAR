@@ -1,0 +1,87 @@
+# GPU / NVFortran lane on the self-hosted containerized runner.
+#
+# Trigger policy (public repo, untrusted code must not auto-run on our hardware):
+#   * the `run-gpu` label on a PR (added by a maintainer)  -> on-demand
+#   * nightly schedule on the default branch               -> regression watch
+#   * manual workflow_dispatch
+#
+# The runner is the hicar-gpu-runner container (see .github/docker/), which
+# already provides NVHPC + CUDA + NCCL and a nvfortran-built NetCDF stack
+# via baked-in env (NETCDF_DIR, FFTW_DIR, NCCL_ROOT). HICAR is built
+# here (not in the image) so -gpu=ccnative sees the real device.
+name: GPU CI (NVFortran)
+
+on:
+  pull_request:
+    types: [labeled, synchronize, reopened]
+  schedule:
+    - cron: '0 3 * * *'   # 03:00 UTC nightly
+  workflow_dispatch:
+
+concurrency:
+  group: gpu-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gpu-build-and-test:
+    # Only run when explicitly requested via label, or on schedule/manual.
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'run-gpu'))
+    runs-on: [self-hosted, gpu, nvhpc]
+    env:
+      FC: nvfortran
+      HICAR_MODE: release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show GPU / toolchain
+        run: |
+          nvidia-smi -L
+          nvfortran --version | head -n2
+          echo "NETCDF_DIR=$NETCDF_DIR  NCCL_ROOT=$NCCL_ROOT"
+
+      - name: Build HICAR (nvfortran / GPU / ${{ env.HICAR_MODE }})
+        run: |
+          rm -rf build && mkdir build && cd build
+          cmake .. -DFSM=OFF -DMODE="${HICAR_MODE}"
+          make -j"$(nproc)"
+          make install
+
+      - name: Build test executable + fetch test data
+        run: |
+          cd build
+          make download_test_data
+          make HICAR-tester
+
+      # --- Unit / invariant tests on the GPU -------------------------------
+      - name: Unit tests (GPU)
+        run: |
+          NGPU=$(nvidia-smi -L | wc -l)
+          cd build && mpiexec -np "$NGPU" tests/HICAR-tester
+
+      # --- Reproducibility (decomposition + restart, GPU-aware) ------------
+      - name: Reproducibility (decomposition + restart)
+        run: bash tests/test_reproducibility.sh "$GITHUB_WORKSPACE" all
+
+      # --- GPU regression vs stored GPU baseline (tolerance) ---------------
+      - name: GPU regression vs baseline (tolerance)
+        continue-on-error: true   # flip to false once gpu-nvhpc baseline is blessed
+        run: |
+          bash tests/regression_vs_baseline.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/build" \
+            --lane gpu-nvhpc --mode tolerance --tolerance-spec tests/tolerances.yaml
+
+      - name: Upload GPU diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-diagnostics
+          path: |
+            tests/regression_report_*.json
+            tests/figures/**
+          if-no-files-found: ignore

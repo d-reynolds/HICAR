@@ -1,0 +1,58 @@
+# ---------------------------------------------------------------------------
+# HICAR cross-lane comparison tolerances
+# ---------------------------------------------------------------------------
+# Used by tests/compare_outputs.py --tolerance-spec for comparisons that CANNOT
+# be bit-for-bit: CPU<->GPU and gnu<->nvfortran. Floating-point operations are
+# reordered across architectures/compilers/optimization levels, so two runs that
+# are both "correct" will differ at the ULP level and accumulate over a run.
+#
+# These tolerances answer: "did the candidate diverge MEANINGFULLY from the
+# reference, beyond expected FP-reordering noise?" They are NOT scientific
+# accuracy bounds. Same-toolchain regression should use --mode exact instead.
+#
+# A value passes when:   |candidate - baseline| <= atol + rtol * |baseline|
+#
+# Tuning guidance: start loose, tighten as you learn each field's real cross-lane
+# spread from the nightly GPU lane. atol must dominate near zero (where rtol is
+# meaningless); rtol dominates for large-magnitude fields. Units in comments.
+# NaN/Inf introduced by the candidate ALWAYS fails regardless of these numbers.
+# ---------------------------------------------------------------------------
+
+defaults:
+  rtol: 1.0e-4
+  atol: 1.0e-7
+
+variables:
+  # --- Thermodynamic state -------------------------------------------------
+  pressure:        {rtol: 1.0e-5, atol: 1.0e-1}    # Pa  (O(1e5)), 0.1 Pa floor
+  temperature:     {rtol: 1.0e-5, atol: 1.0e-3}    # K,   1 mK floor
+  potential_temperature: {rtol: 1.0e-5, atol: 1.0e-3}  # K
+
+  # --- Moisture (small magnitudes; lean on atol) ---------------------------
+  qv:              {rtol: 1.0e-4, atol: 1.0e-9}    # kg/kg
+  qc:              {rtol: 1.0e-3, atol: 1.0e-10}   # kg/kg, cloud water is noisier
+  qr:              {rtol: 1.0e-3, atol: 1.0e-10}   # kg/kg
+  qi:              {rtol: 1.0e-3, atol: 1.0e-10}   # kg/kg
+  qs:              {rtol: 1.0e-3, atol: 1.0e-10}   # kg/kg
+
+  # --- Winds (can change sign; tight rtol, modest atol) --------------------
+  u:               {rtol: 1.0e-4, atol: 1.0e-4}    # m/s
+  v:               {rtol: 1.0e-4, atol: 1.0e-4}    # m/s
+  w:               {rtol: 1.0e-3, atol: 1.0e-4}    # m/s, vertical vel is most sensitive
+
+  # --- Accumulated / surface fields ----------------------------------------
+  precipitation:   {rtol: 1.0e-3, atol: 1.0e-5}    # mm, accumulation drifts
+  hfls:            {rtol: 1.0e-3, atol: 1.0e-2}    # W/m2 latent heat flux
+  hfss:            {rtol: 1.0e-3, atol: 1.0e-2}    # W/m2 sensible heat flux
+
+  # --- Radiation -----------------------------------------------------------
+  swtb:            {rtol: 1.0e-3, atol: 1.0e-2}    # W/m2 (rrtmg<->rrtmgp differ more)
+  swtd:            {rtol: 1.0e-3, atol: 1.0e-2}    # W/m2
+  lwtr:            {rtol: 1.0e-3, atol: 1.0e-2}    # W/m2
+
+# Coordinate / bookkeeping variables that should match structurally but whose
+# tiny FP differences are not physically meaningful to gate on.
+ignore:
+  - time
+  - lat
+  - lon
