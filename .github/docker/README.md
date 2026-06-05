@@ -25,14 +25,69 @@ toolchain, so the
 
 ```bash
 cd .github/docker
-cp runner.env.example runner.env       # fill in REPO_URL and GH_PAT
-docker compose build                   # builds deps with nvfortran (~30–60 min, once)
-docker compose up -d
-docker compose logs -f                 # watch it register; should print nvidia-smi -L
+cp runner.env.example runner.env       # fill in REPO_URL and GH_PAT (chmod 600 it)
+docker compose build                   # build the image (deps w/ nvfortran, ~30–60 min, once)
+
+# Production run: FRESH container per job (recommended).
+./run-runner.sh                        # foreground; Ctrl-C to stop
+# ...or keep it alive across reboots via the systemd unit:
+#   edit paths in hicar-gpu-runner.service, then
+#   sudo cp hicar-gpu-runner.service /etc/systemd/system/
+#   sudo systemctl enable --now hicar-gpu-runner
+#   journalctl -u hicar-gpu-runner -f
 ```
 
 The runner appears under **Settings → Actions → Runners** with labels
 `self-hosted, gpu, nvhpc`.
+
+> `docker compose up -d` also works for quick **dev** runs, but it re-execs the
+> runner in the *same* container (writable layer persists between jobs).
+> `run-runner.sh` uses `docker run --rm` so every job starts from the pristine
+> image — prefer it in production.
+
+## Security model
+
+Self-hosted runners on a public repo are a known risk: a triggered workflow runs
+the code at that ref on your hardware. This setup is hardened so that **only code
+a maintainer has already vetted ever runs**:
+
+* **No untrusted PR code, ever.** `gpu.yml` has **no `pull_request` trigger** — it
+  runs only on push to `master`/`develop`, the nightly schedule, and manual
+  `workflow_dispatch`. A fork PR cannot cause execution on the box. Contributor
+  PRs get GPU validation only after review + merge (or a maintainer dispatching
+  the workflow against a ref they've read).
+* **Ephemeral + fresh container per job** — `--ephemeral` runner + `docker run
+  --rm` loop: one job per container, then destroyed. No persistence between jobs.
+* **Non-root, no Docker socket** — jobs run as user `runner`; the host Docker
+  socket is never mounted, so there's no trivial container→host escape.
+* **No secrets in the GPU job** — `gpu.yml` sets `permissions: contents: read`
+  and uses no repo secrets. The runner-admin PAT is **scrubbed from the
+  environment** (`unset GH_PAT` in entrypoint.sh) before any job step runs, so a
+  job cannot read it from `env`.
+* **Recommended host hygiene** — run on a dedicated box, ideally an isolated
+  network segment with an **egress firewall** (limits exfiltration / lateral
+  movement in the unlikely event a trusted build is compromised). Keep
+  `runner.env` mode `600`; it holds the registration PAT.
+
+Also set, in **Settings → Actions → General → Fork pull request workflows**:
+"Require approval for all outside collaborators" (defense in depth even though no
+PR trigger exists here).
+
+### Validating a contributor PR on GPU (the cost of this posture)
+
+Because there's no PR trigger, GPU-testing an external PR is a deliberate,
+maintainer-initiated act **after reading the diff** (including `.github/` and
+build scripts). Pull the PR onto a branch *in this repo* — which only a
+maintainer can push to — and the `push` trigger runs it on the GPU box:
+
+```bash
+gh pr checkout <PR#>                    # review the FULL diff first!
+git push origin HEAD:develop           # push to develop -> triggers gpu.yml
+# (or push to a throwaway in-repo branch and: gh workflow run gpu.yml --ref <that-branch>)
+```
+
+Never point the runner at the fork's ref directly — staging it in-repo is the
+review gate.
 
 ## Values to confirm for YOUR GPU box
 

@@ -1,9 +1,16 @@
 # GPU / NVFortran lane on the self-hosted containerized runner.
 #
-# Trigger policy (public repo, untrusted code must not auto-run on our hardware):
-#   * the `run-gpu` label on a PR (added by a maintainer)  -> on-demand
-#   * nightly schedule on the default branch               -> regression watch
-#   * manual workflow_dispatch
+# SECURITY POSTURE: the self-hosted runner NEVER executes untrusted PR code.
+# There is deliberately NO `pull_request` trigger here — a fork PR can therefore
+# never cause code to run on our hardware. The runner only ever runs code that a
+# maintainer has already vetted:
+#   * push to master/develop  -> trusted, post-merge code
+#   * nightly schedule        -> default-branch regression watch
+#   * workflow_dispatch       -> maintainer-initiated, against a chosen (vetted) ref
+#
+# Contributor PRs get GPU validation only AFTER review + merge, or when a
+# maintainer manually dispatches this workflow against the PR's ref having read
+# the diff. See .github/docker/README.md for the full threat model.
 #
 # The runner is the hicar-gpu-runner container (see .github/docker/), which
 # already provides NVHPC + CUDA + NCCL and a nvfortran-built NetCDF stack
@@ -12,11 +19,17 @@
 name: GPU CI (NVFortran)
 
 on:
-  pull_request:
-    types: [labeled, synchronize, reopened]
+  push:
+    # TEMPORARY: ci_pipeline is here only to shake out the GPU lane pre-merge.
+    # REMOVE `ci_pipeline` before merging to master.
+    branches: [master, develop, ci_pipeline]
   schedule:
     - cron: '0 3 * * *'   # 03:00 UTC nightly
   workflow_dispatch:
+
+# Least privilege: this job needs no repo secrets and only read access.
+permissions:
+  contents: read
 
 concurrency:
   group: gpu-${{ github.ref }}
@@ -24,12 +37,6 @@ concurrency:
 
 jobs:
   gpu-build-and-test:
-    # Only run when explicitly requested via label, or on schedule/manual.
-    if: >
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' &&
-       contains(github.event.pull_request.labels.*.name, 'run-gpu'))
     runs-on: [self-hosted, gpu, nvhpc]
     env:
       FC: nvfortran

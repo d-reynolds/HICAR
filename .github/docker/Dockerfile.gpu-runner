@@ -43,7 +43,7 @@ ARG NVHPC_CUDA=12.8
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gfortran ca-certificates curl wget git \
-        m4 zlib1g-dev libcurl4-openssl-dev libfftw3-dev \
+        m4 zlib1g-dev libcurl4-openssl-dev libfftw3-dev libxml2-dev \
         python3 python3-pip python3-venv jq \
     && rm -rf /var/lib/apt/lists/*
 
@@ -70,9 +70,11 @@ COPY scripts/hicar_install_utils.sh /opt/hicar_install_utils.sh
 RUN chmod +x /opt/hicar_install_utils.sh
 
 # --- C libraries: zlib, HDF5, PnetCDF, netcdf-c (built with gcc via OMPI_CC) -
-RUN bash -c 'source /opt/hicar_install_utils.sh --help >/dev/null 2>&1 || true; \
-    CC=mpicc FC=mpif90 \
-    /opt/hicar_install_utils.sh install_zlib install_hdf5 install_PnetCDF install_netcdf_c'
+# Invoke the script directly (NOT via `source`): sourcing it with --help would
+# hit the help branch's `exit 0` and terminate the build step before anything
+# is built. The script's case-dispatch runs each named install function in order.
+RUN CC=mpicc FC=mpif90 \
+    /opt/hicar_install_utils.sh install_zlib install_hdf5 install_PnetCDF install_netcdf_c
 
 # --- netcdf-fortran: built with nvfortran so .mod ABI matches HICAR ----------
 RUN OMPI_FC=nvfortran CC=mpicc FC=mpif90 F77=mpif90 \
@@ -82,8 +84,10 @@ RUN OMPI_FC=nvfortran CC=mpicc FC=mpif90 F77=mpif90 \
 RUN rm -rf ${WORKDIR}
 
 # --- Python deps for the comparison engine -----------------------------------
-RUN python3 -m pip install --no-cache-dir --break-system-packages \
-        numpy xarray netCDF4 matplotlib pyyaml
+# Ubuntu 22.04 ships an old system pip (no --break-system-packages, and no PEP-668
+# restriction that would require it). Upgrade pip first for clean recent wheels.
+RUN python3 -m pip install --no-cache-dir --upgrade pip \
+    && python3 -m pip install --no-cache-dir numpy xarray netCDF4 matplotlib pyyaml
 
 # --- GitHub Actions self-hosted runner ---------------------------------------
 ARG RUNNER_VERSION=2.321.0

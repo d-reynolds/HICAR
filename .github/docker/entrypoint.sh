@@ -61,4 +61,10 @@ else
     echo "WARNING: nvidia-smi not available in container."
 fi
 
+# SECURITY: scrub the high-value runner-admin PAT from the environment before
+# the job runs, so a malicious job step cannot read it from `env`. The runner
+# itself no longer needs it; the short-lived RUNNER_TOKEN is kept only so the
+# cleanup trap can deregister (ephemeral runners also auto-deregister on exit).
+unset GH_PAT
+
 ./run.sh

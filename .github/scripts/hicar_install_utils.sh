@@ -76,7 +76,10 @@ function install_zlib {
     cd $WORKDIR
 
     if [ ! -d "$WORKDIR/zlib-1.3.1" ]; then
-        wget --no-check-certificate -q https://www.zlib.net/zlib-1.3.1.tar.gz
+        # zlib.net only hosts the current release at its top-level URL (older
+        # versions move to /fossils and the old URL 404s). Use the permanent
+        # GitHub release asset instead.
+        wget --no-check-certificate -q https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
         tar -xvzf zlib-1.3.1.tar.gz
     fi
 
@@ -106,13 +109,20 @@ function install_hdf5 {
     
     cd hdf5-1.14.3
 
-    # check if make file exists and if not, run configure
-    if [ ! -f "Makefile" ]; then
-        ./configure --prefix=$INSTALLDIR --enable-parallel --with-zlib=$INSTALLDIR #&> config.log
-    fi
+    # ALWAYS run configure. The HDF5 release tarball ships a top-level Makefile
+    # whose default prefix is <builddir>/hdf5, so a `[ ! -f Makefile ]` guard would
+    # skip configure and silently install to the wrong place (downstream netcdf-c
+    # then fails with "cannot find -lhdf5"). Re-running configure forces our prefix.
+    ./configure --prefix=$INSTALLDIR --enable-parallel --with-zlib=$INSTALLDIR
 
     make -j 8
     make install
+
+    # Fail loudly if the library did not land where downstream builds expect it.
+    if ! ls "$INSTALLDIR"/lib/libhdf5.* >/dev/null 2>&1; then
+        echo "ERROR: libhdf5 not found in $INSTALLDIR/lib after install" >&2
+        exit 1
+    fi
 
     export HDF5=$INSTALLDIR
     export HDF5_DIR=$INSTALLDIR
@@ -159,6 +169,8 @@ function install_netcdf_c {
     
     cd netcdf-c-4.9.2
 
+    rm -f "$INSTALLDIR"/lib/*.la
+
     # check if make file exists and if not, run configure
     if [ ! -f "Makefile" ]; then
         ./configure --prefix=${INSTALLDIR} --disable-shared --enable-pnetcdf --enable-parallel-tests
@@ -185,6 +197,8 @@ function install_netcdf_fortran {
     fi
 
     cd netcdf-fortran-4.6.1
+
+    rm -f "$INSTALLDIR"/lib/*.la
 
     # check if make file exists and if not, run configure
     if [ ! -f "Makefile" ]; then

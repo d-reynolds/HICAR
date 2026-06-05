@@ -1,14 +1,19 @@
-# Deploy the HICAR self-hosted GPU CI runner on the GPU box.
+# Build (and optionally dev-run) the HICAR self-hosted GPU CI runner.
 #
-#   1. Build the image (on the GPU box, once):
+# This compose file is primarily for BUILDING the image:
 #        docker compose -f .github/docker/docker-compose.yml build
-#   2. Create .github/docker/runner.env from runner.env.example and fill in
-#        REPO_URL and GH_PAT (or RUNNER_TOKEN).
-#   3. Launch:
-#        docker compose -f .github/docker/docker-compose.yml up -d
 #
-# The runner registers with labels [self-hosted, gpu, nvhpc] and picks up jobs
-# from gpu.yml. `restart: always` re-registers after each ephemeral job.
+# For PRODUCTION, run via .github/docker/run-runner.sh (or the systemd unit)
+# instead of `compose up`: that uses `docker run --rm` to give every job a FRESH
+# container, so a job's filesystem writes never persist to the next job.
+#
+# `compose up -d` below is a convenience for quick dev runs ONLY: `restart:
+# always` re-execs the runner in the SAME container, so its writable layer
+# persists between jobs (acceptable for trusted dev, weaker isolation than the
+# per-job-fresh script).
+#
+# Either way, create .github/docker/runner.env from runner.env.example first.
+# The runner registers with labels [self-hosted, gpu, nvhpc] and picks up gpu.yml jobs.
 services:
   hicar-gpu-runner:
     build:
@@ -26,14 +31,15 @@ services:
     env_file:
       - runner.env
     restart: always
-    # Requires the NVIDIA Container Toolkit on the host.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # GPU access via the NVIDIA Container Runtime. This works when the toolkit is
+    # in CDI mode (where the legacy `--gpus` / deploy.devices path is disabled and
+    # errors with "invoking the NVIDIA Container Runtime Hook directly ... is not
+    # supported. Please use ... --runtime=nvidia"). Requires the nvidia runtime to
+    # be registered (nvidia-ctk runtime configure --runtime=docker).
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     # IPC/shm headroom for MPI + CUDA.
     shm_size: "2gb"
     ulimits:
