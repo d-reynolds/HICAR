@@ -91,24 +91,25 @@ review gate.
 
 ## Values to confirm for YOUR GPU box
 
-The defaults target the latest **NVHPC 26.x** `cuda_multi` image (best guess —
-confirm the exact tag string on NGC). Adjust in `docker-compose.yml` (the args
-propagate to the Dockerfile):
+The defaults target **NVHPC 26.3** `cuda_multi` (the nvfortran that builds HICAR
+cleanly — 26.1 has an internal compiler error on `output_obj.F90`). Match this to
+the `nvfortran --version` of your known-good build. Adjust in `docker-compose.yml`
+(the args propagate to the Dockerfile):
 
 | Arg          | What it controls                                   | How to check |
 |--------------|----------------------------------------------------|--------------|
-| `NVHPC_TAG`  | NVHPC base image (cuda_multi picks CUDA ≤ driver)  | [NGC nvhpc tags](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/nvhpc/tags); `nvidia-smi` for driver CUDA |
+| `NVHPC_TAG`  | NVHPC base image (cuda_multi picks CUDA ≤ driver)  | [NGC nvhpc tags](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/nvhpc/tags); match your `nvfortran --version` |
 | `NVHPC_VER`  | Path `…/Linux_x86_64/<VER>` inside the image       | `ls /opt/nvidia/hpc_sdk/Linux_x86_64` in the image |
-| `NVHPC_CUDA` | Path `…/comm_libs/<CUDA>/nccl`                      | `ls .../comm_libs` in the image |
 
-Quickest way to confirm VER/CUDA once the image is pulled:
+NCCL and MPI use NVHPC's version-agnostic `comm_libs/{nccl,mpi}` symlinks, so
+there's no separate CUDA arg to track. Confirm `NVHPC_VER` once the image is pulled:
 ```bash
 docker run --rm --entrypoint bash nvcr.io/nvidia/nvhpc:<TAG> -c \
-  'ls /opt/nvidia/hpc_sdk/Linux_x86_64 && ls /opt/nvidia/hpc_sdk/Linux_x86_64/*/comm_libs'
+  'ls /opt/nvidia/hpc_sdk/Linux_x86_64'
 ```
 
 `-gpu=ccnative` means HICAR is compiled for the GPU present at build time — the
-build happens inside the running container (which has `--gpus all`), so no
+build happens inside the running container (which has GPU access), so no
 compute-capability arg is needed.
 
 ## Known risks to validate on first build
@@ -117,8 +118,8 @@ These can't be verified without an NVHPC + GPU host; expect to iterate once:
 
 * **NetCDF C stack with `gcc` vs `nvc`** — built with `OMPI_CC=gcc` for safety.
   If linking HICAR complains about ABI, rebuild netcdf-c with `nvc`.
-* **NCCL path** — set via `NVHPC_CUDA`; HICAR's CMake auto-detects via
-  `NCCL_ROOT`. If NCCL isn't found, the build falls back to GPU-aware MPI.
+* **NCCL path** — `NCCL_ROOT` points at `comm_libs/nccl`; HICAR's CMake
+  auto-detects it. If NCCL isn't found, the build falls back to GPU-aware MPI.
 
 ## Updating
 

@@ -19,26 +19,24 @@
 # reachable). Build (on the GPU box, so later `docker run --gpus all` matches
 # the driver):
 #   docker build -f .github/docker/Dockerfile.gpu-runner \
-#       --build-arg NVHPC_TAG=24.11-devel-cuda12.6-ubuntu22.04 \
+#       --build-arg NVHPC_TAG=26.3-devel-cuda_multi-ubuntu22.04 \
 #       -t hicar-gpu-runner:latest .github
 #
 # CONFIRM FOR YOUR BOX (see .github/docker/README.md):
-#   * NVHPC_TAG  — the EXACT tag of the latest 26.x release on NGC. The default
-#     below is a best guess; verify the string at
-#     https://catalog.ngc.nvidia.com/orgs/nvidia/containers/nvhpc/tags
-#     (the cuda_multi variant bundles several CUDA versions and picks one <= your
-#      driver at runtime, so it's the most robust choice).
-#   * NVHPC_VER / NVHPC_CUDA — must match the paths inside the chosen image:
-#       ls /opt/nvidia/hpc_sdk/Linux_x86_64           -> NVHPC_VER
-#       ls /opt/nvidia/hpc_sdk/Linux_x86_64/<VER>/comm_libs  -> NVHPC_CUDA (nccl dir)
+#   * NVHPC_TAG  — must match the nvfortran that builds HICAR (26.3; 26.1 ICEs on
+#     output_obj.F90). cuda_multi bundles several CUDA versions and picks one <=
+#     your driver at runtime. Tags: https://catalog.ngc.nvidia.com/orgs/nvidia/containers/nvhpc/tags
+#   * NVHPC_VER — the SDK dir name; must match NVHPC_TAG:
+#       ls /opt/nvidia/hpc_sdk/Linux_x86_64   -> NVHPC_VER
+#   (NCCL/MPI use the version-agnostic comm_libs/{nccl,mpi} symlinks, so no
+#    separate CUDA arg is needed.)
 # =============================================================================
-ARG NVHPC_TAG=26.1-devel-cuda_multi-ubuntu22.04
+ARG NVHPC_TAG=26.3-devel-cuda_multi-ubuntu22.04
 FROM nvcr.io/nvidia/nvhpc:${NVHPC_TAG}
 
-# Version components used to locate the bundled MPI / NCCL inside the image.
-# These MUST match the NVHPC_TAG above (check by ls-ing the paths shown above).
-ARG NVHPC_VER=26.1
-ARG NVHPC_CUDA=12.8
+# SDK version dir under .../Linux_x86_64/<VER>. MUST match NVHPC_TAG above
+# (check with: ls /opt/nvidia/hpc_sdk/Linux_x86_64).
+ARG NVHPC_VER=26.3
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -49,8 +47,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # --- NVHPC toolchain on PATH (compilers + bundled OpenMPI + NCCL) ------------
 ENV NVHPC_ROOT=/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VER}
+# comm_libs/mpi and comm_libs/nccl are NVHPC's version-agnostic default symlinks,
+# so we don't have to track the exact bundled-CUDA subdir.
 ENV MPI_ROOT=${NVHPC_ROOT}/comm_libs/mpi
-ENV NCCL_DIR=${NVHPC_ROOT}/comm_libs/${NVHPC_CUDA}/nccl
+ENV NCCL_DIR=${NVHPC_ROOT}/comm_libs/nccl
 ENV PATH=${NVHPC_ROOT}/compilers/bin:${MPI_ROOT}/bin:${PATH}
 ENV LD_LIBRARY_PATH=${NVHPC_ROOT}/compilers/lib:${MPI_ROOT}/lib:${NCCL_DIR}/lib:${LD_LIBRARY_PATH}
 
