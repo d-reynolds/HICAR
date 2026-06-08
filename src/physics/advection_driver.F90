@@ -8,7 +8,8 @@
 module advection
     use icar_constants
     use adv_std,                    only : adv_std_init, adv_std_var_request, adv_std_advect3d, adv_std_compute_wind, &
-                                           adv_std_clean_wind_arrays, adv_theta_ref, adv_std_apply_ref_vert
+                                           adv_std_clean_wind_arrays, adv_std_clean_wind_arrays_fm, &
+                                           adv_theta_ref, adv_std_apply_ref_vert
     use adv_fluxcorr,               only : init_fluxcorr, set_sign_arrays, compute_upwind_fluxes_async
     ! use debug_module,               only : domain_fix
     use options_interface,          only: options_t
@@ -53,6 +54,9 @@ contains
             ! will be re-allocated (host + device) on next adv_std_compute_wind.
             call clean_wind_arrays()
             call adv_std_clean_wind_arrays()
+            ! Drop the fine-mesh wind/flux buffers too so they are re-bounded for
+            ! the new nest on the next adv_std_compute_wind_2d_fm (snow_drift).
+            call adv_std_clean_wind_arrays_fm()
             call adv_std_init(domain,options)
             if (options%adv%flux_corr > 0) call init_fluxcorr(domain)
         endif
