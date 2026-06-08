@@ -1,110 +1,55 @@
-# Maintainer-only: (re)generate a regression baseline for a lane and open a PR
-# against the Test-Data repo. This is the audited path for intentionally
-# result-changing commits: a blessed baseline is reviewed in Test-Data before it
-# becomes the reference the regression lanes compare against.
+# Maintainer-only: bless a commit as the regression reference.
 #
-# Requires repo secret TEST_DATA_TOKEN: a token with write access to the
-# Test-Data repo (and LFS), used to push the baseline branch and open the PR.
-name: Bless regression baseline
+# The regression reference is the most recent commit carrying a
+# `hicar-regression-blessed=success` commit status (the regression test recompiles
+# that commit to regenerate the reference output — see tests/test_regression.sh).
+# Blessing is therefore just posting that status — no file, no PR, no build, no LFS.
+# Same machinery as the `hicar-full-test` sign in hicar-full-test.yml.
+#
+# Bless a commit that has passed hicar-full-test (the job warns if it hasn't).
+name: Bless regression commit
 
 on:
   workflow_dispatch:
     inputs:
-      lane:
-        description: Baseline lane to regenerate
-        type: choice
-        options: [cpu-gnu-debug, cpu-gnu-release, gpu-nvhpc]
-        default: cpu-gnu-debug
+      commit:
+        description: Commit SHA to bless (blank = current default-branch HEAD)
+        type: string
+        required: false
       reason:
-        description: Why the baseline is changing (goes in the PR body)
+        description: Why the regression reference is changing (for the audit log)
         type: string
         required: true
 
 permissions:
   contents: read
-
-env:
-  TEST_DATA_REPO: HICAR-Model/Test-Data
+  statuses: write
 
 jobs:
   bless:
-    # GPU lane blesses on the self-hosted runner; CPU lanes on hosted.
-    runs-on: ${{ inputs.lane == 'gpu-nvhpc' && fromJSON('["self-hosted","gpu","nvhpc"]') || 'ubuntu-22.04' }}
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Derive build config from lane
-        run: |
-          case "${{ inputs.lane }}" in
-            cpu-gnu-debug)   echo "HICAR_MODE=debug"   >> "$GITHUB_ENV";;
-            cpu-gnu-release) echo "HICAR_MODE=release" >> "$GITHUB_ENV";;
-            gpu-nvhpc)       echo "HICAR_MODE=release" >> "$GITHUB_ENV"; echo "FC=nvfortran" >> "$GITHUB_ENV";;
-          esac
-
-      # --- CPU lanes: build deps + HICAR on the hosted runner --------------
-      - name: Cache dependencies
-        if: inputs.lane != 'gpu-nvhpc'
-        uses: actions/cache@v4
-        with:
-          path: ~/installdir
-          key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
-          restore-keys: hicar-deps-${{ runner.os }}-
-      - name: Build dependencies (CPU)
-        if: inputs.lane != 'gpu-nvhpc'
-        run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies
-      - name: Build HICAR (CPU)
-        if: inputs.lane != 'gpu-nvhpc'
-        run: bash .github/scripts/hicar_install_utils.sh hicar_install
-      - name: Fetch test data (CPU)
-        if: inputs.lane != 'gpu-nvhpc'
-        run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
-
-      # --- GPU lane: build HICAR in the prebuilt container -----------------
-      - name: Build HICAR + test data (GPU)
-        if: inputs.lane == 'gpu-nvhpc'
-        run: |
-          rm -rf build && mkdir build && cd build
-          cmake .. -DFSM=OFF -DMODE="${HICAR_MODE}"
-          make -j"$(nproc)" && make install
-          make download_test_data
-
-      # --- Produce the baseline output -------------------------------------
-      - name: Generate baseline
-        run: |
-          bash tests/regression_vs_baseline.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/build" \
-            --lane "${{ inputs.lane }}" --bless
-
-      # --- Open a PR against Test-Data with the new baseline ---------------
-      - name: Push baseline + open PR to Test-Data
+      - name: Bless commit (hicar-regression-blessed = success)
         env:
-          GH_TOKEN: ${{ secrets.TEST_DATA_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          LANE="${{ inputs.lane }}"
-          FILE="Gaudergrat_250m_2017-02-14_00-00-00.nc"
-          SRC="tests/Test_Cases/baselines/${LANE}/${FILE}"
-          [ -f "$SRC" ] || { echo "Baseline not produced at $SRC"; exit 1; }
+          sha="${{ inputs.commit }}"
+          [ -z "$sha" ] && sha=$(git rev-parse HEAD)
+          sha=$(git rev-parse "$sha")
 
-          TMP=$(mktemp -d)
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TEST_DATA_REPO}.git" "$TMP"
-          cd "$TMP"
-          git lfs install --local || true
-          git lfs track "baselines/**/*.nc" || true
-          BR="bless/${LANE}-${{ github.run_id }}"
-          git checkout -b "$BR"
-          mkdir -p "baselines/${LANE}"
-          cp "${GITHUB_WORKSPACE}/${SRC}" "baselines/${LANE}/${FILE}"
-          git add .gitattributes "baselines/${LANE}/${FILE}"
-          git config user.name "hicar-ci"; git config user.email "ci@hicar"
-          git commit -m "Bless ${LANE} baseline (HICAR ${{ github.sha }})"
-          git push origin "$BR"
-          gh pr create --repo "${TEST_DATA_REPO}" --head "$BR" --base main \
-            --title "Bless ${LANE} baseline" \
-            --body "Regenerated ${LANE} regression baseline from HICAR commit ${{ github.sha }}.
+          # Warn (do not block) if the commit hasn't passed the full-test gate.
+          ft=$(gh api "/repos/${{ github.repository }}/commits/$sha/status" \
+                 --jq '[.statuses[] | select(.context=="hicar-full-test")][0].state // "none"')
+          echo "hicar-full-test status of $sha: $ft"
+          [ "$ft" = "success" ] || echo "::warning::Blessing $sha which has NOT passed hicar-full-test (status=$ft)"
 
-          **Reason:** ${{ inputs.reason }}
-
-          Generated by the bless-baseline workflow (run ${{ github.run_id }})."
+          gh api -X POST "/repos/${{ github.repository }}/statuses/$sha" \
+            -f state=success \
+            -f context=hicar-regression-blessed \
+            -f description="Regression reference — ${{ inputs.reason }}" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "Blessed $sha as hicar-regression-blessed=success"
