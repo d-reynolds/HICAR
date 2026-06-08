@@ -58,6 +58,12 @@ module module_water_flake
                                                          !       lakes collapse to FLAKE_MIN_DEPTH and T_sfc
                                                          !       equilibrates to T_air within hours, killing SH)
     real, parameter :: FLAKE_CT_INIT          = 0.5      ! [-]  initial thermocline shape factor
+    ! Safety clamp on condensation (evap < 0): the PBL applies qfx to the lowest
+    ! model layer as qv_new = qv + qfx*g/del*dt, so an unbounded negative qfx can
+    ! drive qv negative and crash YSU. Cap the per-step vapor removal at this
+    ! fraction of the bottom layer's vapor content. Never bites for normal evap
+    ! (~1e-4 kg m-2 s-1); only trims pathological condensation spikes.
+    real, parameter :: EVAP_QV_SAFETY         = 0.5      ! [-]  max fraction of bottom-layer vapor removable per step
 
     real, parameter :: PI_FLAKE       = 3.14159265
     real, parameter :: OMEGA_EARTH    = 7.2921e-5        ! [s-1] Earth rotation rate
@@ -347,7 +353,7 @@ contains
         qv_sat_air = real(sat_mr(T_air, P_a), ireals)
         evap = min(evap, max(qv_sat_air - real(q_air, ireals), 0.0_ireals) *      &
                           real(rho_dz_bot, ireals) / max(real(dt, ireals), 1.0_ireals))
-        evap = max(evap, -real(q_air, ireals) *     &
+        evap = max(evap, -real(EVAP_QV_SAFETY, ireals) * real(q_air, ireals) *     &
                           real(rho_dz_bot, ireals) / max(real(dt, ireals), 1.0_ireals))
         lh   = evap * real(XLV, ireals)
 

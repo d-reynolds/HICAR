@@ -13,7 +13,7 @@ module adv_std
     use adv_fluxcorr,      only: WRF_flux_corr
     use timer_interface,   only: timer_t
     use vertical_interpolation, only: find_match, weights   ! Zaengl Variant-B constant-z LUT
-    use mpi_f08,           only: MPI_Allreduce, MPI_IN_PLACE, MPI_SUM, MPI_REAL, MPI_MIN, MPI_MAX
+    use mpi_f08,           only: MPI_Allreduce, MPI_IN_PLACE, MPI_SUM, MPI_REAL, MPI_MIN, MPI_MAX, MPI_DOUBLE_PRECISION
     implicit none
     private
 
@@ -362,7 +362,7 @@ contains
             !$acc   private(u_val,abs_u_val,ax,q0z,qn1z,qm2z,qp1z,deta,dcz,dlim,gate)
             do j = j_s, j_e
                 do k = kms, kme-1
-                    do i = i_s, i_e
+                    do i = i_s, i_e+1     ! match flux3 x-face: correct the i_e+1 face sum_kernel consumes
                         ax   = zb_alpha_k(k)
                         deta = 3.0*(q(i,k,j)-q(i-1,k,j)) - (q(i+1,k,j)-q(i-2,k,j))
                         q0z  = zb_xs_wt (i,k,j,1)*q(i,   zb_xs_lev (i,k,j,1), j) &
@@ -391,7 +391,7 @@ contains
             !$acc           zb_yn2_lev,zb_yp_lev,zb_yn2_wt,zb_yp_wt, &
             !$acc           zb_alpha_k) &
             !$acc   private(v_val,abs_u_val,ay,q0z,qn3z,qm2z,qp1z,deta,dcz,dlim,gate)
-            do j = j_s, j_e
+            do j = j_s, j_e+1     ! match flux3 y-face: correct the j_e+1 face sum_kernel consumes
                 do k = kms, kme-1
                     do i = i_s, i_e
                         ay   = zb_alpha_k(k)
@@ -419,8 +419,8 @@ contains
             !$acc parallel loop gang vector tile(32,1) async(1) &
             !$acc   present(q,U_m,V_m,flux_x,flux_y) &
             !$acc   private(u_val,v_val,abs_u_val,deta)
-            do j = j_s, j_e
-                do i = i_s, i_e
+            do j = j_s, j_e+1     ! match flux3: correct the i_e+1/j_e+1 faces sum_kernel consumes
+                do i = i_s, i_e+1
                     deta = 3.0*(q(i,kme,j)-q(i-1,kme,j)) - (q(i+1,kme,j)-q(i-2,kme,j))
                     u_val = U_m(i,kme,j); abs_u_val = ABS(u_val)
                     flux_x(i,kme,j) = flux_x(i,kme,j) - abs_u_val * coef * deta
@@ -447,7 +447,7 @@ contains
             !$acc   private(u_val,abs_u_val,ax,q0z,qn1z,deta,dcz,dlim,gate)
             do j = j_s, j_e
                 do k = kms, kme-1
-                    do i = i_s, i_e
+                    do i = i_s, i_e+1     ! match flux3 x-face: correct the i_e+1 face sum_kernel consumes
                         ax   = zb_alpha_k(k)
                         deta = q(i,k,j) - q(i-1,k,j)
                         q0z  = zb_xs_wt(i,k,j,1)*q(i,   zb_xs_lev(i,k,j,1), j) &
@@ -470,7 +470,7 @@ contains
             !$acc           zb_ys_lev,zb_yn_lev,zb_ys_wt,zb_yn_wt, &
             !$acc           zb_alpha_k) &
             !$acc   private(v_val,abs_u_val,ay,q0z,qn3z,deta,dcz,dlim,gate)
-            do j = j_s, j_e
+            do j = j_s, j_e+1     ! match flux3 y-face: correct the j_e+1 face sum_kernel consumes
                 do k = kms, kme-1
                     do i = i_s, i_e
                         ay   = zb_alpha_k(k)
@@ -493,8 +493,8 @@ contains
             !$acc parallel loop gang vector tile(32,1) async(1) &
             !$acc   present(q,U_m,V_m,flux_x,flux_y) &
             !$acc   private(u_val,v_val,abs_u_val,deta)
-            do j = j_s, j_e
-                do i = i_s, i_e
+            do j = j_s, j_e+1     ! match flux3: correct the i_e+1/j_e+1 faces sum_kernel consumes
+                do i = i_s, i_e+1
                     deta = q(i,kme,j) - q(i-1,kme,j)
                     u_val = U_m(i,kme,j); abs_u_val = ABS(u_val)
                     flux_x(i,kme,j) = flux_x(i,kme,j) - abs_u_val * coef * deta
@@ -1304,7 +1304,15 @@ contains
         implicit none
         type(domain_t), intent(in) :: domain
         integer :: zv, thv, i, j, k, nz, nbins, b, nc, m
-        real, allocatable :: th_sum(:), z_sum(:), bcnt(:), zb_c(:), th_c(:)
+        ! th_sum/z_sum/bcnt accumulate in DOUBLE precision so the per-bin mean is
+        ! decomposition-invariant: single-precision summation of the same cells in
+        ! a different partition order (GPU atomics + MPI_SUM grouping) drifts by
+        ! ~1e-4 K, which taints theta = theta_bar + theta' and breaks bit-for-bit
+        ! MPI reproducibility. Double accumulation shrinks that drift below a
+        ! single-precision ULP, so th_c/zb_c (single) round identically on any rank
+        ! count. zb_c/th_c stay single (the downstream interpolation is single).
+        double precision, allocatable :: th_sum(:), z_sum(:), bcnt(:)
+        real, allocatable :: zb_c(:), th_c(:)
         real :: zmin, zmax, dzbin, zt, w1
 
         if (allocated(adv_theta_ref)) return
@@ -1374,9 +1382,9 @@ contains
         enddo
         !$acc exit data copyout(th_sum, z_sum, bcnt)
 
-        call MPI_Allreduce(MPI_IN_PLACE, th_sum, nbins, MPI_REAL, MPI_SUM, domain%compute_comms)
-        call MPI_Allreduce(MPI_IN_PLACE, z_sum,  nbins, MPI_REAL, MPI_SUM, domain%compute_comms)
-        call MPI_Allreduce(MPI_IN_PLACE, bcnt,   nbins, MPI_REAL, MPI_SUM, domain%compute_comms)
+        call MPI_Allreduce(MPI_IN_PLACE, th_sum, nbins, MPI_DOUBLE_PRECISION, MPI_SUM, domain%compute_comms)
+        call MPI_Allreduce(MPI_IN_PLACE, z_sum,  nbins, MPI_DOUBLE_PRECISION, MPI_SUM, domain%compute_comms)
+        call MPI_Allreduce(MPI_IN_PLACE, bcnt,   nbins, MPI_DOUBLE_PRECISION, MPI_SUM, domain%compute_comms)
 
         ! ---- compact NON-EMPTY bins into a monotone (zb_c, th_c) table.
         ! Bin mean height z_sum/bcnt (not the geometric bin centre) so each
@@ -1384,10 +1392,10 @@ contains
         ! zb_c strictly increasing across the nc kept points.
         nc = 0
         do b = 1, nbins
-            if (bcnt(b) > 0.0) then
+            if (bcnt(b) > 0.0d0) then
                 nc = nc + 1
-                zb_c(nc) = z_sum(b)  / bcnt(b)
-                th_c(nc) = th_sum(b) / bcnt(b)
+                zb_c(nc) = real(z_sum(b)  / bcnt(b))
+                th_c(nc) = real(th_sum(b) / bcnt(b))
             endif
         enddo
 

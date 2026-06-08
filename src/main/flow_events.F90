@@ -204,7 +204,6 @@ subroutine update_component_nest(comp_arr,options,ioclient)
         class default
             ! if ioclient is null, then we are acting as an ioserver
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
-                    write(*,*) "Client Barr 3 -- gather on nest ", options%nest_indx
                 call MPI_Barrier(MPI_COMM_WORLD)
             else
                 ! now loop over all child nests
@@ -255,7 +254,6 @@ subroutine component_write(component, ioclient)
             if (STD_OUT_PE_IO) flush(output_unit)
         class default
             call component%increment_output_time()
-            write(*,*) "Client/Server Barr 5 -- output on nest ", component%nest_indx
             call MPI_Barrier(MPI_COMM_WORLD)
 
     end select
@@ -314,7 +312,6 @@ subroutine component_read(component, options, boundary, ioclient)
 
         class default
             if (.not.(ioclient%parent_comms==MPI_COMM_NULL)) then
-                write(*,*) "Client Barr 5 -- read on nest ", options%nest_indx
                 call MPI_Barrier(MPI_COMM_WORLD)
             else
                 ! if ioclient comms is null, then we are acting as an ioserver
@@ -323,7 +320,6 @@ subroutine component_read(component, options, boundary, ioclient)
                     call end_time_safety_under%set(component%end_time%mjd() - component%input_dt%days() - component%small_time_delta%days())
 
                     if ( component%dead_or_asleep() .or. (component%sim_time < end_time_safety_under) ) then
-                        write(*,*) "Server Barr 5 -- read on nest ", options%nest_indx
                         call MPI_Barrier(MPI_COMM_WORLD)
                     endif
                 endif
