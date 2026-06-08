@@ -959,48 +959,43 @@ contains
     !!------------------------------------------------------------
     subroutine adv_std_compute_wind_2d_fm(u_cell, v_cell, rho, &
         jaco, jaco_u, jaco_v, dx, dt, &
-        U_m, V_m, denom, &
-        ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
+        U_m, V_m, denom, ks, ke)
         implicit none
-        integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
-        integer, intent(in) :: its_l, ite_l, jts_l, jte_l
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: u_cell, v_cell, rho
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: jaco, jaco_u, jaco_v
+        integer, intent(in) :: ks, ke
+        real, dimension(ims:ime, ks:ke, jms:jme), intent(in) :: u_cell, v_cell, rho
+        real, dimension(ims:ime, ks:ke, jms:jme), intent(in) :: jaco, jaco_u, jaco_v
         real, intent(in) :: dx, dt
-        ! U_m, V_m, denom must be pre-allocated by the caller and already on
-        ! the device (via !$acc enter data create). The caller manages their
-        ! lifecycle to avoid OpenACC dummy-argument tracking issues.
-        real, intent(inout) :: U_m   (its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3)
-        real, intent(inout) :: V_m   (its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3)
-        real, intent(inout) :: denom (ims_l:ime_l,     ks:ke, jms_l:jme_l)
+        ! U_m, V_m are allocated here (mirroring adv_std_compute_wind for the
+        ! regular scheme) so their bounds are always set consistently from the
+        ! current tile, rather than relying on a caller-side allocation. denom is
+        ! still caller-allocated (it is a plain ims:ime array, not stencil-extended).
+        real, allocatable, intent(inout) :: U_m(:,:,:), V_m(:,:,:)
+        real, intent(inout) :: denom (ims:ime,     ks:ke, jms:jme)
 
         integer :: i, j, k
-        integer :: i_s_w_l, i_e_w_l, j_s_w_l, j_e_w_l
-        integer :: i_s_l, i_e_l, j_s_l, j_e_l
 
-        ! Extended bounds for flux correction:
-        ! Flux computation range: its-1:ite+1  (extend interior by 1)
-        ! Wind array range: its-2:ite+2        (extend flux range by 1)
-        i_s_l   = its_l - 1
-        i_e_l   = ite_l + 1
-        j_s_l   = jts_l - 1
-        j_e_l   = jte_l + 1
-
-        i_s_w_l = max(its_l - 2, ims_l+1)  ! Ensure we don't go out of bounds
-        i_e_w_l = min(ite_l + 2, ime_l-1)
-        j_s_w_l = max(jts_l - 2, jms_l+1)
-        j_e_w_l = min(jte_l + 2, jme_l-1)
-
-        ! Allocate module-level fine-mesh flux arrays
-        allocate(flux_x_fm(i_s_l:i_e_l+1, ks:ke,   j_s_l:j_e_l+1))
-        allocate(flux_y_fm(i_s_l:i_e_l+1, ks:ke,   j_s_l:j_e_l+1))
-        !$acc enter data create(flux_x_fm, flux_y_fm)
+        if (.not. allocated(U_m)) then
+            allocate(U_m(i_s_w:i_e_w+1, ks:ke, j_s_w:j_e_w+1))
+            !$acc enter data create(U_m)
+        endif
+        if (.not. allocated(V_m)) then
+            allocate(V_m(i_s_w:i_e_w+1, ks:ke, j_s_w:j_e_w+1))
+            !$acc enter data create(V_m)
+        endif
+        if (.not. allocated(flux_x_fm)) then
+            allocate(flux_x_fm(i_s:i_e+1, ks:ke,   j_s:j_e+1))
+            !$acc enter data create(flux_x_fm)
+        endif
+        if (.not. allocated(flux_y_fm)) then
+            allocate(flux_y_fm(i_s:i_e+1, ks:ke,   j_s:j_e+1))
+            !$acc enter data create(flux_y_fm)
+        endif
 
         ! Compute 1/(rho * jaco) denominator
         !$acc parallel loop gang vector collapse(3) default(present)
-        do j = jms_l, jme_l
+        do j = jms, jme
             do k = ks, ke
-                do i = ims_l, ime_l
+                do i = ims, ime
                     denom(i,k,j) = 1.0 / (rho(i,k,j) * jaco(i,k,j))
                 enddo
             enddo
@@ -1008,9 +1003,9 @@ contains
 
         ! U_m: face-staggered in x (mirrors adv_std_compute_wind line 1203)
         !$acc parallel loop gang vector collapse(3) default(present)
-        do j = j_s_w_l, j_e_w_l+1
+        do j = j_s_w, j_e_w+1
             do k = ks, ke
-                do i = i_s_w_l, i_e_w_l+1
+                do i = i_s_w, i_e_w+1
                     U_m(i,k,j) = u_cell(i,k,j) * dt * &
                         0.5 * (rho(i-1,k,j) + rho(i,k,j)) * jaco_u(i,k,j) / dx
                 enddo
@@ -1019,9 +1014,9 @@ contains
 
         ! V_m: face-staggered in y (mirrors line 1206)
         !$acc parallel loop gang vector collapse(3) default(present)
-        do j = j_s_w_l, j_e_w_l+1
+        do j = j_s_w, j_e_w+1
             do k = ks, ke
-                do i = i_s_w_l, i_e_w_l+1
+                do i = i_s_w, i_e_w+1
                     V_m(i,k,j) = v_cell(i,k,j) * dt * &
                         0.5 * (rho(i,k,j-1) + rho(i,k,j)) * jaco_v(i,k,j) / dx
                 enddo
@@ -1038,26 +1033,17 @@ contains
     !! Mirrors flux3 h_order=3 / v_order=3 with explicit bounds
     !! and fine-mesh vertical BCs (zero flux bottom, zero-gradient top).
     !!------------------------------------------------------------
-    subroutine flux_2d_fm(q, U_m, V_m, t_factor, &
-        ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
+    subroutine flux_2d_fm(q, U_m, V_m, t_factor, ks, ke)
         implicit none
-        integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
-        integer, intent(in) :: its_l, ite_l, jts_l, jte_l
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: q
-        real, dimension(its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3), intent(in) :: U_m, V_m
+        integer, intent(in) :: ks, ke
+        real, dimension(ims:ime, ks:ke, jms:jme), intent(in) :: q
+        real, dimension(i_s_w:i_e_w+1, ks:ke, j_s_w:j_e_w+1), intent(in) :: U_m, V_m
         real, intent(in) :: t_factor
 
         integer :: i, j, k
-        integer :: i_s_l, i_e_l, j_s_l, j_e_l
         real :: coef, t_factor_up
         real :: u_val, v_val, w_val, abs_u_val, tmp
         real :: q0, qn1, qn2, q1
-
-        ! Flux computation bounds (extended for flux correction)
-        i_s_l = its_l - 1
-        i_e_l = ite_l + 1
-        j_s_l = jts_l - 1
-        j_e_l = jte_l + 1
 
         if (horder == 1) then
             t_factor_up = 0.5 * t_factor
@@ -1066,9 +1052,9 @@ contains
             ! Horizontal fluxes (1st order upwind)
             ! ==========================================
             !$acc parallel loop gang vector collapse(3) default(present)
-            do j = j_s_l, j_e_l+1
+            do j = j_s, j_e+1
                 do k = ks, ke
-                    do i = i_s_l, i_e_l+1
+                    do i = i_s, i_e+1
                         ! X-direction flux
                         u_val = U_m(i,k,j)
                         abs_u_val = ABS(u_val)
@@ -1090,9 +1076,9 @@ contains
             ! Horizontal fluxes (3rd order)
             ! ==========================================
             !$acc parallel loop gang vector collapse(3) default(present)
-            do j = j_s_l, j_e_l+1
+            do j = j_s, j_e+1
                 do k = ks, ke
-                    do i = i_s_l, i_e_l+1
+                    do i = i_s, i_e+1
                         ! X-direction flux
                         u_val = U_m(i,k,j)
                         abs_u_val = ABS(u_val)
@@ -1118,9 +1104,9 @@ contains
             ! Horizontal fluxes (5th order)
             ! ==========================================
             !$acc parallel loop gang vector collapse(3) default(present)
-            do j = j_s_l, j_e_l+1
+            do j = j_s, j_e+1
                 do k = ks, ke
-                    do i = i_s_l, i_e_l+1
+                    do i = i_s, i_e+1
                         ! X-direction flux
                         u_val = U_m(i,k,j)
                         abs_u_val = ABS(u_val)
@@ -1144,8 +1130,8 @@ contains
         ! Vertical fluxes (3rd order with fine-mesh BCs)
         ! ==========================================
 
-        ! do j = j_s_l, j_e_l
-        !     do i = i_s_l, i_e_l
+        ! do j = j_s, j_e
+        !     do i = i_s, i_e
         !         ! k=ks: zero flux at bottom (ground)
         !         flux_z_fm(i,ks,j) = 0.0
 
@@ -1159,9 +1145,9 @@ contains
 
         ! ! Interior vertical fluxes (3rd order): ks+2 to ke-1
         ! if (ke >= ks+3) then
-        !     do j = j_s_l, j_e_l
+        !     do j = j_s, j_e
         !         do k = ks+2, ke-1
-        !             do i = i_s_l, i_e_l
+        !             do i = i_s, i_e
         !                 w_val = W_m(i,k-1,j)
         !                 abs_u_val = ABS(w_val)
         !                 q0  = q(i,k,j)
@@ -1177,8 +1163,8 @@ contains
         !     enddo
         ! endif
 
-        ! do j = j_s_l, j_e_l
-        !     do i = i_s_l, i_e_l
+        ! do j = j_s, j_e
+        !     do i = i_s, i_e
         !         ! k=ke: 1st-order upwind (insufficient stencil above)
         !         if (ke > ks+1) then
         !             w_val = W_m(i,ke-1,j)
@@ -1202,20 +1188,18 @@ contains
     !! Apply flux divergence for fine-mesh advection.
     !! Mirrors sum_kernel with explicit bounds and fine-mesh BCs.
     !!------------------------------------------------------------
-    subroutine sum_kernel_2d_fm(qold, qfluxes, denom, &
-        ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
+    subroutine sum_kernel_2d_fm(qold, qfluxes, denom, ks, ke)
         implicit none
-        integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
-        integer, intent(in) :: its_l, ite_l, jts_l, jte_l
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in)  :: qold, denom
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(out) :: qfluxes
+        integer, intent(in) :: ks, ke
+        real, dimension(ims:ime, ks:ke, jms:jme), intent(in)  :: qold, denom
+        real, dimension(ims:ime, ks:ke, jms:jme), intent(out) :: qfluxes
 
         integer :: i, j, k
 
         !$acc parallel loop gang vector collapse(3) default(present)
-        do j = jts_l, jte_l
+        do j = jts, jte
             do k = ks, ke
-                do i = its_l, ite_l
+                do i = its, ite
                     qfluxes(i,k,j) = qold(i,k,j) - ((flux_x_fm(i+1,k,j) - flux_x_fm(i,k,j) + &
                                         flux_y_fm(i,k,j+1) - flux_y_fm(i,k,j)) * denom(i,k,j))
                 enddo
@@ -1232,9 +1216,19 @@ contains
     subroutine adv_std_clean_wind_arrays_fm()
         implicit none
 
-        !$acc exit data delete(flux_x_fm, flux_y_fm)
-        if (allocated(flux_x_fm)) deallocate(flux_x_fm)
-        if (allocated(flux_y_fm)) deallocate(flux_y_fm)
+        ! Guard each exit-data on allocation and use finalize: adv_init calls this
+        ! on every init (incl. the first, before flux_*_fm are ever allocated), and
+        ! an unguarded exit-data delete on an unmapped array — or a non-finalized
+        ! delete that only decrements the refcount — is the partial-present trap
+        ! (see feedback_openacc_enter_data_refcount).
+        if (allocated(flux_x_fm)) then
+            !$acc exit data delete(flux_x_fm) finalize
+            deallocate(flux_x_fm)
+        endif
+        if (allocated(flux_y_fm)) then
+            !$acc exit data delete(flux_y_fm) finalize
+            deallocate(flux_y_fm)
+        endif
 
     end subroutine adv_std_clean_wind_arrays_fm
 

@@ -224,8 +224,10 @@ contains
         allocate(jaco_fm  (ims:ime,     1:snc_N_loc, jms:jme))
         allocate(jaco_u_fm(ims:ime,     1:snc_N_loc, jms:jme))
         allocate(jaco_v_fm(ims:ime,     1:snc_N_loc, jms:jme))
-        allocate(U_m_fm   (its-2:ite+3, 1:snc_N_loc, jts-2:jte+3))
-        allocate(V_m_fm   (its-2:ite+3, 1:snc_N_loc, jts-2:jte+3))
+        ! U_m_fm / V_m_fm are now allocated (and device-mapped) inside
+        ! adv_std_compute_wind_2d_fm on its first call, mirroring how the regular
+        ! scheme's adv_std_compute_wind owns its U_m/V_m bounds. Only denom_fm is
+        ! allocated here (a plain ims:ime field the routine treats as caller-owned).
         allocate(denom_fm (ims:ime,     1:snc_N_loc, jms:jme))
         allocate(layer_mass_remaining_2d(its:ite, jts:jte))
         allocate(dep_mass_salt_2d       (its:ite, jts:jte))
@@ -266,7 +268,7 @@ contains
         !$acc enter data copyin(snc_dz,snc_Z,subl_mass_2d,kH_fm,wind_fm,v_fm,u_fm, &
         !$acc                   jaco_fm,jaco_u_fm,jaco_v_fm) &
         !$acc            create(qv_fm,t_fm,w_fm,qs_flux_cache,ns_flux_cache, &
-        !$acc                   rho_fm,qs_fm_old,ns_fm_old,div,U_m_fm,V_m_fm,denom_fm, &
+        !$acc                   rho_fm,qs_fm_old,ns_fm_old,div,denom_fm, &
         !$acc                   layer_mass_remaining_2d,dep_mass_salt_2d,susp_budget_2d)
         ! Initialize fine mesh exchange variable indices for batch halo exchange
         exch_vars_fm(1)%v = domain%var_indx(kVARS%qs_fm)%v
@@ -634,7 +636,7 @@ contains
     !! Surface mass balance (Eq. 22)
     !!----------------------------------------------------------
     subroutine snow_drift_integrate(domain, dt, dx, options)
-        use adv_std,      only: adv_std_compute_wind_2d_fm, flux_2d_fm, sum_kernel_2d_fm, adv_std_clean_wind_arrays_fm, &
+        use adv_std,      only: adv_std_compute_wind_2d_fm, flux_2d_fm, sum_kernel_2d_fm, &
                                 flux_x_fm, flux_y_fm, flux_z_fm
         use adv_fluxcorr, only: init_fluxcorr_fm, set_sign_arrays_fm, WRF_flux_corr_fm
         implicit none
@@ -759,14 +761,12 @@ contains
         ! Compute 3D fine-mesh wind Courant numbers (U_m_fm, V_m_fm, denom_fm)
         call adv_std_compute_wind_2d_fm(u_fm, v_fm, rho_fm, &
             jaco_fm, jaco_u_fm, jaco_v_fm, dx, dt, &
-            U_m_fm, V_m_fm, denom_fm, &
-            ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+            U_m_fm, V_m_fm, denom_fm, 1, snc_N_loc)
 
         if (options%adv%flux_corr == kFLUXCOR_MONO) then
             ! Initialize flux correction arrays and sign arrays (used on 3rd substep)
-            call init_fluxcorr_fm(ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
-            call set_sign_arrays_fm(U_m_fm, V_m_fm, &
-                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+            call init_fluxcorr_fm(1, snc_N_loc)
+            call set_sign_arrays_fm(U_m_fm, V_m_fm, 1, snc_N_loc)
         endif
 
         if (options%time%RK3) then
@@ -851,30 +851,24 @@ contains
             if (iter > 1) call exch_fine_mesh_3d(domain)
 
             ! --- Explicit horizontal advection for q_bs ---
-            call flux_2d_fm(qs_fm, U_m_fm, V_m_fm, t_fac, &
-                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+            call flux_2d_fm(qs_fm, U_m_fm, V_m_fm, t_fac, 1, snc_N_loc)
 
             if (flux_corr == kFLUXCOR_MONO) then
                 call WRF_flux_corr_fm(qs_fm_old, U_m_fm, V_m_fm, &
-                    flux_x_fm, flux_y_fm, denom_fm, &
-                    ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+                    flux_x_fm, flux_y_fm, denom_fm, 1, snc_N_loc)
             endif
 
-            call sum_kernel_2d_fm(qs_fm_old, qs_fm, denom_fm, &
-                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+            call sum_kernel_2d_fm(qs_fm_old, qs_fm, denom_fm, 1, snc_N_loc)
 
             ! --- Explicit horizontal advection for N_bs ---
-            call flux_2d_fm(ns_fm, U_m_fm, V_m_fm, t_fac, &
-                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+            call flux_2d_fm(ns_fm, U_m_fm, V_m_fm, t_fac, 1, snc_N_loc)
 
             if (flux_corr == kFLUXCOR_MONO) then
                 call WRF_flux_corr_fm(ns_fm_old, U_m_fm, V_m_fm, &
-                    flux_x_fm, flux_y_fm, denom_fm, &
-                    ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+                    flux_x_fm, flux_y_fm, denom_fm, 1, snc_N_loc)
             endif
 
-            call sum_kernel_2d_fm(ns_fm_old, ns_fm, denom_fm, &
-                ims, ime, 1, snc_N_loc, jms, jme, its, ite, jts, jte)
+            call sum_kernel_2d_fm(ns_fm_old, ns_fm, denom_fm, 1, snc_N_loc)
 
             ! --- Implicit vertical transport (Thomas solver) within each RK substep ---
             dt_thomas = dt * t_fac
@@ -1231,10 +1225,11 @@ contains
 
 
         end associate
-        ! All fine-mesh scratches are now module-level and persist across calls
-        ! (allocated in snow_drift_init, freed by the re-init block on nest switch).
-        ! Module-level flux_x_fm/flux_y_fm cleanup is still in adv_std module.
-        call adv_std_clean_wind_arrays_fm()
+        ! All fine-mesh scratches (U_m_fm/V_m_fm and adv_std's flux_x_fm/flux_y_fm)
+        ! are allocated once on the first call and persist across snow_drift_integrate
+        ! calls. They are freed/re-bounded only on a nest context switch: U_m_fm/V_m_fm
+        ! by snow_drift_init's re-init block, flux_x_fm/flux_y_fm by adv_init's
+        ! adv_std_clean_wind_arrays_fm. No per-call alloc/free here anymore.
 
     end subroutine snow_drift_integrate
 

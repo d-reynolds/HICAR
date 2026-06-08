@@ -768,10 +768,9 @@ contains
     !! All use explicit bounds (no module-level domain state)
     !!------------------------------------------------------------
 
-    subroutine init_fluxcorr_fm(ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
+    subroutine init_fluxcorr_fm(ks, ke)
         implicit none
-        integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
-        integer, intent(in) :: its_l, ite_l, jts_l, jte_l
+        integer, intent(in) :: ks, ke
 
         if (allocated(usign_fm))      then
             !$acc exit data delete(usign_fm, vsign_fm, scale_in_fm, scale_out_fm, flux_x_up_fm, flux_y_up_fm, dumb_q_fm)
@@ -784,32 +783,30 @@ contains
         if (allocated(flux_y_up_fm))  deallocate(flux_y_up_fm)
         if (allocated(dumb_q_fm))     deallocate(dumb_q_fm)
 
-        allocate(usign_fm(its_l-1:ite_l+1, ks:ke, jts_l-1:jte_l+1))
-        allocate(vsign_fm(its_l-1:ite_l+1, ks:ke, jts_l-1:jte_l+1))
+        allocate(usign_fm(its-1:ite+1, ks:ke, jts-1:jte+1))
+        allocate(vsign_fm(its-1:ite+1, ks:ke, jts-1:jte+1))
 
-        allocate(scale_in_fm(its_l-1:ite_l+1, ks:ke, jts_l-1:jte_l+1))
-        allocate(scale_out_fm(its_l-1:ite_l+1, ks:ke, jts_l-1:jte_l+1))
-        allocate(flux_x_up_fm(ims_l:ime_l, ks:ke, jms_l:jme_l))
-        allocate(flux_y_up_fm(ims_l:ime_l, ks:ke, jms_l:jme_l))
-        allocate(dumb_q_fm(ims_l:ime_l, ks:ke, jms_l:jme_l))
+        allocate(scale_in_fm(its-1:ite+1, ks:ke, jts-1:jte+1))
+        allocate(scale_out_fm(its-1:ite+1, ks:ke, jts-1:jte+1))
+        allocate(flux_x_up_fm(ims:ime, ks:ke, jms:jme))
+        allocate(flux_y_up_fm(ims:ime, ks:ke, jms:jme))
+        allocate(dumb_q_fm(ims:ime, ks:ke, jms:jme))
 
         !$acc enter data create(usign_fm, vsign_fm, scale_in_fm, scale_out_fm, flux_x_up_fm, flux_y_up_fm, dumb_q_fm)
     end subroutine init_fluxcorr_fm
 
 
-    subroutine set_sign_arrays_fm(u, v, &
-        ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
+    subroutine set_sign_arrays_fm(u, v, ks, ke)
         implicit none
-        integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
-        integer, intent(in) :: its_l, ite_l, jts_l, jte_l
-        real, dimension(its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3), intent(in) :: u, v
+        integer, intent(in) :: ks, ke
+        real, dimension(its-2:ite+3, ks:ke, jts-2:jte+3), intent(in) :: u, v
 
         integer :: i, j, k
 
         !$acc parallel loop gang vector collapse(3) default(present)
-        do j = jts_l-1, jte_l+1
+        do j = jts-1, jte+1
             do k = ks, ke
-                do i = its_l-1, ite_l+1
+                do i = its-1, ite+1
                     if (u(i,k,j) > 0) then
                         usign_fm(i,k,j) = -1
                     elseif (u(i+1,k,j) < 0) then
@@ -831,13 +828,11 @@ contains
     end subroutine set_sign_arrays_fm
 
 
-    subroutine compute_upwind_fluxes_fm(q, u, v, denom, &
-        ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
+    subroutine compute_upwind_fluxes_fm(q, u, v, denom, ks, ke)
         implicit none
-        integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
-        integer, intent(in) :: its_l, ite_l, jts_l, jte_l
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: q, denom
-        real, dimension(its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3), intent(in) :: u, v
+        integer, intent(in) :: ks, ke
+        real, dimension(ims:ime, ks:ke, jms:jme), intent(in) :: q, denom
+        real, dimension(its-2:ite+3, ks:ke, jts-2:jte+3), intent(in) :: u, v
 
         real :: q0, u_val, v_val, w_val, abs_u, abs_v, abs_w
         real :: flux_diff_x, flux_diff_y, flux_diff_z, denom_val, dz_val
@@ -845,9 +840,9 @@ contains
 
         ! STEP 1: First half-step upwind fluxes
         !$acc parallel loop gang vector collapse(3) default(present)
-        do j = jts_l-2, jte_l+3
+        do j = jts-2, jte+3
             do k = ks, ke
-                do i = its_l-2, ite_l+3
+                do i = its-2, ite+3
                     q0 = q(i,k,j)
 
                     u_val = u(i,k,j)
@@ -870,9 +865,9 @@ contains
 
         ! STEP 2: Compute intermediate concentration after first half-step
         !$acc parallel loop gang vector collapse(3) default(present)
-        do j = jts_l-2, jte_l+2
+        do j = jts-2, jte+2
             do k = ks, ke
-                do i = its_l-2, ite_l+2
+                do i = its-2, ite+2
                     flux_diff_x = flux_x_up_fm(i+1,k,j) - flux_x_up_fm(i,k,j)
                     flux_diff_y = flux_y_up_fm(i,k,j+1) - flux_y_up_fm(i,k,j)
 
@@ -886,9 +881,9 @@ contains
 
         ! STEP 3: Second half-step upwind fluxes (accumulate)
         !$acc parallel loop gang vector collapse(3) default(present)
-        do j = jts_l-1, jte_l+2
+        do j = jts-1, jte+2
             do k = ks, ke
-                do i = its_l-1, ite_l+2
+                do i = its-1, ite+2
                     q0 = dumb_q_fm(i,k,j)
 
                     u_val = u(i,k,j)
@@ -907,14 +902,12 @@ contains
     end subroutine compute_upwind_fluxes_fm
 
 
-    subroutine WRF_flux_corr_fm(q, u, v, flux_x, flux_y, denom, &
-        ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
+    subroutine WRF_flux_corr_fm(q, u, v, flux_x, flux_y, denom, ks, ke)
         implicit none
-        integer, intent(in) :: ims_l, ime_l, ks, ke, jms_l, jme_l
-        integer, intent(in) :: its_l, ite_l, jts_l, jte_l
-        real, dimension(ims_l:ime_l, ks:ke, jms_l:jme_l), intent(in) :: q, denom
-        real, dimension(its_l-2:ite_l+3, ks:ke, jts_l-2:jte_l+3), intent(in) :: u, v
-        real, dimension(its_l-1:ite_l+2, ks:ke, jts_l-1:jte_l+2), intent(inout) :: flux_x, flux_y
+        integer, intent(in) :: ks, ke
+        real, dimension(ims:ime, ks:ke, jms:jme), intent(in) :: q, denom
+        real, dimension(its-2:ite+3, ks:ke, jts-2:jte+3), intent(in) :: u, v
+        real, dimension(its-1:ite+2, ks:ke, jts-1:jte+2), intent(inout) :: flux_x, flux_y
 
         real :: dz_t_i, q0, q_i, q_j, temp, flux_in, flux_out
         real :: scale, scale_in_val, scale_out_val, qmax_local, qmin_local
@@ -923,14 +916,13 @@ contains
         integer :: i, j, k
 
         ! Compute two-step upwind fluxes
-        call compute_upwind_fluxes_fm(q, u, v, denom, &
-            ims_l, ime_l, ks, ke, jms_l, jme_l, its_l, ite_l, jts_l, jte_l)
+        call compute_upwind_fluxes_fm(q, u, v, denom, ks, ke)
 
         ! STEP 1: Compute scale_in/scale_out using upwind fluxes
         !$acc parallel loop gang vector collapse(3) default(present)
-        do j = jts_l-1, jte_l+1
+        do j = jts-1, jte+1
             do k = ks, ke
-                do i = its_l-1, ite_l+1
+                do i = its-1, ite+1
                     q0 = q(i,k,j)
                     q_i = q(i+usign_fm(i,k,j),k,j)
                     q_j = q(i,k,j+vsign_fm(i,k,j))
@@ -971,9 +963,9 @@ contains
 
         ! STEP 2: Apply flux corrections
         !$acc parallel loop gang vector collapse(3) default(present)
-        do j = jts_l, jte_l+1
+        do j = jts, jte+1
             do k = ks, ke
-                do i = its_l, ite_l+1
+                do i = its, ite+1
                     scale_in_val = scale_in_fm(i,k,j)
                     scale_out_val = scale_out_fm(i,k,j)
 
