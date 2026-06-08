@@ -34,7 +34,7 @@ module module_water_flake
     use icar_constants,         only : kVARS, kWATER_FLAKE, kLC_WATER, STD_OUT_PE
     use options_interface,      only : options_t
     use domain_interface,       only : domain_t
-    use mod_wrf_constants,      only : XLV
+    use mod_wrf_constants,      only : XLV, gravity
     use mod_atm_utilities,      only : sat_mr
     use flake_data_parameters,  only : ireals
     use flake_parameters,       only : tpl_T_f, h_Ice_min_flk, h_Snow_min_flk
@@ -58,6 +58,12 @@ module module_water_flake
                                                          !       lakes collapse to FLAKE_MIN_DEPTH and T_sfc
                                                          !       equilibrates to T_air within hours, killing SH)
     real, parameter :: FLAKE_CT_INIT          = 0.5      ! [-]  initial thermocline shape factor
+    ! Safety clamp on condensation (evap < 0): the PBL applies qfx to the lowest
+    ! model layer as qv_new = qv + qfx*g/del*dt, so an unbounded negative qfx can
+    ! drive qv negative and crash YSU. Cap the per-step vapor removal at this
+    ! fraction of the bottom layer's vapor content. Never bites for normal evap
+    ! (~1e-4 kg m-2 s-1); only trims pathological condensation spikes.
+    real, parameter :: EVAP_QV_SAFETY         = 0.5      ! [-]  max fraction of bottom-layer vapor removable per step
 
     real, parameter :: PI_FLAKE       = 3.14159265
     real, parameter :: OMEGA_EARTH    = 7.2921e-5        ! [s-1] Earth rotation rate
@@ -215,6 +221,7 @@ contains
                   latitude  => domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d,             &
                   T3d       => domain%vars_3d(domain%var_indx(kVARS%temperature)%v)%data_3d,          &
                   q3d       => domain%vars_3d(domain%var_indx(kVARS%water_vapor)%v)%data_3d,          &
+                  p_int     => domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d,   &
                   t_snow    => domain%vars_2d(domain%var_indx(kVARS%flake_t_snow)%v)%data_2d,         &
                   t_ice     => domain%vars_2d(domain%var_indx(kVARS%flake_t_ice)%v)%data_2d,          &
                   t_mnw     => domain%vars_2d(domain%var_indx(kVARS%flake_t_mnw)%v)%data_2d,          &
@@ -229,7 +236,7 @@ contains
             !$acc parallel loop gang vector collapse(2)                                                      &
             !$acc&  present(lakemask, lakedepth, tskin, hsnow, swdown, glw, psfc, chs,                       &
             !$acc&          sh_out, lh_out, qfx_out, grdflx, albedo, xice, emiss, latitude,                  &
-            !$acc&          T3d, q3d, windspd, current_precipitation,                                        &
+            !$acc&          T3d, q3d, p_int, windspd, current_precipitation,                                 &
             !$acc&          t_snow, t_ice, t_mnw, t_wml, t_bot, t_b1, c_t, h_ice, h_ml, h_b1)
             do j = jts, jte
                 do i = its, ite
@@ -247,6 +254,8 @@ contains
                             current_precipitation(i,j), dt,                                &
                             ! exchange coefficient
                             chs(i,j),                                                      &
+                            ! bottom-layer air mass per area [kg m-2] = del/g, for qfx clamp
+                            (p_int(i,kms,j) - p_int(i,kms+1,j)) / gravity,                 &
                             ! prognostic state (inout)
                             t_snow(i,j), t_ice(i,j),  t_mnw(i,j), t_wml(i,j), t_bot(i,j),  &
                             t_b1(i,j),   c_t(i,j),    hsnow(i,j), h_ice(i,j), h_ml(i,j),   &
@@ -283,7 +292,7 @@ contains
     subroutine flake_cell_step(                                                  &
             depth_w, depth_bs, T_bs, fetch, lat_deg,                             &
             T_air, q_air, U_a, P_a, swdown, glw, emiss_in,                       &
-            precip_acc, dt, chs_val,                                             &
+            precip_acc, dt, chs_val, rho_dz_bot,                                 &
             T_snow, T_ice, T_mnw, T_wML, T_bot,                                  &
             T_B1,   C_T,   h_snow, h_ice, h_ML,                                  &
             H_B1,   T_sfc,                                                       &
@@ -292,7 +301,7 @@ contains
         implicit none
         real, intent(in)    :: depth_w, depth_bs, T_bs, fetch, lat_deg
         real, intent(in)    :: T_air, q_air, U_a, P_a, swdown, glw, emiss_in
-        real, intent(in)    :: precip_acc, dt, chs_val
+        real, intent(in)    :: precip_acc, dt, chs_val, rho_dz_bot
         real, intent(inout) :: T_snow, T_ice, T_mnw, T_wML, T_bot
         real, intent(inout) :: T_B1,   C_T,   h_snow, h_ice, h_ML
         real, intent(inout) :: H_B1,   T_sfc
@@ -301,7 +310,7 @@ contains
         type(flake_state_t)   :: s
         real(KIND=ireals)     :: qv_s, sh, lh, evap, lw_up, lw_net
         real(KIND=ireals)     :: dMsnowdt, fcor, T_sfc_p_loc, T_sfc_n_loc
-        real(KIND=ireals)     :: q_surface_net, extincoef_water_typ
+        real(KIND=ireals)     :: q_surface_net, extincoef_water_typ, qv_sat_air
 
         ! ----- 1. Coriolis & snowfall partition -----
         fcor = 2.0_ireals * real(OMEGA_EARTH, ireals) * &
@@ -326,6 +335,26 @@ contains
                (real(T_sfc, ireals) - real(T_air, ireals))     ! W m-2 (positive = heat OUT of water)
         evap = real(chs_val, ireals) * real(U_a, ireals) * &
                (qv_s - real(q_air, ireals))                    ! kg m-2 s-1
+        ! ----- Bound the moisture flux to what the bottom atmospheric layer can
+        ! physically absorb. The PBL applies qfx as qv_new = qv + qfx*g/del*dt,
+        ! i.e. it adds evap*dt/rho_dz_bot to the layer's mixing ratio, where
+        ! rho_dz_bot = del/g is the layer's air mass per area. So:
+        !   * upper cap: evaporation can raise the layer only to saturation
+        !     (RH 100%), not past it. The deficit to saturation is
+        !     (qv_sat_air - q_air); over dt that limits evap to
+        !     (qv_sat_air - q_air)*rho_dz_bot/dt. Without this, a strong flux into
+        !     a thin near-surface layer supersaturates qv and blows up the
+        !     microphysics / PBL on the following step.
+        !   * lower floor: condensation can't remove more vapor than the layer
+        !     holds, so qv stays >= 0.
+        ! Both are no-ops for ordinary fluxes (deficit >> evap*dt/rho_dz_bot);
+        ! they only trim spikes. lh and q_surface_net below use the bounded value
+        ! so the lake energy budget matches what the atmosphere actually receives.
+        qv_sat_air = real(sat_mr(T_air, P_a), ireals)
+        evap = min(evap, max(qv_sat_air - real(q_air, ireals), 0.0_ireals) *      &
+                          real(rho_dz_bot, ireals) / max(real(dt, ireals), 1.0_ireals))
+        evap = max(evap, -real(EVAP_QV_SAFETY, ireals) * real(q_air, ireals) *     &
+                          real(rho_dz_bot, ireals) / max(real(dt, ireals), 1.0_ireals))
         lh   = evap * real(XLV, ireals)
 
         ! ----- 3. Net longwave (downward positive into surface) -----
