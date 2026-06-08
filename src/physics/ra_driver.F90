@@ -426,7 +426,7 @@ contains
         integer :: i_lo, i_hi, j_lo, j_hi  ! current valid extent in nbr_2d
         integer :: pn, ps, pe, pw          ! marching pack-pointers for the four relay streams
         integer :: send_len, recv_width, max_recv_len, buf_size, ierr
-        integer :: i, j
+        integer :: i, j, ins, ine, jns, jne
         type(MPI_Status) :: stat
         type(MPI_Request) :: send_req
 
@@ -445,6 +445,12 @@ contains
         ! Track the extent of valid data in nbr_2d
         i_lo = its; i_hi = ite
         j_lo = jts; j_hi = jte
+
+        ! copy neighborhood indices so that they will be automatically private on device
+        ins = domain%ihs
+        ine = domain%ihe
+        jns = domain%jhs
+        jne = domain%jhe
 
         ! Pack-pointers for the four relay streams. Each marks the band of `width`
         ! rows/columns we forward to the *opposite* neighbour this phase. They march
@@ -481,11 +487,11 @@ contains
             if (.not. domain%halo%south_boundary .or. .not. domain%halo%north_boundary) then
                 send_len     = (i_hi - i_lo + 1) * width
                 max_recv_len = send_len
-                recv_width   = max(0, min(width, j_lo - domain%jhs))
+                recv_width   = max(0, min(width, j_lo - jns))
                 ! Pack the band [pn-width+1 : pn] to forward north (marches south by `width`).
                 if (.not. domain%halo%north_boundary) then
                     !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
-                    do j = max(pn - width + 1, domain%jhs), pn
+                    do j = max(pn - width + 1, jns), pn
                         do i = i_lo, i_hi
                             send_buf((j - (pn - width + 1)) * (i_hi - i_lo + 1) + (i - i_lo) + 1) = nbr_2d(i, j)
                         end do
@@ -534,11 +540,11 @@ contains
             if (.not. domain%halo%south_boundary .or. .not. domain%halo%north_boundary) then
                 send_len     = (i_hi - i_lo + 1) * width
                 max_recv_len = send_len
-                recv_width   = max(0, min(width, domain%jhe - j_hi))
+                recv_width   = max(0, min(width, jne - j_hi))
                 ! Pack the band [ps : ps+width-1] to forward south (marches north by `width`).
                 if (.not. domain%halo%south_boundary) then
                     !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
-                    do j = ps, min(ps + width - 1, domain%jhe)
+                    do j = ps, min(ps + width - 1, jne)
                         do i = i_lo, i_hi
                             send_buf((j - ps) * (i_hi - i_lo + 1) + (i - i_lo) + 1) = nbr_2d(i, j)
                         end do
@@ -589,12 +595,12 @@ contains
             if (.not. domain%halo%west_boundary .or. .not. domain%halo%east_boundary) then
                 send_len     = width * (j_hi - j_lo + 1)
                 max_recv_len = send_len
-                recv_width   = max(0, min(width, i_lo - domain%ihs))
+                recv_width   = max(0, min(width, i_lo - ins))
                 ! Pack the band [pe-width+1 : pe] to forward east (marches west by `width`).
                 if (.not. domain%halo%east_boundary) then
                     !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
                     do j = j_lo, j_hi
-                        do i = max(pe - width + 1, domain%ihs), pe
+                        do i = max(pe - width + 1, ins), pe
                             send_buf((j - j_lo) * width + (i - (pe - width + 1)) + 1) = nbr_2d(i, j)
                         end do
                     end do
@@ -641,12 +647,12 @@ contains
             if (.not. domain%halo%west_boundary .or. .not. domain%halo%east_boundary) then
                 send_len     = width * (j_hi - j_lo + 1)
                 max_recv_len = send_len
-                recv_width   = max(0, min(width, domain%ihe - i_hi))
+                recv_width   = max(0, min(width, ine - i_hi))
                 ! Pack the band [pw : pw+width-1] to forward west (marches east by `width`).
                 if (.not. domain%halo%west_boundary) then
                     !$acc parallel loop gang vector collapse(2) present(send_buf, nbr_2d)
                     do j = j_lo, j_hi
-                        do i = pw, min(pw + width - 1, domain%ihe)
+                        do i = pw, min(pw + width - 1, ine)
                             send_buf((j - j_lo) * width + (i - pw) + 1) = nbr_2d(i, j)
                         end do
                     end do
