@@ -41,7 +41,7 @@ module planetary_boundary_layer
     implicit none
     real,allocatable, dimension(:,:)    ::  windspd, regime, sensible_heat_tmp, qfx_tmp
     ! integer, allocatable, dimension(:,:) :: kpbl2d
-    real, allocatable, dimension(:,:,:) :: RTHRATEN!, tend_u_ugrid, tend_v_vgrid
+    real, allocatable, dimension(:,:,:) :: RTHRATEN
     real, allocatable, dimension(:,:,:) :: trid_a, trid_b, trid_c, trid_rhs  ! work arrays for scalar PBL diffusion
 
     private
@@ -140,8 +140,6 @@ contains
                 deallocate(regime)
             endif
             allocate(regime(ims:ime,jms:jme))
-            !allocate(tend_u_ugrid(ims:ime+1, kms:kme, jms:jme)) ! to add the calculated u/v tendencies to the u/v grid
-            !allocate(tend_v_vgrid(ims:ime, kms:kme, jms:jme+1))
             if (allocated(RTHRATEN)) then
                 !$acc exit data delete(RTHRATEN)
                 deallocate(RTHRATEN)
@@ -243,14 +241,12 @@ contains
 
             associate(tend_u => domain%tend%u, tend_v => domain%tend%v, tend_th_pbl => domain%tend%th_pbl, &
                       tend_qv_pbl => domain%tend%qv_pbl, tend_qc_pbl => domain%tend%qc_pbl, tend_qi_pbl => domain%tend%qi_pbl, &
-                      tend_th_lwrad => domain%vars_3d(domain%var_indx(kVARS%tend_th_lwrad)%v)%data_3d, &
-                      tend_th_swrad => domain%vars_3d(domain%var_indx(kVARS%tend_th_swrad)%v)%data_3d, &
                       sensible_heat => domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
                       qfx => domain%vars_2d(domain%var_indx(kVARS%qfx)%v)%data_2d, &
                       u_10m => domain%vars_2d(domain%var_indx(kVARS%u_10m)%v)%data_2d, &
                       v_10m => domain%vars_2d(domain%var_indx(kVARS%v_10m)%v)%data_2d)
             !$acc parallel present(tend_u, tend_v, tend_th_pbl, tend_qv_pbl, tend_qc_pbl, tend_qi_pbl, &
-            !$acc &               tend_th_lwrad, tend_th_swrad, u_10m, v_10m, windspd,RTHRATEN,regime)
+            !$acc &               u_10m, v_10m, windspd,regime)
             !$acc loop gang vector collapse(3)
             do j = jms,jme
             do k = kms,kme
@@ -272,8 +268,16 @@ contains
                 if (windspd(i,j)==0) windspd(i,j)=1e-5
             enddo
             enddo
-            ! if (options%physics%radiation==kRA_RRTMG) then
-                !$acc loop gang vector collapse(3)
+            !$acc end parallel
+
+            ! Radiative heating tendencies are only allocated when the
+            ! radiation scheme provides them (RRTMG/RRTMGP); referencing
+            ! vars_3d(-1) when they are absent is an out-of-bounds access.
+            if (domain%var_indx(kVARS%tend_th_lwrad)%v > 0 .and. &
+                domain%var_indx(kVARS%tend_th_swrad)%v > 0) then
+                associate(tend_th_lwrad => domain%vars_3d(domain%var_indx(kVARS%tend_th_lwrad)%v)%data_3d, &
+                          tend_th_swrad => domain%vars_3d(domain%var_indx(kVARS%tend_th_swrad)%v)%data_3d)
+                !$acc parallel loop gang vector collapse(3) present(tend_th_lwrad, tend_th_swrad, RTHRATEN)
                 do j = jms,jme
                 do k = kms,kme
                 do i = ims,ime
@@ -281,8 +285,8 @@ contains
                 enddo
                 enddo
                 enddo
-            ! endif
-            !$acc end parallel
+                end associate
+            endif
 
 
             ! Add blowing snow sublimation feedback to the sensible and latent heat
@@ -323,8 +327,8 @@ contains
                     ,p3d=domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d                         & !-- p3d         3d pressure (pa)
                     ,p3di=domain%vars_3d(domain%var_indx(kVARS%pressure_interface)%v)%data_3d              & !-- p3di        3d pressure (pa) at interface level
                     ,pi3d=domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d                           & !-- pi3d        3d exner function (dimensionless)
-                    ! ,rublten=domain%tend%u                               & ! i/o
-                    ! ,rvblten=domain%tend%v                  & ! i/o
+                    ,rublten=domain%tend%u                  & ! i/o (mass grid; applied to staggered u under kRANS_WINDS)
+                    ,rvblten=domain%tend%v                  & ! i/o (mass grid; applied to staggered v under kRANS_WINDS)
                     ,rthblten=domain%tend%th_pbl            & ! i/o
                     ,rqvblten=domain%tend%qv_pbl            & ! i/o
                     ,rqcblten=domain%tend%qc_pbl            & ! i/o
@@ -392,17 +396,47 @@ contains
             !> ------------  add tendency terms  ------------
             !
             ! Here the tendency terms that were calculated by the ysu routine are added to the domain-wide fields.
-            ! For u and v, we need to re-balance the uvw fields and re-compute dt after we change them. This is done in the
-            ! step routine in time_step.f90, after the pbl call.
+            ! Momentum tendencies (u, v) are only applied when running the prognostic RANS solver — the
+            ! diagnostic mass-conserving solver overwrites winds every forcing step and would simply discard
+            ! a PBL momentum tendency, so applying it would be wasted work (and the surface-layer drag would
+            ! then be double-counted on top of the diagnostic balance).
             !
             !> -----------------------------------------------
 
-            ! Offset u/v tendencies to u and v grid, then add
-            ! call array_offset_x_3d(domain%tend%u , tend_u_ugrid)
-            ! call array_offset_y_3d(domain%tend%v , tend_v_vgrid)
-
-            ! domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d   =  domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d  +  tend_u_ugrid  * dt_in
-            ! domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d   =  domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d  +  tend_v_vgrid  * dt_in
+            if (options%physics%windtype == kRANS_WINDS) then
+                ! Apply mass-grid momentum tendencies to the staggered u-/v-grids.
+                ! Interpolation is inlined on the device — avoids the host-side reallocate
+                ! that array_offset_x_3d would do every call.
+                !
+                ! Interior u-face at i uses the average of mass-cell tendencies at i-1 and i.
+                ! The outermost faces (i = ims at global west boundary, ime+1 at east) are
+                ! left untouched: they are owned by the lateral-BC machinery (forcing +
+                ! Davies relaxation) and would otherwise out-of-bound `tend_u_mass(i-1)`
+                ! at i = its == ims on a global-west boundary rank.
+                associate(u_data      => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+                          v_data      => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+                          tend_u_mass => domain%tend%u, &
+                          tend_v_mass => domain%tend%v)
+                !$acc parallel loop gang vector collapse(3) default(present)
+                do j = jts, jte
+                    do k = kts, kte
+                        do i = max(its, ims+1), ite
+                            u_data(i,k,j) = u_data(i,k,j) + &
+                                0.5 * (tend_u_mass(i-1,k,j) + tend_u_mass(i,k,j)) * dt
+                        end do
+                    end do
+                end do
+                !$acc parallel loop gang vector collapse(3) default(present)
+                do j = max(jts, jms+1), jte
+                    do k = kts, kte
+                        do i = its, ite
+                            v_data(i,k,j) = v_data(i,k,j) + &
+                                0.5 * (tend_v_mass(i,k,j-1) + tend_v_mass(i,k,j)) * dt
+                        end do
+                    end do
+                end do
+                end associate
+            endif
 
             ! add mass grid tendencies
 

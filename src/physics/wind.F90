@@ -11,7 +11,9 @@ module wind
 
     use linear_theory_winds, only : linear_perturb, setup_linwinds
     ! use wind_iterative,      only : calc_iter_winds, init_iter_winds
-    use wind_iterative,    only : calc_iter_winds, init_iter_winds
+    use wind_iterative,    only : calc_iter_winds, init_iter_winds, &
+                                  probe_lambda_pattern, probe_zero_corrections, &
+                                  probe_apply_corrections, probe_record, probe_finalize
     use iso_fortran_env, only : output_unit
     use icar_constants
     use domain_interface,  only : domain_t
@@ -32,6 +34,7 @@ module wind
             !    i_s, i_e, j_s, j_e
 
     logical :: first_wind=.True.
+    logical :: operator_calibrated(kMAX_NESTS) = .false.
     real, parameter::deg2rad=0.017453293 !2*pi/360
     real, parameter :: rad2deg=57.2957779371
     real, parameter :: DEFAULT_FR_L = 1000.0
@@ -770,16 +773,27 @@ contains
                 call smooth_array(domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v),windowsize=2,ydim=3,nsmooths=3,halo=domain%halo)
             endif
 
-            do i = 1, options%wind%wind_iterations
-                call calc_idealized_wgrid(domain)
+            ! Build the grid-w predictor from the forcing w_real, then
+            ! calibrate the elliptic operator to the exact composition
+            ! A = 2*D o G for the CURRENT alpha field (the operator
+            ! depends on alpha through the w correction, so re-probe at
+            ! every wind update unless alpha is constant and already
+            ! probed). With the exact operator a single solve reaches the
+            ! solver tolerance — the historical wind_iterations loop
+            ! compensated for operator mismatch and is no longer needed.
+            call calc_idealized_wgrid(domain)
+            if (alpha_const_val <= 0 .or. .not. operator_calibrated(min(domain%nest_indx, size(operator_calibrated)))) then
+                call calibrate_projection_operator(domain, options, div)
+                operator_calibrated(min(domain%nest_indx, size(operator_calibrated))) = .true.
+            endif
 
-                call calc_divergence(div,domain,horz_only=.False.,use_dqdt=.True.)
+            call calc_divergence(div,domain,horz_only=.False.,use_dqdt=.True.)
 
-                call calc_iter_winds(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
-                !Exchange u and v, since the outer points are not updated in above function
-                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
-                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
-            end do
+            call calc_iter_winds(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
+            !Exchange the corrected fields, since the outer points are not updated in above function
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%w)%v),do_dqdt=.True.,corners=.True.)
 
             !$acc end data
             end associate

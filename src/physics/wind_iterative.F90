@@ -37,9 +37,21 @@ module wind_iterative
     implicit none
     private
     public :: init_iter_winds, calc_iter_winds, finalize_iter_winds
+    public :: probe_lambda_pattern, probe_zero_corrections, probe_apply_corrections, &
+              probe_record, probe_finalize
 
     logical :: initialized_iter_winds = .false.
     logical :: structure_uploaded = .false.
+
+    ! the stencil coefficients have
+    ! been replaced by the exact composition of the model's divergence
+    ! operator with the velocity-correction operator (obtained by lattice
+    ! probing — see wind.F90::calibrate_projection_operator). spmv/extract_diagonal then
+    ! use the probed 15-point operator on all physical rows and identity
+    ! rows on the ghost planes (the correction operator no longer reads
+    ! ghost lambda under w_to_grid).
+    logical :: operator_probed = .false.
+
 
     real, parameter :: deg2rad = 0.017453293
     real, parameter :: rad2deg = 57.2957779371
@@ -133,6 +145,7 @@ module wind_iterative
         type(MPI_Comm) :: solver_comm
         ! Flags
         logical :: structure_uploaded
+        logical :: operator_probed = .false.
         integer :: wind_solver_max_iters
         integer :: precond_n_sweeps = BASE_PREC_SWEEPS
         ! Geometry (single precision, owned-range allocations)
@@ -397,7 +410,11 @@ contains
                 enddo
             enddo
             varying_alpha = (alpha_max > alpha_min)
-            if (varying_alpha) call update_coefs_gpu()
+            ! Under the probed operator the coefficients ARE the exact
+            ! alpha-dependent composition; the analytic refresh would
+            ! clobber them. Alpha changes are handled by re-probing
+            ! (wind.F90::calibrate_projection_operator).
+            if (varying_alpha .and. .not. operator_probed) call update_coefs_gpu()
         endif
 
         ! Build / refresh the diagonal preconditioner from current coefficients
@@ -406,8 +423,12 @@ contains
         ! Build RHS on GPU (3D layout: rhs(i,k,j) = -2*div for interior, 0 at BCs)
         call compute_rhs_3d()
 
-        ! Reset initial guess to avoid BiCGStab breakdown from stale state
-        call vec_zero(x_sol)
+        ! Initial guess: warm-start from the previous solve's lambda.
+        ! bicgstab_solve computes r0 = b - A*x0 properly and the
+        ! convergence target is normalized by ||b||, so a correlated
+        ! guess (RANS per-step solves) cuts iterations directly, while an
+        ! uncorrelated one (diagnostic hourly solves) just behaves like a
+        ! cold start. x_sol is reset after operator probing.
 
         !$acc wait
 
@@ -536,7 +557,7 @@ contains
         real(c_double) :: red5_local(5), red5_global(5)
         real(c_double) :: ts, tt, rs, rt, ss
         real(c_double) :: rnorm_global, rnorm_squared, target_norm
-        real(c_double) :: rho0_pack(2)
+        real(c_double) :: rho0_pack(2), b_norm2
         type(MPI_Request) :: req_sigma, req_red5
         real(c_double) :: t0_solve, t0_region
 
@@ -555,16 +576,26 @@ contains
 
         ! --- Initial setup ---
         t0_region = MPI_Wtime()
-        ! r0 = b - A*x0.  x0 is zero (set by caller), so r0 = b.
-        call vec_copy(r_vec, rhs)
+        ! r0 = b - A*x0. Computed properly (one SpMV) so the caller may
+        ! warm-start from the previous solve's lambda; with a zero x0 the
+        ! SpMV result is zero and r0 = b as before. x_sol halos may be one
+        ! iteration stale from the previous solve — refresh before SpMV.
+        call exchange_krylov_halos(x_sol, domain)
+        call spmv(x_sol, t_vec)
+        call vec_axpby_into(r_vec, 1.0_c_double, rhs, -1.0_c_double, t_vec)
         ! r̂0 = r0 (shadow residual; held fixed across the solve)
         call vec_copy(r_hat, r_vec)
         ! p_0 = r_0
         call vec_copy(p_vec, r_vec)
 
-        ! Initial reductions: rho_0 = <r̂, r_0>, ||r_0||²
+        ! Initial reductions: rho_0 = <r̂, r_0>, ||r_0||², plus ||b||² for
+        ! the convergence target. The target is normalized by ||b|| (the
+        ! physical scale of the divergence to remove), NOT by ||r_0||:
+        ! otherwise a warm start that shrinks r_0 would tighten its own
+        ! target and gain nothing.
         call vec_dot_local(r_hat, r_vec, rho0_pack(1))
         call vec_norm2_local(r_vec, rho0_pack(2))
+        call vec_norm2_local(rhs, b_norm2)
         t_vecops_acc = t_vecops_acc + (MPI_Wtime() - t0_region)
 
         t0_region = MPI_Wtime()
@@ -576,8 +607,13 @@ contains
         !$acc end host_data
         !$acc update host(rho0_dev)
         rho0_pack(1) = rho0_dev(1); rho0_pack(2) = rho0_dev(2)
+        ! ||b||² reduced separately (host MPI; once per solve)
+        call MPI_Allreduce(MPI_IN_PLACE, b_norm2, 1, MPI_DOUBLE_PRECISION, &
+                           MPI_SUM, solver_comm, ierr)
 #else
         call MPI_Allreduce(MPI_IN_PLACE, rho0_pack, 2, MPI_DOUBLE_PRECISION, &
+                           MPI_SUM, solver_comm, ierr)
+        call MPI_Allreduce(MPI_IN_PLACE, b_norm2, 1, MPI_DOUBLE_PRECISION, &
                            MPI_SUM, solver_comm, ierr)
 #endif
         t_allreduce_acc = t_allreduce_acc + (MPI_Wtime() - t0_region)
@@ -586,9 +622,9 @@ contains
         rnorm_global  = sqrt(rho0_pack(2))
         res0_out      = rnorm_global
         res_final_out = rnorm_global
-        target_norm   = max(bicg_tol_abs, bicg_tol_rel * rnorm_global)
+        target_norm   = max(bicg_tol_abs, bicg_tol_rel * sqrt(b_norm2))
 
-        if (rnorm_global <= bicg_tol_abs) then
+        if (rnorm_global <= target_norm) then
             status_out  = 0
             n_iters_out = 0
             t_total_acc = MPI_Wtime() - t0_solve
@@ -790,6 +826,84 @@ contains
         j_int_lo = max(ys,         1)
         j_int_hi = min(ys + ym - 1, my - 2)
 
+        ! All physical rows use the full probed 15-point coefficients
+        ! (no hardcoded D/E/F/G = 1/dx^2 shortcuts, no analytic vertical
+        ! BC rows); the ghost planes k=0 and k=mz-1 are identity rows
+        ! (the w_to_grid correction operator never reads ghost lambda).
+        if (operator_probed) then
+            ! Lateral identity rows (same as the analytic operator)
+            if (xs == 0) then
+                !$acc parallel loop gang vector collapse(2) present(x, y)
+                do j = ys, ys + ym - 1
+                    do k = zs, zs + zm - 1
+                        y(0, k, j) = x(0, k, j)
+                    enddo
+                enddo
+            endif
+            if (xs + xm - 1 == mx - 1) then
+                !$acc parallel loop gang vector collapse(2) present(x, y)
+                do j = ys, ys + ym - 1
+                    do k = zs, zs + zm - 1
+                        y(mx-1, k, j) = x(mx-1, k, j)
+                    enddo
+                enddo
+            endif
+            if (ys == 0) then
+                !$acc parallel loop gang vector collapse(2) present(x, y)
+                do k = zs, zs + zm - 1
+                    do i = xs, xs + xm - 1
+                        y(i, k, 0) = x(i, k, 0)
+                    enddo
+                enddo
+            endif
+            if (ys + ym - 1 == my - 1) then
+                !$acc parallel loop gang vector collapse(2) present(x, y)
+                do k = zs, zs + zm - 1
+                    do i = xs, xs + xm - 1
+                        y(i, k, my-1) = x(i, k, my-1)
+                    enddo
+                enddo
+            endif
+
+            if (i_int_lo <= i_int_hi .and. j_int_lo <= j_int_hi) then
+                ! Ghost-plane identity rows
+                !$acc parallel loop gang vector collapse(2) present(x, y)
+                do j = j_int_lo, j_int_hi
+                    do i = i_int_lo, i_int_hi
+                        y(i, 0,    j) = x(i, 0,    j)
+                        y(i, mz-1, j) = x(i, mz-1, j)
+                    enddo
+                enddo
+
+                !$acc parallel loop gang vector collapse(3) &
+                !$acc present(x, y, A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
+                !$acc         H_coef, I_coef, J_coef, K_coef, L_coef, M_coef, N_coef, O_coef)
+                do j = j_int_lo, j_int_hi
+                    do k = 1, mz - 2
+                        do i = i_int_lo, i_int_hi
+                            y(i,k,j) =                                                       &
+                                  real(O_coef(i,k,j), c_double) * x(i,   k-1, j-1)           &
+                                + real(G_coef(i,k,j), c_double) * x(i,   k,   j-1)           &
+                                + real(M_coef(i,k,j), c_double) * x(i,   k+1, j-1)           &
+                                + real(K_coef(i,k,j), c_double) * x(i-1, k-1, j  )           &
+                                + real(C_coef(i,k,j), c_double) * x(i,   k-1, j  )           &
+                                + real(J_coef(i,k,j), c_double) * x(i+1, k-1, j  )           &
+                                + real(E_coef(i,k,j), c_double) * x(i-1, k,   j  )           &
+                                + real(A_coef(i,k,j), c_double) * x(i,   k,   j  )           &
+                                + real(D_coef(i,k,j), c_double) * x(i+1, k,   j  )           &
+                                + real(I_coef(i,k,j), c_double) * x(i-1, k+1, j  )           &
+                                + real(B_coef(i,k,j), c_double) * x(i,   k+1, j  )           &
+                                + real(H_coef(i,k,j), c_double) * x(i+1, k+1, j  )           &
+                                + real(N_coef(i,k,j), c_double) * x(i,   k-1, j+1)           &
+                                + real(F_coef(i,k,j), c_double) * x(i,   k,   j+1)           &
+                                + real(L_coef(i,k,j), c_double) * x(i,   k+1, j+1)
+                        enddo
+                    enddo
+                enddo
+            endif
+            return
+        endif
+
         ! ============== 1. Lateral identity rows ==============
         ! West face (i=0): only owned at west-boundary ranks
         if (xs == 0) then
@@ -932,9 +1046,18 @@ contains
                     if (i <= 0 .or. j <= 0 .or. i >= mx-1 .or. j >= my-1) then
                         d = 1.0_c_double
                     else if (k >= mz-1) then
-                        d = 1.0_c_double / real(dz_if(i,k,j), c_double)
+                        ! probed operator: ghost plane is an identity row
+                        if (operator_probed) then
+                            d = 1.0_c_double
+                        else
+                            d = 1.0_c_double / real(dz_if(i,k,j), c_double)
+                        endif
                     else if (k <= 0) then
-                        d = -1.0_c_double / real(dz_if(i,k+1,j), c_double)
+                        if (operator_probed) then
+                            d = 1.0_c_double
+                        else
+                            d = -1.0_c_double / real(dz_if(i,k+1,j), c_double)
+                        endif
                     else
                         d = real(A_coef(i,k,j), c_double)
                     endif
@@ -945,6 +1068,178 @@ contains
             enddo
         enddo
     end subroutine extract_diagonal
+
+
+    !>------------------------------------------------------------
+    !! operator probing (orchestrated by wind.F90::calibrate_projection_operator).
+    !!
+    !! The exact discrete projection requires the solver matrix to be
+    !! the composition A = 2 * D o G of the model's divergence operator
+    !! D (calc_divergence) with the velocity-correction operator G
+    !! (calc_updated_winds, w_to_grid form). Rather than deriving the
+    !! composed coefficients by hand, they are extracted numerically:
+    !! apply G then D to 27 lattice-colored indicator fields (3x3x3
+    !! coloring, so no two stencil supports overlap) and read off all
+    !! 15 coefficients per cell. By construction the result is
+    !! bit-consistent with whatever D and G implement.
+    !!------------------------------------------------------------
+
+
+    !> Fill x_sol with the (ca,cb,cc) coloring on physical cells
+    !! (global-index lattice), zero on ghost planes and the lateral
+    !! identity ring — matching solve-time lambda there.
+    subroutine probe_lambda_pattern(ca, cb, cc)
+        implicit none
+        integer, intent(in) :: ca, cb, cc
+        integer :: i, j, k
+
+        do j = j_s-1, j_e+1
+            do k = k_s-1, k_e+1
+                do i = i_s-1, i_e+1
+                    if (i >= 1 .and. i <= mx-2 .and. k >= 1 .and. k <= mz-2 .and. &
+                        j >= 1 .and. j <= my-2 .and. &
+                        mod(i,3) == ca .and. mod(k,3) == cb .and. mod(j,3) == cc) then
+                        x_sol(i,k,j) = 1.0_c_double
+                    else
+                        x_sol(i,k,j) = 0.0_c_double
+                    endif
+                enddo
+            enddo
+        enddo
+        !$acc update device(x_sol)
+    end subroutine probe_lambda_pattern
+
+    !> Zero the u/v/w dqdt workspace so calc_updated_winds leaves the
+    !! pure correction G(lambda) in it.
+    subroutine probe_zero_corrections(domain)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        integer :: i, j, k
+
+        associate(u_q => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                  v_q => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                  w_q => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+        !$acc parallel default(present)
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = domain%kms, domain%kme
+                do i = ims, ime+1
+                    u_q(i,k,j) = 0.0
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme+1
+            do k = domain%kms, domain%kme
+                do i = ims, ime
+                    v_q(i,k,j) = 0.0
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = domain%kms, domain%kme
+                do i = ims, ime
+                    w_q(i,k,j) = 0.0
+                enddo
+            enddo
+        enddo
+        !$acc end parallel
+        end associate
+    end subroutine probe_zero_corrections
+
+    !> Apply the correction operator G from the current x_sol.
+    subroutine probe_apply_corrections(domain, adv_den)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        logical, intent(in) :: adv_den
+        call calc_updated_winds(domain, adv_den)
+    end subroutine probe_apply_corrections
+
+    !> Record the probed response T = 2*div(G(pattern)) into the stencil
+    !! coefficient arrays (host side; finalize pushes to device). Any
+    !! response at an offset outside the 15-point footprint is leakage
+    !! (a discretization wider than the stencil) and is reported.
+    subroutine probe_record(domain, Tfield, ca, cb, cc, max_leak)
+        implicit none
+        type(domain_t), intent(in) :: domain
+        real, intent(in) :: Tfield(domain%ims:domain%ime, domain%kms:domain%kme, domain%jms:domain%jme)
+        integer, intent(in) :: ca, cb, cc
+        real, intent(inout) :: max_leak
+        integer :: i, j, k, di, dk, dj
+        real :: tv
+
+        do j = j_s, j_e
+            do k = k_s, k_e
+                do i = i_s, i_e
+                    di = mod(ca - mod(i,3) + 3, 3); if (di == 2) di = -1
+                    dk = mod(cb - mod(k,3) + 3, 3); if (dk == 2) dk = -1
+                    dj = mod(cc - mod(j,3) + 3, 3); if (dj == 2) dj = -1
+                    tv = 2.0 * Tfield(i,k,j)
+                    if (dk == 0) then
+                        if (di == 0 .and. dj == 0) then
+                            A_coef(i,k,j) = tv
+                        else if (di == 1 .and. dj == 0) then
+                            D_coef(i,k,j) = tv
+                        else if (di == -1 .and. dj == 0) then
+                            E_coef(i,k,j) = tv
+                        else if (di == 0 .and. dj == 1) then
+                            F_coef(i,k,j) = tv
+                        else if (di == 0 .and. dj == -1) then
+                            G_coef(i,k,j) = tv
+                        else
+                            max_leak = max(max_leak, abs(tv))
+                        endif
+                    else if (dk == 1) then
+                        if (di == 0 .and. dj == 0) then
+                            B_coef(i,k,j) = tv
+                        else if (di == 1 .and. dj == 0) then
+                            H_coef(i,k,j) = tv
+                        else if (di == -1 .and. dj == 0) then
+                            I_coef(i,k,j) = tv
+                        else if (di == 0 .and. dj == 1) then
+                            L_coef(i,k,j) = tv
+                        else if (di == 0 .and. dj == -1) then
+                            M_coef(i,k,j) = tv
+                        else
+                            max_leak = max(max_leak, abs(tv))
+                        endif
+                    else
+                        if (di == 0 .and. dj == 0) then
+                            C_coef(i,k,j) = tv
+                        else if (di == 1 .and. dj == 0) then
+                            J_coef(i,k,j) = tv
+                        else if (di == -1 .and. dj == 0) then
+                            K_coef(i,k,j) = tv
+                        else if (di == 0 .and. dj == 1) then
+                            N_coef(i,k,j) = tv
+                        else if (di == 0 .and. dj == -1) then
+                            O_coef(i,k,j) = tv
+                        else
+                            max_leak = max(max_leak, abs(tv))
+                        endif
+                    endif
+                enddo
+            enddo
+        enddo
+    end subroutine probe_record
+
+    !> Switch the solver to the probed operator and push coefficients
+    !! to the device.
+    subroutine probe_finalize(max_leak)
+        implicit none
+        real, intent(in) :: max_leak
+        operator_probed = .true.
+        !$acc update device(A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
+        !$acc               H_coef, I_coef, J_coef, K_coef, L_coef, M_coef, N_coef, O_coef)
+        ! x_sol holds the last probe pattern — useless as a warm-start
+        ! guess for the next solve; reset it.
+        call vec_zero(x_sol)
+        if (STD_OUT_PE) then
+            write(*,*) "Poison projection operator calibrated by probing (A = 2*D o G)."
+            write(*,*) "  off-stencil leakage max |T| = ", max_leak, " (should be ~0)"
+        endif
+    end subroutine probe_finalize
 
 
     !>------------------------------------------------------------
@@ -1442,8 +1737,7 @@ contains
         implicit none
         type(domain_t), intent(inout) :: domain
         logical,        intent(in)    :: adv_den
-
-        real, allocatable, dimension(:,:,:) :: u_dlambdz, v_dlambdz, dlambdz, u_temp, v_temp
+        real, allocatable, dimension(:,:,:) :: u_dlambdz, v_dlambdz, u_temp, v_temp
         real, allocatable, dimension(:,:,:) :: lambda_3d
         real, allocatable, dimension(:,:,:) :: rho, rho_u, rho_v, rho_w
         integer :: i, j, k, i_start, i_end, j_start, j_end
@@ -1459,7 +1753,6 @@ contains
 
         allocate(u_dlambdz(i_start:i_end,    k_s:k_e, j_s:j_e))
         allocate(v_dlambdz(i_s:i_e,          k_s:k_e, j_start:j_end))
-        allocate(dlambdz  (i_s-1:i_e+1,      k_s:k_e, j_s-1:j_e+1))
 
         allocate(rho   (domain%ims:domain%ime, k_s:k_e, domain%jms:domain%jme))
         allocate(rho_u (i_start:i_end, k_s:k_e, j_s:j_e))
@@ -1495,9 +1788,9 @@ contains
                   dzdx_u => domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, &
                   dzdy_v => domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d)
 
-        !$acc enter data create(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, rho_w)
+        !$acc enter data create(u_temp, v_temp, u_dlambdz, v_dlambdz, rho, rho_u, rho_v, rho_w)
         !$acc data present(density, u, v, jaco_u_domain, jaco_v_domain, jaco_domain, dzdx_u, dzdy_v, &
-        !$acc              u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, rho_w, &
+        !$acc              u_temp, v_temp, u_dlambdz, v_dlambdz, rho, rho_u, rho_v, rho_w, &
         !$acc              alpha, dz_if, lambda_3d)
 
         !$acc kernels
@@ -1691,13 +1984,21 @@ contains
             enddo
         enddo
 
-        !$acc parallel loop gang vector collapse(3)
-        do j = j_s-1, j_e+1
-            do k = k_s, k_e
-                do i = i_s-1, i_e+1
-                    dlambdz(i,k,j) = lambda_3d(i,k+1,j) - lambda_3d(i,k-1,j)
-                    dlambdz(i,k,j) = dlambdz(i,k,j) / (dz_if(i_s,k+1,j_s) + dz_if(i_s,k,j_s))
-                enddo
+        ! One-sided vertical gradients at the bottom/top levels so the
+        ! correction operator never reads ghost-plane lambda (the ghost
+        ! rows are identity in the probed operator, lambda = 0).
+        !$acc parallel loop gang vector collapse(2)
+        do j = j_s, j_e
+            do i = i_start, i_end
+                u_dlambdz(i,k_s,j) = (u_temp(i,k_s+1,j) - u_temp(i,k_s,j)) / dz_if(i_s,k_s+1,j_s)
+                u_dlambdz(i,k_e,j) = (u_temp(i,k_e,j) - u_temp(i,k_e-1,j)) / dz_if(i_s,k_e,j_s)
+            enddo
+        enddo
+        !$acc parallel loop gang vector collapse(2)
+        do j = j_start, j_end
+            do i = i_s, i_e
+                v_dlambdz(i,k_s,j) = (v_temp(i,k_s+1,j) - v_temp(i,k_s,j)) / dz_if(i_s,k_s+1,j_s)
+                v_dlambdz(i,k_e,j) = (v_temp(i,k_e,j) - v_temp(i,k_e-1,j)) / dz_if(i_s,k_e,j_s)
             enddo
         enddo
 
@@ -1723,20 +2024,34 @@ contains
             enddo
         enddo
 
-        !$acc parallel loop gang vector collapse(3)
+        ! Vertical velocity correction: applied to the grid-relative w
+        ! predictor (w%dqdt) so the corrected (u, v, w_grid) triplet
+        ! jointly satisfies continuity — the unified form for both the
+        ! RANS and diagnostic paths (the diagnostic path then derives its
+        ! final w via balance_uvw as before, from a better-converged
+        ! horizontal field). The gradient is the COMPACT one centred on
+        ! interface k ((lambda(k+1)-lambda(k))/dz_if(k+1)): accurate for a
+        ! face-located quantity, no ghost-plane reads, and a composition
+        ! that fits the probed 15-point stencil. The lid interface (k_e)
+        ! gets no correction (rigid lid).
+        associate(w_g => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+        !$acc parallel loop gang vector collapse(3) present(w_g, lambda_3d, dz_if)
         do j = j_s, j_e
-            do k = k_s, k_e
+            do k = k_s, k_e-1
                 do i = i_s, i_e
-                    w(i,k,j) = w(i,k,j) + 0.5 * (alpha(i,k,j)**2) * dlambdz(i,k,j) / jaco_domain(i,k,j) / rho_w(i,k,j)
+                    w_g(i,k,j) = w_g(i,k,j) + 0.5 * (alpha(i,k,j)**2) * &
+                                 (lambda_3d(i,k+1,j) - lambda_3d(i,k,j)) / dz_if(i,k+1,j) &
+                                 / jaco_domain(i,k,j) / rho_w(i,k,j)
                 enddo
             enddo
         enddo
-
-        !$acc end data
-        !$acc exit data delete(u_temp, v_temp, u_dlambdz, v_dlambdz, dlambdz, rho, rho_u, rho_v, rho_w, lambda_3d)
         end associate
 
-        deallocate(u_temp, v_temp, lambda_3d, u_dlambdz, v_dlambdz, dlambdz)
+        !$acc end data
+        !$acc exit data delete(u_temp, v_temp, u_dlambdz, v_dlambdz, rho, rho_u, rho_v, rho_w, lambda_3d)
+        end associate
+
+        deallocate(u_temp, v_temp, lambda_3d, u_dlambdz, v_dlambdz)
         deallocate(rho, rho_u, rho_v, rho_w)
     end subroutine calc_updated_winds
 
@@ -2305,6 +2620,7 @@ contains
         domain_cache(slot)%south_neighbor = south_neighbor
         domain_cache(slot)%solver_comm    = solver_comm
         domain_cache(slot)%structure_uploaded   = structure_uploaded
+        domain_cache(slot)%operator_probed           = operator_probed
         domain_cache(slot)%wind_solver_max_iters = wind_solver_max_iters
         domain_cache(slot)%precond_n_sweeps      = precond_n_sweeps
 
@@ -2431,6 +2747,7 @@ contains
         south_neighbor = domain_cache(slot)%south_neighbor
         solver_comm    = domain_cache(slot)%solver_comm
         structure_uploaded   = domain_cache(slot)%structure_uploaded
+        operator_probed          = domain_cache(slot)%operator_probed
         wind_solver_max_iters = domain_cache(slot)%wind_solver_max_iters
         precond_n_sweeps      = domain_cache(slot)%precond_n_sweeps
 
