@@ -16,7 +16,7 @@ module module_sm_SNOWPACKdrv
     use mod_atm_utilities, only : relative_humidity
     use string, only : str, to_upper
     use omp_lib, only : omp_get_wtime
-    use mod_wrf_constants, only: STBOLT
+    use mod_wrf_constants, only: STBOLT, XLS
 
     implicit none
 
@@ -29,6 +29,12 @@ module module_sm_SNOWPACKdrv
 
     integer :: ims, ime, jms, jme, its, ite, jts, jte
     integer :: i, j, k
+    ! Atmospheric forcing reference height (m) = half the first model level
+    ! thickness (0.5*dz), matching the native-Fortran port's height_of_meteo
+    ! (snowpack_driver.F90:77). Used for HEIGHT_OF_WIND_VALUE/HEIGHT_OF_METEO_VALUES
+    ! (so SNOWPACK computes ustar/psi_s at the same height as the port) and in
+    ! MeteoOut's chs formula. Set in sm_SNOWPACK_init.
+    real(kind=8) :: height_of_meteo_m = 12.0d0
 
     interface
         subroutine snowpack_SHROUD_memory_destructor(cap) &
@@ -82,8 +88,14 @@ module module_sm_SNOWPACKdrv
         ! Previously passed raw seconds (300) as minutes → 18000s timestep bug.
         call cfg%add_key("CALCULATION_STEP_LENGTH", "Snowpack", trim(str(int(options%lsm%update_interval / 60.0))))
         call cfg%add_key("METEO_STEP_LENGTH", "Snowpack", trim(str(int(options%lsm%update_interval / 60.0))))
-        call cfg%add_key("HEIGHT_OF_WIND_VALUE", "Snowpack", "12.0")
-        call cfg%add_key("HEIGHT_OF_METEO_VALUES", "Snowpack", "12.0")
+        ! Reference height = 0.5*dz (first model level), matching the port. This
+        ! makes SNOWPACK compute ustar/psi_s at the same height the port uses, so
+        ! the surface heat-exchange coefficient (chs) is consistent between the two
+        ! drivers instead of differing by the 12.0-vs-(0.5*dz) base height.
+        height_of_meteo_m = 0.5d0 * real( &
+            domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(its, 1, jts), kind=8)
+        call cfg%add_key("HEIGHT_OF_WIND_VALUE", "Snowpack", trim(str(real(height_of_meteo_m))))
+        call cfg%add_key("HEIGHT_OF_METEO_VALUES", "Snowpack", trim(str(real(height_of_meteo_m))))
         call cfg%add_key("ENFORCE_MEASURED_SNOW_HEIGHTS", "Snowpack", "false")
         call cfg%add_key("SW_MODE", "Snowpack", "INCOMING")
         call cfg%add_key("FORCING", "Snowpack", "ATMOS")
@@ -121,10 +133,15 @@ module module_sm_SNOWPACKdrv
         call cfg%add_key("METAMORPHISM_MODEL", "SnowpackAdvanced", "DEFAULT")
         call cfg%add_key("STRENGTH_MODEL", "SnowpackAdvanced", "DEFAULT")
         call cfg%add_key("VISCOSITY_MODEL", "SnowpackAdvanced", "DEFAULT")
-        call cfg%add_key("MINIMUM_L_ELEMENT", "SnowpackAdvanced", "0.001")
-        call cfg%add_key("HEIGHT_NEW_ELEM", "SnowpackAdvanced", "0.001")
+        ! Element-resolution config: match the native-Fortran port's canonical
+        ! defaults (snowpack_config.F90 snowpack_cfg_default) so both snow drivers
+        ! run at the same element resolution. These are the upstream SnowpackConfig.cc
+        ! values; HICAR previously overrode them to a fine 0.001 m here, which made
+        ! the C++ build subdivide into ~18 layers while the port stayed near 14.
+        call cfg%add_key("MINIMUM_L_ELEMENT", "SnowpackAdvanced", "0.0025")
+        call cfg%add_key("HEIGHT_NEW_ELEM", "SnowpackAdvanced", "0.02")
         call cfg%add_key("COMBINE_ELEMENTS", "SnowpackAdvanced", "true")
-        call cfg%add_key("COMB_THRESH_L", "SnowpackAdvanced", "0.01")
+        call cfg%add_key("COMB_THRESH_L", "SnowpackAdvanced", "0.015")
         call cfg%add_key("REDUCE_N_ELEMENTS", "SnowpackAdvanced", str(options%sm%snowpack_reduce_n_elements))
         call cfg%add_key("FIXED_POSITIONS", "SnowpackAdvanced", "0.25 0.5 1.0")
         call cfg%add_key("NUMBER_FIXED_RATES", "SnowpackAdvanced", "0")
@@ -255,6 +272,7 @@ module module_sm_SNOWPACKdrv
         call SurfaceFluxesOut(domain, sdata)
         call BoundaryConditionsOut(domain, bdata)
         call SnowStationsOut(domain, stations)
+        call MeteoOut(domain, meteo)
         t_copyout = omp_get_wtime()
 
         ! Clean up C++ objects before local arrays go out of scope
@@ -303,6 +321,7 @@ module module_sm_SNOWPACKdrv
                     ! shortwave_terrain => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d, &
                     longwave_in => domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d,   &
                     ground_temp => domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d,               &
+                    air_density => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d,                          &
                     skin_temperature => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d              &
                  )
 
@@ -340,6 +359,10 @@ module module_sm_SNOWPACKdrv
 
                 ! NOTE: because SOIL_FLUX is set to false above, ts0 has to be the ground surface temperature from NoahMP
                 call meteo(i,j)%set_ts0(real(ground_temp(i,1,j), kind=8))          ! Bottom temperature [K] - CRYOWRF Coupler: TSG
+                ! Supply the actual model air density for the sensible heat flux so
+                ! SNOWPACK uses it instead of the hardcoded Constants::density_air
+                ! (1.1). Matches the native-Fortran port (rho_air_loc=air_density).
+                call meteo(i,j)%set_rho_air(real(air_density(i,1,j), kind=8))
                 call meteo(i,j)%set_psum(total_precip(i,j))           ! Precipitation sum since previous SNOWPACK call [mm] - CRYOWRF Coupler: l_psum
                 call meteo(i,j)%set_psum_ph(precip_phase(i,j))        ! Precip phase (0=solid, 1=liquid)
 
@@ -383,7 +406,8 @@ module module_sm_SNOWPACKdrv
 
         associate(                                                                                           &
                     sublimation => domain%vars_2d(domain%var_indx(kVARS%dSWE_subl)%v)%data_2d,       &
-                    meltflux_out => domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d &
+                    meltflux_out => domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
+                    G_base => domain%vars_2d(domain%var_indx(kVARS%snow_basal_heat_flux)%v)%data_2d &
                  )
         ! Loop over horizontal grid points
         do j = jts, jte
@@ -396,6 +420,13 @@ module module_sm_SNOWPACKdrv
 
                 ! Snowmelt runoff (kg/m²), positive = water leaving snowpack base
                 meltflux_out(i,j) = snowpack_get_mass_runoff(sfluxes(i,j)%cxxmem%addr)
+
+                ! Snow-base conductive heat flux (W/m²), used as NoahMP's upper
+                ! Neumann BC in noahmp_soil_only. SNOWPACK's qg0 = -k*gradT with
+                ! gradT=(T_upper-T_ground)/L; the native-Fortran port's G_base is
+                ! +Keff*(T_upper-T_ground)/dz, so the two differ by a sign: negate
+                ! qg0 to match the port's convention.
+                G_base(i,j) = -real(snowpack_get_qg0(sfluxes(i,j)%cxxmem%addr))
 
             enddo
         enddo
@@ -430,9 +461,12 @@ module module_sm_SNOWPACKdrv
         type(domain_t), intent(inout) :: domain
         type(bound_cond), intent(inout) :: bconds(its:ite,jts:jte)
 
+        real(kind=8) :: ql_l
+
         associate(                                                                                           &
                     sensible_heat => domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d,               &
-                    latent_heat => domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d                 &
+                    latent_heat => domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d,               &
+                    QFX => domain%vars_2d(domain%var_indx(kVARS%QFX)%v)%data_2d                                 &
                  )
 
         ! Loop over horizontal grid points
@@ -441,8 +475,13 @@ module module_sm_SNOWPACKdrv
                 if (run_snowpack_flag(i,j)) then
                     ! Negate: SNOWPACK uses positive-downward (into snow),
                     ! HICAR uses positive-upward (into atmosphere)
+                    ql_l = bconds(i,j)%get_ql()
                     sensible_heat(i,j) = -bconds(i,j)%get_qs()
-                    latent_heat(i,j) = -bconds(i,j)%get_ql()
+                    latent_heat(i,j) = real(-ql_l)
+                    ! Moisture (mass) flux from the latent-heat flux, mirroring the
+                    ! native-Fortran driver (QFX = -ql / L_sublimation). Previously
+                    ! left unset on snow cells -> HICAR output stale moisture_flux.
+                    QFX(i,j) = real(-ql_l / XLS)
                 endif
             enddo
         enddo
@@ -450,6 +489,69 @@ module module_sm_SNOWPACKdrv
         end associate
 
     end subroutine BoundaryConditionsOut
+
+    !>------------------------------------------------------------
+    !! Store the surface sensible-heat exchange coefficient (kVARS%chs) from the
+    !! post-step meteo state. SNOWPACK's Fortran bindings do not expose chs
+    !! directly, and (unlike the native-Fortran snowpack_driver, which sets
+    !! chs_2d) this driver previously left chs unset -> HICAR read 0 on every
+    !! snow cell, producing a spurious C++-vs-Fortran "coeff_heat_exchange"
+    !! divergence. Reconstruct it with the same bulk formula SNOWPACK uses
+    !! internally (SnLaws::compSensibleHeatCoefficient):
+    !!     chs = karman * ustar / max(0.7, lrat - psi_s),  lrat = log(z / z0),
+    !!     z = max(0.5, height_of_meteo - cH).
+    !! ustar / z0 / psi_s come from the (post-MicroMet) meteo object.
+    !!------------------------------------------------------------
+    subroutine MeteoOut(domain, meteo)
+        type(domain_t), intent(inout) :: domain
+        type(current_meteo), intent(inout) :: meteo(its:ite,jts:jte)
+
+        real(kind=8), parameter :: KARMAN          = 0.4d0
+        real(kind=8), parameter :: HEIGHT_OF_METEO = 12.0d0   ! HEIGHT_OF_METEO_VALUES config key
+        real(kind=8), parameter :: BARE_SOIL_Z0    = 0.002d0  ! matches set_bare_soil_z0 above
+        real(kind=8), parameter :: EMISS_SNOW      = 0.98d0   ! SN_EMISSIVITY_SNOW
+        real(kind=8), parameter :: STEFAN          = 5.67051d-8  ! SN_STEFAN_BOLTZMANN
+        real(kind=8) :: ustar_l, z0_l, psi_s_l, cH_l, z_l, lrat_l, tss_l
+
+        associate( chs => domain%vars_2d(domain%var_indx(kVARS%chs)%v)%data_2d, &
+                   snow_height => domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d, &
+                   ground_heat_flux => domain%vars_2d(domain%var_indx(kVARS%ground_heat_flux)%v)%data_2d, &
+                   shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
+                   longwave => domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d, &
+                   albedo => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
+                   skin_temperature => domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d, &
+                   sensible_heat => domain%vars_2d(domain%var_indx(kVARS%sensible_heat)%v)%data_2d, &
+                   latent_heat => domain%vars_2d(domain%var_indx(kVARS%latent_heat)%v)%data_2d )
+        do j = jts, jte
+            do i = its, ite
+                if (.not.(run_snowpack_flag(i,j))) cycle
+                ustar_l = meteo(i,j)%get_ustar()
+                psi_s_l = meteo(i,j)%get_psi_s()
+                cH_l    = real(snow_height(i,j), kind=8)
+                z_l = max(0.5d0, height_of_meteo_m)
+                if (cH_l > 0.03d0) then
+                    z0_l = max(1.0d-6, meteo(i,j)%get_z0())
+                else
+                    z0_l = BARE_SOIL_Z0
+                endif
+                lrat_l = log(max(1.1d0, z_l / z0_l))
+                chs(i,j) = real(KARMAN * ustar_l / max(0.7d0, lrat_l - psi_s_l))
+
+                ! Surface energy-balance residual (= net flux into the snowpack),
+                ! mirroring the native-Fortran driver:
+                !   G = SW(1-alb) + LW - eps*sigma*Tss^4 - qs - ql, with the HICAR
+                !   sign convention sensible/latent = -qs/-ql, so -qs-ql = +sh+lh.
+                tss_l = real(skin_temperature(i,j), kind=8)
+                ground_heat_flux(i,j) = real( &
+                    real(shortwave(i,j), kind=8) * (1.0d0 - real(albedo(i,j), kind=8)) &
+                    + real(longwave(i,j), kind=8) &
+                    - EMISS_SNOW * STEFAN * tss_l**4 &
+                    + real(sensible_heat(i,j), kind=8) + real(latent_heat(i,j), kind=8))
+            enddo
+        enddo
+        end associate
+
+    end subroutine MeteoOut
 
 
     !>--------------------------------- SnowStationsIn --------------------------------
@@ -522,6 +624,7 @@ module module_sm_SNOWPACKdrv
                 call snowpack_set_all_element_sp(stations_in(i,j)%cxxmem%addr, real(Sp(i,n_elem:1:-1,j), kind=8), n_elem)
                 call snowpack_set_all_element_mk(stations_in(i,j)%cxxmem%addr, int(mk(i,n_elem:1:-1,j), kind=c_short), n_elem)
                 call snowpack_set_all_element_CDot(stations_in(i,j)%cxxmem%addr, real(CDot(i,n_elem:1:-1,j), kind=8), n_elem)
+                call snowpack_set_all_element_stress(stations_in(i,j)%cxxmem%addr, real(snow_stress(i,n_elem:1:-1,j), kind=8), n_elem)
                 ! call snowpack_set_all_element_metamo(stations_in(i,j)%cxxmem%addr, real(metamo(i,n_elem:1:-1,j), kind=8), n_elem)
                 ! call snowpack_set_all_element_N3(stations_in(i,j)%cxxmem%addr, real(N3(i,n_elem:1:-1,j), kind=8), n_elem)
 
@@ -672,8 +775,12 @@ module module_sm_SNOWPACKdrv
                     call snowpack_get_all_element_mk(stations_in(i,j)%cxxmem%addr, tmp_mk, n_elem)
                     if (n_save > 0) mk(i,1:n_save,j) = real(tmp_mk(n_elem:n_elem-n_save+1:-1))
 
-                    ! TODO: FIX FOR LATER ! call snowpack_get_all_element_mass_hoar(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
-                    ! TODO: FIX FOR LATER ! mass_hoar(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
+                    call snowpack_get_all_node_hoar(stations_in(i,j)%cxxmem%addr, tmp_node_arr, n_node)
+                    if (n_save > 0) mass_hoar(i,1:n_save,j) = real(tmp_node_arr(n_node:n_node-n_save+1:-1))
+
+                    ! Cauchy element stress (Pa)
+                    call snowpack_get_all_element_stress(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
+                    if (n_save > 0) snow_stress(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
 
                     call snowpack_get_all_element_CDot(stations_in(i,j)%cxxmem%addr, tmp_arr, n_elem)
                     if (n_save > 0) CDot(i,1:n_save,j) = real(tmp_arr(n_elem:n_elem-n_save+1:-1))
@@ -703,6 +810,7 @@ module module_sm_SNOWPACKdrv
                 mk(i,n_save+1:,j) = 0.0
                 CDot(i,n_save+1:,j) = 0.0
                 snow_stress(i,n_save+1:,j) = 0.0
+                mass_hoar(i,n_save+1:,j) = 0.0
                 N3(i,n_save+1:,j) = 0.0
             enddo
         enddo
@@ -822,21 +930,36 @@ module module_sm_SNOWPACKdrv
             do j = jms, jme
                 do i = ims, ime
                     nz = domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(i,j)
+                    ! Snow-free cells have nz = 0; the writes below index
+                    ! snow_temperature(i,nz,j) and (i,nz+1,j), which go out of bounds
+                    ! (index 0) for nz = 0. Only fill interfaces where a pack exists.
+                    if (nz < 1) cycle
                     domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(i,2:nz,j) = 0.5 * (domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(i,1:nz-1,j) + &
                                                                                                             domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(i,2:nz,j))
-                    domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(i,nz+1,j) = domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(i,nz,j) 
-                    domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(i,1,j) = domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(i,1,j) 
+                    domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(i,nz+1,j) = domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(i,nz,j)
+                    domain%vars_3d(domain%var_indx(kVARS%snow_temperature_i)%v)%data_3d(i,1,j) = domain%vars_3d(domain%var_indx(kVARS%snow_temperature)%v)%data_3d(i,1,j)
                 enddo
             enddo
         endif
 
+        ! Bulk diagnostics (snow_height, SWE) from the prescribed layers, so the
+        ! initial output frame reflects the seeded pack. SWE = sum of per-layer
+        ! mass, Ds * (theta_ice*rho_ice + theta_water*rho_water), with
+        ! rho_ice = 917, rho_water = 1000 (SNOWPACK Constants). Kept consistent
+        ! with the native-Fortran driver's read_snowpack_state.
         do j = jms, jme
             do i = ims, ime
-                if (domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(i,j) > 0) then
+                nz = domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(i,j)
+                if (nz > 0) then
                     domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(i,j) = &
-                        sum(domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d(i,1:domain%vars_2d(domain%var_indx(kVARS%snow_nlayers)%v)%data_2di(i,j),j))
+                        sum(domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d(i,1:nz,j))
+                    domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d(i,j) = &
+                        sum(domain%vars_3d(domain%var_indx(kVARS%Ds)%v)%data_3d(i,1:nz,j) * &
+                            (domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d(i,1:nz,j) * 917.0 + &
+                             domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d(i,1:nz,j) * 1000.0))
                 else
                     domain%vars_2d(domain%var_indx(kVARS%snow_height)%v)%data_2d(i,j) = 0.0
+                    domain%vars_2d(domain%var_indx(kVARS%snow_water_equivalent)%v)%data_2d(i,j) = 0.0
                 endif
             enddo
         enddo

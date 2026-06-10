@@ -831,12 +831,17 @@ contains
             error stop
         endif
 
-        ! get index of tmp_val in mapping
+        ! get index of tmp_val in mapping. Mapping entries are
+        ! (name, numeric value) pairs; ONLY the names (odd indices) are
+        ! accepted as user input — numeric aliases are deliberately
+        ! rejected and fall through to the "not a valid option" error
+        ! below. (Testing every index would also string-match the stored
+        ! numeric values and then misread the next pair's name as an
+        ! integer.)
         mapped_val = -1
-        do i = 1, size(mapping)
+        do i = 1, size(mapping), 2
             if (trim(tmp_val) == trim(to_lower(mapping(i)))) then
-                ! mapped values are stored at the index after the string values
-                ! cast to integer
+                ! the mapped numeric value follows its name
                 read(mapping(i+1), *) mapped_val
                 exit
             endif
