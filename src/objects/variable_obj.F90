@@ -10,18 +10,19 @@ contains
     !! Allocates 2d/3d data structure as appropriate
     !!
     !! -------------------------------
-    module subroutine init_grid(this, var_idx, grid, forcing_var)
+    module subroutine init_grid(this, var_idx, grid, forcing_var, opt)
         implicit none
         class(variable_t),  intent(inout) :: this
         integer,            intent(in)    :: var_idx
         type(grid_t),       intent(in)    :: grid
         logical,            intent(in), optional :: forcing_var
+        type(options_t),    intent(in), optional :: opt
 
         integer :: err
 
 
         this%id = var_idx
-        call this%set_from_metadata(var_idx)
+        call this%set_from_metadata(var_idx, opt=opt)
 
         this%one_d   = grid%is1d
         this%two_d   = grid%is2d
@@ -167,17 +168,18 @@ contains
     !! Allocates 2d/3d data structure as appropriate
     !!
     !! -------------------------------
-    module subroutine init_dims(this, var_idx, dims, forcing_var)
+    module subroutine init_dims(this, var_idx, dims, forcing_var, opt)
         implicit none
         class(variable_t),  intent(inout) :: this
         integer,            intent(in)    :: var_idx
         integer,            intent(in)    :: dims(:)
         logical,            intent(in), optional :: forcing_var
+        type(options_t),    intent(in), optional :: opt
 
         integer :: err
 
 
-        call this%set_from_metadata(var_idx)
+        call this%set_from_metadata(var_idx, opt=opt)
 
         this%dim_len    = dims
 
@@ -377,15 +379,20 @@ contains
         
     end subroutine assign_variable
 
-    module subroutine set_from_metadata(this,var_id)
+    module subroutine set_from_metadata(this,var_id, opt)
         implicit none
         class(variable_t), intent(inout) :: this
         integer, intent(in) :: var_id
+        type(options_t), intent(in), optional :: opt
         logical :: force_boundaries
 
         type(meta_data_t) :: var_meta
 
-        var_meta = get_varmeta(var_id,force_boundaries=force_boundaries)
+        if (present(opt)) then
+            var_meta = get_varmeta(var_id, opt=opt, force_boundaries=force_boundaries)
+        else
+            var_meta = get_varmeta(var_id, force_boundaries=force_boundaries)
+        endif
 
         this%id = var_meta%id
         this%xstag = var_meta%xstag

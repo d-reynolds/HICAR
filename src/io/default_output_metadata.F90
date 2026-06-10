@@ -205,7 +205,18 @@ contains
                                attribute_t("long_name",     "Grid relative eastward wind"),     &
                                attribute_t("units",         "m s-1"),                           &
                                attribute_t("coordinates",   "u_lat u_lon")]
-            if (present(force_boundaries)) force_boundaries = .False.
+            ! Diagnostic-mode default: u is forced throughout the domain
+            ! (apply_forcing nudges interior every physics step). Under the
+            ! prognostic RANS solver, the interior of u is evolved
+            ! prognostically; only the lateral boundaries should be nudged
+            ! toward the forcing, so flag it as a boundary-forced variable
+            ! when opt%physics%windtype is kRANS_WINDS.
+            if (present(force_boundaries)) then
+                force_boundaries = .False.
+                if (present(opt)) then
+                    if (opt%physics%windtype == kRANS_WINDS) force_boundaries = .True.
+                endif
+            endif
             if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%uvar /= "")
         !>------------------------------------------------------------
         !!  V  North South Winds
@@ -219,7 +230,13 @@ contains
                                attribute_t("long_name",     "Grid relative northward wind"),    &
                                attribute_t("units",         "m s-1"),                           &
                                attribute_t("coordinates",   "v_lat v_lon")]
-            if (present(force_boundaries)) force_boundaries = .False.
+            ! See u-block above: RANS makes v boundary-forced.
+            if (present(force_boundaries)) then
+                force_boundaries = .False.
+                if (present(opt)) then
+                    if (opt%physics%windtype == kRANS_WINDS) force_boundaries = .True.
+                endif
+            endif
             if (present(opt) .and. present(forcing_var)) forcing_var = (opt%forcing%vvar /= "")
 
         !>------------------------------------------------------------

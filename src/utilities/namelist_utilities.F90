@@ -2648,10 +2648,11 @@ contains
             case ("wind")
                 description = "Wind solver to use: "//achar(10)//BLNK_CHR_N// &
                                                    "'none'               = no wind solver,"//achar(10)//BLNK_CHR_N// &
-                                                   "'variational solver' = Mass-conserving wind solver based on variational calculus technique"
+                                                   "'variational solver' = Mass-conserving wind solver based on variational calculus technique,"//achar(10)//BLNK_CHR_N// &
+                                                   "'RANS'               = Prognostic anelastic RANS solver (RK3 momentum + projection pressure solve)"
                 default = "variational solver"
                 if (present(val_keys)) then
-                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "variational solver", trim(str(kITERATIVE_WINDS))]
+                    val_keys = [character(len=kMAX_NAME_LENGTH) :: "none", "0", "variational solver", trim(str(kITERATIVE_WINDS)), "RANS", trim(str(kRANS_WINDS))]
                 endif
                 group = "Physics"
             case ("adv")

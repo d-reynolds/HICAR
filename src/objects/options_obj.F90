@@ -2567,7 +2567,9 @@ contains
                 
                 !options%physics%boundarylayer = at some point, add a scale aware / LES turbulence scheme
                 
-                options%physics%windtype = 1
+                ! Default to the diagnostic variational solver, but respect an
+                ! explicit user selection of the prognostic RANS solver.
+                if (options%physics%windtype /= kRANS_WINDS) options%physics%windtype = kITERATIVE_WINDS
                 options%physics%convection = 0
                 options%wind%Sx = .True.
                 options%time%RK3 = .True.

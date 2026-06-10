@@ -2,6 +2,7 @@ module variable_interface
     use icar_constants,          only : kMAX_DIM_LENGTH, kMAX_STRING_LENGTH, kMAX_NAME_LENGTH, kINTEGER, kREAL, kDOUBLE, STD_OUT_PE, kVARS
     use grid_interface,          only : grid_t
     use meta_data_interface,     only : meta_data_t, root_var_t
+    use options_interface,       only : options_t
     implicit none
 
     ! defines a variable type that can store data and attributes
@@ -42,21 +43,23 @@ module variable_interface
 
     interface
 
-        module subroutine init_grid(this, var_idx, grid, forcing_var)
+        module subroutine init_grid(this, var_idx, grid, forcing_var, opt)
             implicit none
             class(variable_t),  intent(inout) :: this
             integer,            intent(in)    :: var_idx
             type(grid_t),       intent(in)    :: grid
             logical,            intent(in), optional :: forcing_var
+            type(options_t),    intent(in), optional :: opt
 
         end subroutine
 
-        module subroutine init_dims(this, var_idx, dims, forcing_var)
+        module subroutine init_dims(this, var_idx, dims, forcing_var, opt)
             implicit none
             class(variable_t),  intent(inout) :: this
             integer,            intent(in)    :: var_idx
             integer,            intent(in)    :: dims(:)
             logical,            intent(in), optional :: forcing_var
+            type(options_t),    intent(in), optional :: opt
         end subroutine
 
         module subroutine assign_variable(dest, src)
@@ -65,10 +68,11 @@ module variable_interface
             class(variable_t), intent(in)  :: src
         end subroutine
 
-        module subroutine set_from_metadata(this, var_id)
+        module subroutine set_from_metadata(this, var_id, opt)
             implicit none
             class(variable_t), intent(inout) :: this
             integer, intent(in) :: var_id
+            type(options_t), intent(in), optional :: opt
         end subroutine
 
         elemental module subroutine finalize_variable(this)

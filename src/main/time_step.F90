@@ -25,7 +25,7 @@ module time_step
     use debug_module,               only : domain_check
     use time_object,                only : Time_type
     use time_delta_object,          only : time_delta_t
-    use icar_constants,             only : STD_OUT_PE, kVARS
+    use icar_constants,             only : STD_OUT_PE, kVARS, kRANS_WINDS
     use snow_drift,                 only : snow_drift_step
 
     implicit none
@@ -194,16 +194,21 @@ contains
     !! @param end_time      the end of the current full time step (when step will return)
     !!
     !!------------------------------------------------------------
-    subroutine update_dt(dt, options, domain)
+    subroutine update_dt(dt, options, domain, quiet)
         implicit none
         type(time_delta_t), intent(inout) :: dt
         type(options_t),    intent(in)    :: options
         type(domain_t),     intent(in)    :: domain
+        logical, optional,  intent(in)    :: quiet
 
         real                  :: present_dt_seconds, seconds_out
         integer :: ierr
         integer :: max_i_pres, max_j_pres, max_k_pres
         real :: max_u_pres, max_v_pres, max_w_pres
+        logical :: verbose
+
+        verbose = .True.
+        if (present(quiet)) verbose = .not. quiet
         ! compute internal timestep dt to maintain stability
         ! courant condition for 3D advection. 
                 
@@ -223,17 +228,24 @@ contains
         max_j_pres = max_j
         max_k_pres = max_k
 
-        future_dt_seconds = compute_dt(domain%dx, domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+        if (options%physics%windtype == kRANS_WINDS) then
+            ! Under RANS the dqdt arrays are projection workspace, not the
+            ! winds at the next forcing time — only the present prognostic
+            ! field constrains dt (it is re-evaluated every step).
+            future_dt_seconds = present_dt_seconds
+        else
+            future_dt_seconds = compute_dt(domain%dx, domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, domain%its, domain%ite, domain%jts, domain%jte, &
                         options%time%cfl_reduction_factor, &
                         err_msg="error computing dt for winds at the future input timestep")
+        endif
 
         !Minimum dt is min(present_dt_seconds, future_dt_seconds). Then reduce this accross all compute processes
         call MPI_Allreduce(min(present_dt_seconds, future_dt_seconds), seconds_out, 1, MPI_REAL, MPI_MIN, domain%compute_comms)
         
-        if (min(present_dt_seconds, future_dt_seconds)==seconds_out) then
+        if (min(present_dt_seconds, future_dt_seconds)==seconds_out .and. verbose) then
 
             if (future_dt_seconds>present_dt_seconds) then
                 max_u = max_u_pres
@@ -259,8 +271,8 @@ contains
         endif
         ! Set dt to the outcome of reduce
         call dt%set(seconds=seconds_out)
-        if (STD_OUT_PE) write(*,*) 'time_step: ',trim(as_string(dt))
-        if (STD_OUT_PE) flush(output_unit)
+        if (STD_OUT_PE .and. verbose) write(*,*) 'time_step: ',trim(as_string(dt))
+        if (STD_OUT_PE .and. verbose) flush(output_unit)
 
     end subroutine update_dt
     
@@ -335,7 +347,12 @@ contains
                 endif
                 domain%dt = real(dt%seconds())
 
-                call update_wind_dqdt(domain, real(options%wind%update_dt%seconds()) - domain%forcing_elapsed)
+                ! Under RANS the dqdt arrays are projection workspace and the
+                ! boundary nudging reads the forcing-side arrays directly, so
+                ! no wind tendency conversion is needed (or meaningful).
+                if (options%physics%windtype /= kRANS_WINDS) then
+                    call update_wind_dqdt(domain, real(options%wind%update_dt%seconds()) - domain%forcing_elapsed)
+                endif
 
                 ! Reset forcing_elapsed after first wind update so subsequent wind updates
                 ! within the same step interval use the full wind_update_dt
@@ -347,6 +364,13 @@ contains
                     domain%sim_time = end_time
                     exit
                 endif
+            endif
+
+            ! Under RANS the winds evolve every physics step, so the CFL
+            ! limit must be re-evaluated each step, not only at wind updates.
+            if (options%physics%windtype == kRANS_WINDS) then
+                call update_dt(dt, options, domain, quiet=.True.)
+                domain%dt = real(dt%seconds())
             endif
 
             ! Make sure we don't over step the forcing or output period
@@ -406,7 +430,11 @@ contains
                 call domain%halo_2d_retrieve()
                 call domain%ret_timer%stop()
 
-                if (options%adv%advect_density) then
+                ! balance_uvw is the diagnostic mass-conservation enforcer; under
+                ! kRANS_WINDS the projection step inside advect() already enforces
+                ! ∇·(ρ₀ u) = 0, and calling balance_uvw on top would discard that work
+                ! by re-dividing w to compensate for an already-zero divergence.
+                if (options%adv%advect_density .and. options%physics%windtype /= kRANS_WINDS) then
                 ! if using advect_density winds need to be balanced at each update
                 call domain%wind_bal_timer%start()
                 call balance_uvw(domain,options%adv%advect_density)

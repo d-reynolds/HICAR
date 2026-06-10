@@ -18,6 +18,8 @@ module advection
     use variable_interface,       only : variable_t
     use timer_interface,          only : timer_t
     use data_structures,          only : index_type
+    use wind_rans,                only : rans_momentum_step
+    use wind,                     only : rans_project
 
     implicit none
     private
@@ -113,6 +115,21 @@ contains
         type(variable_t) :: var_to_advect
         integer :: n
 
+        ! RANS: project FIRST, then advect. The boundary-relaxation nudge
+        ! (apply_forcing) and the PBL momentum tendencies modified u/v
+        ! earlier in this physics step, so the velocity field carries
+        ! divergence (largest in the Davies ring over steep terrain). The
+        ! flux-form momentum advection telescopes to zero spurious source
+        ! ONLY if the transport satisfies the discrete continuity equation —
+        ! advecting with divergent transport self-amplifies momentum where
+        ! div != 0. This mirrors the diagnostic mode, which calls
+        ! balance_uvw before advect every step for exactly this reason.
+        if (options%physics%windtype == kRANS_WINDS) then
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v), corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v), corners=.True.)
+            call rans_project(domain, options, dt)
+        endif
+
         if (options%physics%advection==kADV_STD) then
 
             call adv_wind_time%start()
@@ -141,6 +158,21 @@ contains
                     U_m, V_m, W_m, denom, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d,flux_time, flux_corr_time, sum_time)
             endif
             enddo
+        endif
+
+        ! ------------------------------------------------------------
+        ! RANS dynamics core: momentum RK3 (advection + buoyancy +
+        ! horizontal diffusion + lid damping). The projection already ran
+        ! at the top of this routine, so the transport (U_m/V_m/W_m, and
+        ! the staggered-CV fluxes derived from the same fields) satisfies
+        ! discrete continuity — momentum and scalars advect with
+        ! consistent, divergence-free transport. The small divergence this
+        ! step introduces is projected out at the start of the next step.
+        ! See docs/rans_solver_math.md.
+        ! ------------------------------------------------------------
+        if (options%physics%windtype == kRANS_WINDS) then
+            call rans_momentum_step(domain, options, dt, U_m, V_m, W_m, denom, &
+                                    flux_time, flux_corr_time, sum_time)
         endif
 
     end subroutine advect

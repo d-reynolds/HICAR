@@ -26,7 +26,7 @@ module wind
 
     implicit none
     private
-    public:: balance_uvw, update_winds, init_winds, calc_w_real, wind_var_request, update_wind_dqdt, calc_divergence
+    public:: balance_uvw, update_winds, init_winds, calc_w_real, wind_var_request, update_wind_dqdt, calc_divergence, rans_project
 
     integer :: ids, ide, jds, jde, kds, kde,  &
                ims, ime, jms, jme, kms, kme,  &
@@ -35,6 +35,10 @@ module wind
 
     logical :: first_wind=.True.
     logical :: operator_calibrated(kMAX_NESTS) = .false.
+    ! Balanced grid-w relaxation target pair (option D): value at the
+    ! last balancing + tendency to the next, advanced per step in
+    ! rans_project. Single-nest for now.
+    real, allocatable :: w_forc_now(:,:,:), w_forc_tend(:,:,:)
     real, parameter::deg2rad=0.017453293 !2*pi/360
     real, parameter :: rad2deg=57.2957779371
     real, parameter :: DEFAULT_FR_L = 1000.0
@@ -72,7 +76,7 @@ contains
 
         call options%alloc_vars([kVARS%blk_ri, kVARS%froude])
 
-        if (options%physics%windtype == kITERATIVE_WINDS) then
+        if (options%physics%windtype == kITERATIVE_WINDS .or. options%physics%windtype == kRANS_WINDS) then
             call options%alloc_vars([kVARS%wind_alpha])
 
             if (options%wind%alpha_const<0) call options%alloc_vars([kVARS%froude_terrain])
@@ -695,6 +699,76 @@ contains
             return
         endif
 
+        ! ----------------------------------------------------------
+        ! kRANS_WINDS: prognostic dynamics core (option D boundaries).
+        !
+        ! The diagnostic cascade below (Sx -> thermal -> variational
+        ! solve -> balance_uvw) never runs. At every wind update the
+        ! lateral forcing targets are BALANCED: rans_balance_forcing
+        ! projects the interpolated forcing winds (both interval
+        ! endpoints) so the Davies relaxation in apply_forcing nudges
+        ! toward states that satisfy the model's discrete continuity
+        ! constraint — relaxation injects no divergence (EULAG-style
+        ! "ambient state" treatment). The interior is prognostic and
+        ! untouched here after initialization.
+        ! ----------------------------------------------------------
+        if (options%physics%windtype == kRANS_WINDS) then
+            call rans_balance_forcing(domain, options, wind_dt_seconds)
+
+            if (first_wind) then
+                ! Initialize the prognostic state from the balanced
+                ! current-forcing state, which rans_balance_forcing left
+                ! in the dqdt workspace.
+                associate(u_data => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+                          u_dqdt => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                          v_data => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+                          v_dqdt => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                          w_data => domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+                          w_dqdt => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+                !$acc parallel default(present)
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme
+                    do k = kms, kme
+                        do i = ims, ime+1
+                            u_data(i,k,j) = u_dqdt(i,k,j)
+                        enddo
+                    enddo
+                enddo
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme+1
+                    do k = kms, kme
+                        do i = ims, ime
+                            v_data(i,k,j) = v_dqdt(i,k,j)
+                        enddo
+                    enddo
+                enddo
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme
+                    do k = kms, kme
+                        do i = ims, ime
+                            w_data(i,k,j) = w_dqdt(i,k,j)
+                        enddo
+                    enddo
+                enddo
+                !$acc end parallel
+                end associate
+
+                call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,  &
+                        domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,      &
+                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d,      &
+                        domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
+                        domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, &
+                        domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, &
+                        domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,   &
+                        domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
+                        domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
+
+                if (options%general%debug) call domain_check_winds(domain, "Post update_winds::rans_init")
+            endif
+            first_wind = .False.
+            return
+        endif
+
         !do this now, so that we will have some values in data_3d when calling update_stability
         if (options%general%debug) call domain_check_winds(domain, "Pre update_winds::apply_base_from_forcing",dqdt=.True.)
         call apply_base_from_forcing(domain, w_var_given, wind_dt_seconds)
@@ -985,7 +1059,427 @@ contains
         end associate
 
     end subroutine calc_idealized_wgrid
-    
+
+    !>------------------------------------------------------------
+    !! RANS pressure projection: enforce the anelastic continuity
+    !! constraint on the prognostic predictor velocity at the start of
+    !! every model time step (called from advection_driver::advect
+    !! before transport is computed; docs/rans_solver_math.md 4.2).
+    !!
+    !! Boundary treatment (option D, EULAG-style): the lateral
+    !! relaxation targets are themselves balanced (rans_balance_forcing
+    !! projects the forcing winds at every wind update), so the ring
+    !! carries no structural divergence and needs no masking or
+    !! exclusion. Ring w relaxes toward the balanced target w.
+    !!
+    !! The Lagrange multiplier IS the perturbation pressure (up to
+    !! -2*dt scaling); it is not stored -- non-incremental projection.
+    !!------------------------------------------------------------
+    subroutine rans_project(domain, options, dt)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        type(options_t),intent(in)    :: options
+        real,           intent(in)    :: dt
+
+        real, allocatable :: div(:,:,:)
+        integer :: i, j, k
+
+        call set_module_indices(domain)
+
+        allocate(div(ims:ime,kms:kme,jms:jme))
+        !$acc data create(div)
+
+        ! Stage the predictor in the dqdt workspace over the full memory
+        ! range (halos are current -- the momentum step exchanged last).
+        ! Under RANS u/v dqdt are free workspace.
+        associate(u_data => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+                  u_dqdt => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                  v_data => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+                  v_dqdt => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                  w_data => domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+                  w_dqdt => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+        !$acc parallel default(present)
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime+1
+                    u_dqdt(i,k,j) = u_data(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme+1
+            do k = kms, kme
+                do i = ims, ime
+                    v_dqdt(i,k,j) = v_data(i,k,j)
+                enddo
+            enddo
+        enddo
+        ! Predictor grid-w: the prognostic grid-w itself (base from the
+        ! previous projection + this step's physical-w increment applied
+        ! in rans_momentum_step). NOT re-derived from w_real (the round
+        ! trip through calc_idealized_wgrid/calc_w_real is not an inverse
+        ! pair and re-injects divergence over steep terrain).
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    w_dqdt(i,k,j) = w_data(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc end parallel
+        end associate
+
+        ! Ring w: relax toward the balanced forcing target (advanced
+        ! linearly in time between balanced endpoints). Mirrors the u/v
+        ! Davies relaxation in apply_forcing; since the target satisfies
+        ! the discrete continuity constraint jointly with the u/v targets,
+        ! the ring stays divergence-consistent without masking, column
+        ! closure, or O'Brien adjustment.
+        if (allocated(w_forc_now)) then
+            associate(w_dqdt => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+                      rf     => domain%vars_3d(domain%var_indx(kVARS%relax_filter_3d)%v)%data_3d)
+            !$acc parallel loop gang vector collapse(3) default(present)
+            do j = jms, jme
+                do k = kms, kme
+                    do i = ims, ime
+                        w_forc_now(i,k,j) = w_forc_now(i,k,j) + w_forc_tend(i,k,j) * dt
+                        if (rf(i,k,j) >= 1.0) then
+                            w_dqdt(i,k,j) = w_forc_now(i,k,j)
+                        else
+                            w_dqdt(i,k,j) = w_dqdt(i,k,j) + &
+                                (rf(i,k,j) * dt/3600.0) * (w_forc_now(i,k,j) - w_dqdt(i,k,j))
+                        endif
+                    enddo
+                enddo
+            enddo
+            end associate
+        endif
+
+        call project_dqdt(domain, options, div)
+
+        call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,  &
+                domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,      &
+                domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d,      &
+                domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
+                domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, &
+                domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, &
+                domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,   &
+                domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
+                domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
+
+        ! Commit the corrected state.
+        associate(u_data => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+                  u_dqdt => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                  v_data => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+                  v_dqdt => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                  w_data => domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+                  w_dqdt => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+        !$acc parallel default(present)
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime+1
+                    u_data(i,k,j) = u_dqdt(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme+1
+            do k = kms, kme
+                do i = ims, ime
+                    v_data(i,k,j) = v_dqdt(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    w_data(i,k,j) = w_dqdt(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc end parallel
+        end associate
+
+        !$acc end data
+        deallocate(div)
+
+        if (options%general%debug) call domain_check_winds(domain, "Post rans_project")
+    end subroutine rans_project
+
+
+    !>------------------------------------------------------------
+    !! Core projection on the dqdt workspace: iterated divergence +
+    !! BiCGStab solve with corrections to (u, v, w_grid) dqdt. After
+    !! calibration the operator is exact and one solve suffices; the
+    !! first-ever projection (analytic operator) runs two passes and
+    !! then triggers the probing calibration (A = 2*D o G; 27 lattice
+    !! colorings -- see wind_iterative.F90), preserving the projected
+    !! dqdt across the probe scratch usage.
+    !!------------------------------------------------------------
+    subroutine project_dqdt(domain, options, div)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        type(options_t),intent(in)    :: options
+        real,           intent(inout) :: div(ims:ime,kms:kme,jms:jme)
+
+        integer :: it, n_solves, nest
+
+        nest = min(domain%nest_indx, size(operator_calibrated))
+
+        n_solves = 2
+        if (operator_calibrated(nest)) n_solves = 1
+        do it = 1, n_solves
+            call calc_divergence(div, domain, advect_density=options%adv%advect_density, &
+                                 horz_only=.False., use_dqdt=.True.)
+            call calc_iter_winds(domain, domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d, &
+                                 div, options%adv%advect_density)
+
+            ! The solve updates only tile-interior cells; refresh halos.
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%w)%v),do_dqdt=.True.,corners=.True.)
+        enddo
+
+        if (.not. operator_calibrated(nest)) then
+            call calibrate_projection_operator(domain, options, div)
+            operator_calibrated(nest) = .true.
+        endif
+    end subroutine project_dqdt
+
+
+    !>------------------------------------------------------------
+    !! Calibrate the elliptic operator to the exact discrete
+    !! composition A = 2*D o G by lattice probing (27 colorings; see
+    !! wind_iterative.F90). Used by BOTH wind solvers: the RANS path
+    !! probes once per nest (alpha == 1, constant); the diagnostic
+    !! path re-probes whenever its Froude-dependent alpha field is
+    !! refreshed (the operator depends on alpha through the w
+    !! correction). The u/v/w dqdt workspace is preserved across the
+    !! probe scratch usage.
+    !!------------------------------------------------------------
+    subroutine calibrate_projection_operator(domain, options, div)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        type(options_t),intent(in)    :: options
+        real,           intent(inout) :: div(ims:ime,kms:kme,jms:jme)
+
+        integer :: ca, cb, cc, i, j, k
+        real :: max_leak
+        real, allocatable :: us(:,:,:), vs(:,:,:), ws(:,:,:)
+
+        allocate(us(ims:ime+1,kms:kme,jms:jme))
+        allocate(vs(ims:ime,kms:kme,jms:jme+1))
+        allocate(ws(ims:ime,kms:kme,jms:jme))
+        associate(u_dqdt => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                  v_dqdt => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                  w_dqdt => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+        us = u_dqdt; vs = v_dqdt; ws = w_dqdt
+        !$acc enter data copyin(us, vs, ws)
+
+        max_leak = 0.0
+        do cc = 0, 2
+            do cb = 0, 2
+                do ca = 0, 2
+                    call probe_lambda_pattern(ca, cb, cc)
+                    call probe_zero_corrections(domain)
+                    call probe_apply_corrections(domain, options%adv%advect_density)
+                    call calc_divergence(div, domain, advect_density=options%adv%advect_density, &
+                                         horz_only=.False., use_dqdt=.True.)
+                    !$acc update host(div)
+                    call probe_record(domain, div, ca, cb, cc, max_leak)
+                enddo
+            enddo
+        enddo
+        call probe_finalize(max_leak)
+
+        !$acc parallel default(present)
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime+1
+                    u_dqdt(i,k,j) = us(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme+1
+            do k = kms, kme
+                do i = ims, ime
+                    v_dqdt(i,k,j) = vs(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    w_dqdt(i,k,j) = ws(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc end parallel
+        end associate
+        !$acc exit data delete(us, vs, ws)
+        deallocate(us, vs, ws)
+    end subroutine calibrate_projection_operator
+
+
+    !>------------------------------------------------------------
+    !! Balance the lateral forcing targets (option D, EULAG-style):
+    !! project the forcing wind field at both ends of the current
+    !! update interval so the Davies relaxation targets satisfy the
+    !! model's discrete continuity constraint. Relaxing toward
+    !! balanced targets injects no divergence -- the ring needs no
+    !! masking, exclusion, or diagnostic w. Linear interpolation
+    !! between balanced states stays balanced (the divergence operator
+    !! is linear in velocity at fixed rho, J).
+    !!
+    !! On exit: forcing_hi u/v data hold the balanced (grid-relative)
+    !! current state, their dqdt the balanced tendency, w_forc_now /
+    !! w_forc_tend the matching grid-w target pair, and the domain
+    !! u/v/w dqdt workspace holds the balanced current state.
+    !!------------------------------------------------------------
+    subroutine rans_balance_forcing(domain, options, dt_to_next)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        type(options_t),intent(in)    :: options
+        real,           intent(in)    :: dt_to_next
+
+        real, allocatable :: div(:,:,:), u_next(:,:,:), v_next(:,:,:), w_next(:,:,:)
+        integer :: i, j, k, pass
+        real :: dt_stage, inv_dt
+
+        call set_module_indices(domain)
+
+        if (.not. allocated(w_forc_now)) then
+            allocate(w_forc_now (ims:ime,kms:kme,jms:jme), source=0.0)
+            allocate(w_forc_tend(ims:ime,kms:kme,jms:jme), source=0.0)
+            !$acc enter data copyin(w_forc_now, w_forc_tend)
+        endif
+
+        allocate(div(ims:ime,kms:kme,jms:jme))
+        allocate(u_next(ims:ime+1,kms:kme,jms:jme))
+        allocate(v_next(ims:ime,kms:kme,jms:jme+1))
+        allocate(w_next(ims:ime,kms:kme,jms:jme))
+        !$acc data create(div, u_next, v_next, w_next)
+
+        ! Pass 1 projects the interval-END forcing state (from the
+        ! unmodified forcing arrays), pass 2 the CURRENT state; pass 2
+        ! intentionally last so the balanced current state remains in the
+        ! dqdt workspace for the caller.
+        do pass = 1, 2
+            dt_stage = merge(dt_to_next, 0.0, pass == 1)
+
+            associate(u_dqdt => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                      v_dqdt => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                      w_dqdt => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+                      fu      => domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d, &
+                      fu_dqdt => domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%dqdt_3d, &
+                      fv      => domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d, &
+                      fv_dqdt => domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%dqdt_3d)
+            !$acc parallel default(present)
+            !$acc loop gang vector collapse(3)
+            do j = jms, jme
+                do k = kms, kme
+                    do i = ims, ime+1
+                        u_dqdt(i,k,j) = fu(i,k,j) + fu_dqdt(i,k,j) * dt_stage
+                    enddo
+                enddo
+            enddo
+            !$acc loop gang vector collapse(3)
+            do j = jms, jme+1
+                do k = kms, kme
+                    do i = ims, ime
+                        v_dqdt(i,k,j) = fv(i,k,j) + fv_dqdt(i,k,j) * dt_stage
+                    enddo
+                enddo
+            enddo
+            !$acc loop gang vector collapse(3)
+            do j = jms, jme
+                do k = kms, kme
+                    do i = ims, ime
+                        w_dqdt(i,k,j) = 0.0
+                    enddo
+                enddo
+            enddo
+            !$acc end parallel
+            end associate
+
+            ! Rotate the forcing winds to grid-relative BEFORE balancing --
+            ! the relaxation targets become grid-relative balanced states.
+            call make_winds_grid_relative(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                                          domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                                          domain%vars_2d(domain%var_indx(kVARS%sintheta)%v)%data_2d, &
+                                          domain%vars_2d(domain%var_indx(kVARS%costheta)%v)%data_2d)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+
+            call project_dqdt(domain, options, div)
+
+            if (pass == 1) then
+                associate(u_dqdt => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                          v_dqdt => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                          w_dqdt => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+                !$acc kernels default(present)
+                u_next = u_dqdt
+                v_next = v_dqdt
+                w_next = w_dqdt
+                !$acc end kernels
+                end associate
+            endif
+        enddo
+
+        ! Write the balanced pair back: data = balanced now, dqdt =
+        ! balanced tendency over the interval.
+        inv_dt = 1.0 / max(dt_to_next, 1.0)
+        associate(u_dqdt => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                  v_dqdt => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                  w_dqdt => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+                  fu      => domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d, &
+                  fu_dqdt => domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%dqdt_3d, &
+                  fv      => domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d, &
+                  fv_dqdt => domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%dqdt_3d)
+        !$acc parallel default(present)
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime+1
+                    fu(i,k,j)      = u_dqdt(i,k,j)
+                    fu_dqdt(i,k,j) = (u_next(i,k,j) - u_dqdt(i,k,j)) * inv_dt
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme+1
+            do k = kms, kme
+                do i = ims, ime
+                    fv(i,k,j)      = v_dqdt(i,k,j)
+                    fv_dqdt(i,k,j) = (v_next(i,k,j) - v_dqdt(i,k,j)) * inv_dt
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    w_forc_now(i,k,j)  = w_dqdt(i,k,j)
+                    w_forc_tend(i,k,j) = (w_next(i,k,j) - w_dqdt(i,k,j)) * inv_dt
+                enddo
+            enddo
+        enddo
+        !$acc end parallel
+        end associate
+
+        !$acc end data
+        deallocate(div, u_next, v_next, w_next)
+
+        if (STD_OUT_PE) write(*,*) "RANS: forcing targets balanced (projected) for this update interval"
+    end subroutine rans_balance_forcing
+
     subroutine calc_alpha(alpha, froude)
         implicit none
         real,    intent(in)    :: froude(ims:ime,kms:kme,jms:jme)
@@ -1261,6 +1755,33 @@ contains
         endif
         if (options%physics%windtype==kITERATIVE_WINDS) then
             call init_iter_winds(domain,options)
+        endif
+
+        if (options%physics%windtype==kRANS_WINDS) then
+            ! The RANS momentum kernels assume halo width >= 2 (guaranteed by
+            ! h_order >= 3) and reuse the standard advection's transport
+            ! machinery.
+            if (options%physics%advection /= kADV_STD .or. options%adv%h_order < 3) then
+                if (STD_OUT_PE) write(*,*) "ERROR: wind = 'RANS' requires advection = 'std' with h_order >= 3"
+                error stop
+            endif
+            if (.not. options%forcing%relax_filters .and. STD_OUT_PE) then
+                write(*,*) "WARNING: wind = 'RANS' with relax_filters = .False. — the lateral"
+                write(*,*) "         boundary nudge becomes a hard step with no blending zone,"
+                write(*,*) "         which destabilizes the prognostic dynamics at the boundary."
+                write(*,*) "         Strongly recommend relax_filters = .True."
+            endif
+
+            ! alpha == 1 collapses the variational operator to the pressure
+            ! Poisson problem; it is never modified in RANS mode.
+            associate(wind_alpha => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d)
+            !$acc kernels present(wind_alpha)
+            wind_alpha = 1.0
+            !$acc end kernels
+            end associate
+
+            call init_iter_winds(domain, options)
+            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Prognostic RANS solver (RK3 momentum + projection)"
         endif
 
         if (options%wind%thermal) call init_thermal_winds(domain, options)

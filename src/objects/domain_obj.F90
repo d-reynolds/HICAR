@@ -937,26 +937,26 @@ contains
                     this%forcing_var_indx(i)%id = i
                     this%forcing_var_indx(i)%v = n_forcing_var
 
-                    call this%forcing_hi(this%forcing_var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                    call this%forcing_hi(this%forcing_var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var, opt=opt)
                 endif
 
                 this%var_indx(i)%id = i
                 if (var_meta%one_d) then
                     n_one_d = n_one_d + 1
                     this%var_indx(i)%v = n_one_d
-                    call this%vars_1d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                    call this%vars_1d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var, opt=opt)
                 else if (var_meta%two_d) then
                     n_two_d = n_two_d + 1
                     this%var_indx(i)%v = n_two_d
-                    call this%vars_2d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                    call this%vars_2d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var, opt=opt)
                 else if (var_meta%three_d) then
                     n_three_d = n_three_d + 1
                     this%var_indx(i)%v = n_three_d
-                    call this%vars_3d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                    call this%vars_3d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var, opt=opt)
                 else if (var_meta%four_d) then
                     n_four_d = n_four_d + 1
                     this%var_indx(i)%v = n_four_d
-                    call this%vars_4d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var)
+                    call this%vars_4d(this%var_indx(i)%v)%initialize(i, grid, forcing_var=is_forcing_var, opt=opt)
                 endif
             endif
         enddo
@@ -2677,8 +2677,9 @@ contains
         !Calculate neighborhood indexes. These are used to store terrain in the local neighborhood for non-local wind calculations
         this%neighborhood_max = max(nsmooth,8)
         
-        !Considering blocking terrain...
-        if (options%physics%windtype == kITERATIVE_WINDS) then
+        !Considering blocking terrain... (same Poisson stencil reach for the
+        !RANS solver, which inherits the iterative solver's coefficient assembly)
+        if (options%physics%windtype == kITERATIVE_WINDS .or. options%physics%windtype == kRANS_WINDS) then
             this%neighborhood_max = int(max(4000.0/this%dx,1.0))
         endif
         
@@ -3286,8 +3287,25 @@ contains
         type(meta_data_t) :: var_to_update
         integer :: i, k, j, p, var_indx, n
         integer, dimension(4) :: ims_b, ime_b, jms_b, jme_b
-        real    :: dt_h
+        real    :: dt_h, rf_loc
         logical :: do_boundary, do_west, do_east, do_north, do_south, is_wind, is_w_real
+
+        ! Interior nudging of the prognostic RANS winds toward the
+        ! (balanced) forcing is OFF by default — the interior should be
+        ! free dynamics. HICAR_RANS_NUDGE=1 enables a weak interior nudge
+        ! (tau below) as an experiment/mitigation switch only.
+        real, parameter :: RANS_NUDGE_TAU = 1800.0
+        logical, save :: nudge_checked = .false.
+        logical, save :: interior_nudge = .false.
+        character(len=8) :: env_val
+        integer :: env_stat
+
+        if (.not. nudge_checked) then
+            call get_environment_variable("HICAR_RANS_NUDGE", env_val, status=env_stat)
+            interior_nudge = (env_stat == 0 .and. env_val(1:1) == '1')
+            if (interior_nudge .and. STD_OUT_PE) write(*,*) "RANS: interior wind nudging ENABLED (tau=1800s)"
+            nudge_checked = .true.
+        endif
 
         !calculate dt in units of hours
         dt_h = dt/3600.0
@@ -3324,6 +3342,14 @@ contains
             var_indx = this%forcing_hi(n)%id
             is_w_real = (this%var_indx(var_indx)%v == this%var_indx(kVARS%w_real)%v)
             is_wind = (this%var_indx(var_indx)%v == this%var_indx(kVARS%u)%v) .or. (this%var_indx(var_indx)%v == this%var_indx(kVARS%v)%v) .or. is_w_real
+
+            ! Under kRANS_WINDS, w_real is prognostic: never push forcing data
+            ! into it after initialization (u/v take the boundary-relaxation
+            ! branch below via force_boundaries; w_real has no such branch and
+            ! would be clobbered domain-wide by the full-range update of
+            ! f_data-driven fields).
+            if (options%physics%windtype == kRANS_WINDS .and. is_w_real) cycle
+
             if (this%forcing_hi(n)%two_d) then
                 ims = this%vars_2d(this%var_indx(var_indx)%v)%grid%ims
                 ime = this%vars_2d(this%var_indx(var_indx)%v)%grid%ime
@@ -3387,9 +3413,46 @@ contains
                            f_dqdt => this%forcing_hi(n)%dqdt_3d, &
                            relax_filter => this%vars_3d(this%var_indx(kVARS%relax_filter_3d)%v)%data_3d)
 
+                ! Prognostic winds under kRANS_WINDS (u/v; w_real never reaches
+                ! here) get a dedicated treatment:
+                !  (1) advance the forcing target over the FULL domain so the
+                !      interior nudge tracks the time-interpolated forcing
+                !  (2) Davies relaxation in the boundary ring
+                !  (3) weak interior nudging (tau = RANS_NUDGE_TAU): the
+                !      prognostic interior carries no synoptic pressure
+                !      gradient force, so without it the solution drifts from
+                !      the boundary inflow on the advective timescale and the
+                !      contrast sharpens at the relaxation-zone edge
+                !      (docs/rans_solver_math.md section 9).
+                ! Unlike the generic boundary branch below: NO positive-
+                ! definite clamps (winds change sign — the generic branch
+                ! would zero all westward/southward flow in the ring), and
+                ! relax_filter (mass grid) indices are clamped for the
+                ! staggered u/v grids.
+                if (options%physics%windtype == kRANS_WINDS .and. is_wind) then
+                    !$acc parallel loop gang vector collapse(3) present(var_data, f_data, f_dqdt, relax_filter) private(rf_loc)
+                    do j = jms,jme
+                        do k = kms, kme
+                            do i = ims,ime
+                                f_data(i,k,j) = f_data(i,k,j) + (f_dqdt(i,k,j) * dt)
+                                rf_loc = relax_filter(min(i,this%ime),k,min(j,this%jme))
+                                if (rf_loc >= 1.0) then
+                                    var_data(i,k,j) = f_data(i,k,j)
+                                else if (interior_nudge) then
+                                    var_data(i,k,j) = var_data(i,k,j) + &
+                                        max(rf_loc * dt_h, dt/RANS_NUDGE_TAU) * &
+                                        (f_data(i,k,j) - var_data(i,k,j))
+                                else
+                                    var_data(i,k,j) = var_data(i,k,j) + &
+                                        (rf_loc * dt_h) * (f_data(i,k,j) - var_data(i,k,j))
+                                endif
+                            enddo
+                        enddo
+                    enddo
+
                 ! only apply forcing data on the boundaries for advected scalars (e.g. temperature, humidity)
                 ! applying forcing to the edges has already been handeled when updating dqdt using the relaxation filter
-                if (.not.(this%forcing_hi(n)%force_boundaries)) then
+                else if (.not.(this%forcing_hi(n)%force_boundaries)) then
                     !$acc parallel loop gang vector collapse(3) present(var_data, var_dqdt, f_data, f_dqdt)
                     do j = jms,jme
                         do k = kms, kme
