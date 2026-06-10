@@ -831,7 +831,8 @@ contains
         ! BC rows); the ghost planes k=0 and k=mz-1 are identity rows
         ! (the w_to_grid correction operator never reads ghost lambda).
         if (operator_probed) then
-            ! Lateral identity rows (same as the analytic operator)
+            ! Lateral identity rows. NOTE: duplicated in the analytic
+            ! branch below — keep the two copies in sync if editing.
             if (xs == 0) then
                 !$acc parallel loop gang vector collapse(2) present(x, y)
                 do j = ys, ys + ym - 1
