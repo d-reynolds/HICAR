@@ -513,12 +513,6 @@ contains
                 call snowpack_step(domain,options,lsm_dt,current_rain,current_snow,windspd)
                 !$acc exit data delete(current_rain, current_snow, windspd)
 
-                ! Hand soil-T evolution on snow cells over to NoahMP, using the
-                ! conductive heat flux at the snowpack base (G_base, computed by
-                ! snowpack_step) as the upper Neumann BC.
-                if (options%physics%landsurface == kLSM_NOAHMP .and. present(NoahmpIO_arg)) then
-                    call noahmp_soil_only(domain, options, lsm_dt, NoahmpIO_arg)
-                end if
 #else
 
                 ! --- Update host: SNOWPACK-specific inputs ---
@@ -593,6 +587,14 @@ contains
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_tstep)%v)%data_2d, &
                 !$acc   domain%vars_2d(domain%var_indx(kVARS%meltflux_out_cumul)%v)%data_2d)
 #endif
+
+                ! Hand soil-T evolution on snow cells over to NoahMP, using the
+                ! conductive heat flux at the snowpack base (G_base, computed by
+                ! snowpack_step) as the upper Neumann BC.
+                if (options%physics%landsurface == kLSM_NOAHMP .and. present(NoahmpIO_arg)) then
+                    call noahmp_soil_only(domain, options, lsm_dt, NoahmpIO_arg)
+                end if
+
 #endif
             endif
             end associate
