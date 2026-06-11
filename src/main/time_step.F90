@@ -459,6 +459,15 @@ contains
 
                 call integrate_physics_tendencies(domain, options, real(dt%seconds()))
 
+                ! Refresh p/exner/temperature/density from the post-advection,
+                ! post-tendency state so microphysics sees thermodynamics
+                ! consistent with the theta/qv it is given (the step-start
+                ! diagnostic_update predates advection and the rad/lsm/pbl
+                ! tendency integration -> O(dt) stale). thermo_only skips the
+                ! wind/interface/integral diagnostics; under RANS it also
+                ! re-diagnoses pressure hydrostatically from the updated
+                ! theta_v.
+                call domain%diagnostic_update(thermo_only=.True.)
                                 
                 call domain%mp_timer%start()
                 call mp(domain, options, real(dt%seconds()))

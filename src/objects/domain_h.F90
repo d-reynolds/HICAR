@@ -172,10 +172,11 @@ module domain_interface
         type(options_t),  intent(in)    :: options
     end subroutine
 
-    module subroutine diagnostic_update(this, forcing_update)
+    module subroutine diagnostic_update(this, forcing_update, thermo_only)
       implicit none
       class(domain_t),  intent(inout)   :: this
       logical, intent(in), optional    :: forcing_update
+      logical, intent(in), optional    :: thermo_only
     end subroutine
 
     module subroutine interpolate_forcing(this, forcing, update)

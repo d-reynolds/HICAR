@@ -480,17 +480,25 @@ contains
     !! @param options   Model options (not used at present)
     !!
     !!------------------------------------------------------------
-    module subroutine diagnostic_update(this, forcing_update)
+    module subroutine diagnostic_update(this, forcing_update, thermo_only)
         implicit none
         class(domain_t),  intent(inout)   :: this
         logical, intent(in), optional    :: forcing_update
+        logical, intent(in), optional    :: thermo_only
         integer :: i, j, k
-        logical :: forcing_update_only
+        logical :: forcing_update_only, thermo_refresh_only
         real, dimension(this%ims:this%ime, this%kms:this%kme, this%jms:this%jme) :: mod_temp_3d
         real, dimension(this%ims:this%ime, this%jms:this%jme) :: surf_temp_1, surf_temp_2, surf_temp_3
 
         forcing_update_only = .False.
         if (present(forcing_update)) forcing_update_only = forcing_update
+        ! thermo_only: cheap refresh of p/exner/temperature/density alone
+        ! (plus the boundary-frame fixups). Called mid-physics-loop after
+        ! advection + tendency integration so microphysics sees
+        ! thermodynamics consistent with the just-updated theta/qv; skips
+        ! the wind/interface/integral diagnostics.
+        thermo_refresh_only = .False.
+        if (present(thermo_only)) thermo_refresh_only = thermo_only
 
         ! Under the prognostic RANS solver the thermodynamic pressure is
         ! re-diagnosed hydrostatically from the model's own theta_v before
@@ -551,7 +559,7 @@ contains
             enddo
             enddo
 
-            if (this%var_indx(kVARS%u_mass)%v > 0) then
+            if (this%var_indx(kVARS%u_mass)%v > 0 .and. .not. thermo_refresh_only) then
                 !$acc parallel loop gang vector collapse(3) async(2)
                 do j = jms,jme
                     do k = kms,kme
@@ -564,7 +572,7 @@ contains
             endif
 
             ! temporary constant
-            if (this%var_indx(kVARS%roughness_z0)%v > 0) then
+            if (this%var_indx(kVARS%roughness_z0)%v > 0 .and. .not. thermo_refresh_only) then
                 associate(z            => this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d, &
                           roughness_z0 => this%vars_2d(this%var_indx(kVARS%roughness_z0)%v)%data_2d, &
                           terrain      => this%vars_2d(this%var_indx(kVARS%terrain)%v)%data_2d)
@@ -582,7 +590,7 @@ contains
                 end associate
             endif
 
-            if (this%var_indx(kVARS%u_10m)%v > 0) then
+            if (this%var_indx(kVARS%u_10m)%v > 0 .and. .not. thermo_refresh_only) then
                 associate(v_10m => this%vars_2d(this%var_indx(kVARS%v_10m)%v)%data_2d, &
                           u_10m => this%vars_2d(this%var_indx(kVARS%u_10m)%v)%data_2d)
 
@@ -730,7 +738,7 @@ contains
             enddo
         endif
 
-        if (.not.(forcing_update_only)) then
+        if (.not.(forcing_update_only) .and. .not.(thermo_refresh_only)) then
             !$acc parallel loop gang vector collapse(2) wait(6) async(7)
             do j = jms,jme
                 do i = ims,ime
@@ -787,6 +795,13 @@ contains
                 if (this%var_indx(kVARS%graupel_mass)%v > 0) mod_temp_3d = mod_temp_3d + this%vars_3d(this%var_indx(kVARS%graupel_mass)%v)%data_3d(i,k,j)
                 call compute_iq(this%vars_2d(this%var_indx(kVARS%iwi)%v)%data_2d, mod_temp_3d, pressure_i(:,kms:kme,:))
             endif
+        endif
+
+        ! In thermo_only mode the wait above is skipped: synchronize the
+        ! async exner/T/density and frame kernels before the caller
+        ! (microphysics) launches kernels that read them.
+        if (thermo_refresh_only) then
+            !$acc wait
         endif
 
         !$acc end data
