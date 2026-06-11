@@ -42,6 +42,7 @@ contains
         call this%init_flow_obj(options, nest_indx)
 
         this%dx = options%domain%dx
+        this%rans_winds = (options%physics%windtype == kRANS_WINDS)
 
         call read_domain_shape(this, options)
         
@@ -490,6 +491,15 @@ contains
 
         forcing_update_only = .False.
         if (present(forcing_update)) forcing_update_only = forcing_update
+
+        ! Under the prognostic RANS solver the thermodynamic pressure is
+        ! re-diagnosed hydrostatically from the model's own theta_v before
+        ! exner/temperature/density are derived from it (see
+        ! rans_diagnose_pressure). Skipped in forcing_update mode, which
+        ! derives FUTURE diagnostics from the dqdt fields and must not
+        ! touch the current state. Synchronous kernel: completes before
+        ! the async kernels below read pressure.
+        if (this%rans_winds .and. .not. forcing_update_only) call rans_diagnose_pressure(this)
 
         associate(ims => this%ims, ime => this%ime,                             &
                   jms => this%jms, jme => this%jme,                             &
@@ -3290,23 +3300,6 @@ contains
         real    :: dt_h, rf_loc
         logical :: do_boundary, do_west, do_east, do_north, do_south, is_wind, is_w_real
 
-        ! Interior nudging of the prognostic RANS winds toward the
-        ! (balanced) forcing is OFF by default — the interior should be
-        ! free dynamics. HICAR_RANS_NUDGE=1 enables a weak interior nudge
-        ! (tau below) as an experiment/mitigation switch only.
-        real, parameter :: RANS_NUDGE_TAU = 1800.0
-        logical, save :: nudge_checked = .false.
-        logical, save :: interior_nudge = .false.
-        character(len=8) :: env_val
-        integer :: env_stat
-
-        if (.not. nudge_checked) then
-            call get_environment_variable("HICAR_RANS_NUDGE", env_val, status=env_stat)
-            interior_nudge = (env_stat == 0 .and. env_val(1:1) == '1')
-            if (interior_nudge .and. STD_OUT_PE) write(*,*) "RANS: interior wind nudging ENABLED (tau=1800s)"
-            nudge_checked = .true.
-        endif
-
         !calculate dt in units of hours
         dt_h = dt/3600.0
 
@@ -3418,12 +3411,6 @@ contains
                 !  (1) advance the forcing target over the FULL domain so the
                 !      interior nudge tracks the time-interpolated forcing
                 !  (2) Davies relaxation in the boundary ring
-                !  (3) weak interior nudging (tau = RANS_NUDGE_TAU): the
-                !      prognostic interior carries no synoptic pressure
-                !      gradient force, so without it the solution drifts from
-                !      the boundary inflow on the advective timescale and the
-                !      contrast sharpens at the relaxation-zone edge
-                !      (docs/rans_solver_math.md section 9).
                 ! Unlike the generic boundary branch below: NO positive-
                 ! definite clamps (winds change sign — the generic branch
                 ! would zero all westward/southward flow in the ring), and
@@ -3438,10 +3425,6 @@ contains
                                 rf_loc = relax_filter(min(i,this%ime),k,min(j,this%jme))
                                 if (rf_loc >= 1.0) then
                                     var_data(i,k,j) = f_data(i,k,j)
-                                else if (interior_nudge) then
-                                    var_data(i,k,j) = var_data(i,k,j) + &
-                                        max(rf_loc * dt_h, dt/RANS_NUDGE_TAU) * &
-                                        (f_data(i,k,j) - var_data(i,k,j))
                                 else
                                     var_data(i,k,j) = var_data(i,k,j) + &
                                         (rf_loc * dt_h) * (f_data(i,k,j) - var_data(i,k,j))
@@ -3509,8 +3492,66 @@ contains
         !     enddo
         ! endif
 
+        ! NOTE (RANS): the hydrostatic pressure re-diagnosis that replaces
+        ! the forcing-pinned interior runs inside diagnostic_update (called
+        ! right after this routine in the step loop, and again before
+        ! microphysics), so it always sees the freshly advanced model-top
+        ! anchor from the pressure update above.
 
     end subroutine
+
+
+    !>------------------------------------------------------------
+    !! Hydrostatic re-diagnosis of the thermodynamic pressure from the
+    !! model state (kRANS_WINDS only).
+    !!
+    !! The anelastic dynamics never use this pressure (the dynamic
+    !! perturbation pressure is the projection multiplier); it feeds the
+    !! physics: exner/temperature conversion, density, and microphysics
+    !! saturation. Column-wise Exner integration,
+    !!
+    !!     d(pi)/dz = -g / (cp * theta_v),  theta_v = theta*(1 + 0.61 qv)
+    !!
+    !! integrated downward from the model top, whose pressure stays
+    !! pinned to the (time-advanced) forcing — the synoptic signal
+    !! enters through the top anchor and the model's thermal structure.
+    !! The integration is well-conditioned in single precision: pi is
+    !! O(1) and the per-layer increment O(1e-3), and the result is only
+    !! ever consumed pointwise (never differenced horizontally).
+    !!------------------------------------------------------------
+    subroutine rans_diagnose_pressure(this)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        integer :: i, j, k
+        real    :: pii, th_v_if
+        real, parameter :: p0_ref = 100000.0
+        real :: rd_cp, cp_rd
+
+        rd_cp = R_d / cp
+        cp_rd = cp / R_d
+
+        associate(p     => this%vars_3d(this%var_indx(kVARS%pressure)%v)%data_3d, &
+                  theta => this%vars_3d(this%var_indx(kVARS%potential_temperature)%v)%data_3d, &
+                  qv    => this%vars_3d(this%var_indx(kVARS%water_vapor)%v)%data_3d, &
+                  z     => this%vars_3d(this%var_indx(kVARS%z)%v)%data_3d, &
+                  ims   => this%ims, ime => this%ime, &
+                  jms   => this%jms, jme => this%jme, &
+                  kms   => this%kms, kme => this%kme)
+        !$acc parallel loop gang vector collapse(2) default(present) private(pii, th_v_if)
+        do j = jms, jme
+            do i = ims, ime
+                pii = (p(i,kme,j) / p0_ref) ** rd_cp
+                !$acc loop seq
+                do k = kme-1, kms, -1
+                    th_v_if = 0.5 * ( theta(i,k,  j) * (1.0 + 0.61*qv(i,k,  j)) &
+                                    + theta(i,k+1,j) * (1.0 + 0.61*qv(i,k+1,j)) )
+                    pii = pii + gravity * (z(i,k+1,j) - z(i,k,j)) / (cp * th_v_if)
+                    p(i,k,j) = p0_ref * pii ** cp_rd
+                enddo
+            enddo
+        enddo
+        end associate
+    end subroutine rans_diagnose_pressure
 
 
     !> -------------------------------

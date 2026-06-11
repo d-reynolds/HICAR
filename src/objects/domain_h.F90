@@ -81,6 +81,11 @@ module domain_interface
     logical :: west_boundary = .True.
     integer :: FILTER_WIDTH = 7
 
+    ! Set at init from options%physics%windtype == kRANS_WINDS; lets
+    ! diagnostic_update (which does not receive options) run the RANS
+    ! hydrostatic pressure re-diagnosis.
+    logical :: rans_winds = .False.
+
     ! store the start (s) and end (e) for the i,j,k dimensions
     integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)
                 ims,ime, jms,jme, kms,kme, & ! for the memory in these arrays (m)

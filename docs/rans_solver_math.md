@@ -44,9 +44,9 @@ Design principles, learned partly from the failure of the first attempt:
 Anelastic momentum equations in advective form (equivalently flux form, since
 the transport field is divergence-free — see §4.1):
 
-    ∂u/∂t = −(u·∇)u                     − ∂π/∂x + F_u
-    ∂v/∂t = −(u·∇)v                     − ∂π/∂y + F_v
-    ∂w/∂t = −(u·∇)w + g·θ′/θ̄           − ∂π/∂z + F_w
+    ∂u/∂t = −(u·∇)u            + f(v − v_e)   − ∂π/∂x + F_u
+    ∂v/∂t = −(u·∇)v            + f(u_e − u)   − ∂π/∂y + F_v
+    ∂w/∂t = −(u·∇)w + g·θ′/θ̄                 − ∂π/∂z + F_w
 
 subject to
 
@@ -64,10 +64,37 @@ divergence:
   "RANS closure" in the vertical, including surface drag;
 * horizontal: 2-D Smagorinsky deformation diffusion (§6).
 
-Coriolis is omitted (HICAR domains are sub-Rossby-radius; the synoptic
-balance enters through the lateral boundary nudging). The thermodynamic
-equation is untouched: θ is advected by the existing scalar RK3, including
-the θ′-split and the `w_real·dθ̄/dz` background term
+### Geostrophic forcing (Coriolis + synoptic PGF in one term)
+
+The Coriolis term is the EULAG ambient-state form **f·k×(u_e − u)** with
+f = 2Ω·sin(lat) and u_e the *balanced forcing target* — the same
+grid-relative, projection-balanced, time-interpolated forcing state the
+Davies relaxation nudges toward (§7; `forcing_hi` u/v, advanced each step
+by `apply_forcing`). The ambient state is assumed to carry the synoptic
+pressure gradient (geostrophic/thermal-wind balance), so this single term
+supplies both the Coriolis force and the large-scale PGF that the
+anelastic core cannot otherwise represent: π is only the projection
+multiplier, so internally *generated* meso-scale pressure gradients
+(thermal circulations, wave-induced) are produced by the projection, but
+an externally *imposed* synoptic gradient has no carrier without this
+term. Only deviations from the balanced state feel rotation; a deviation
+executes a bounded inertial oscillation (period 2π/f) instead of secular
+drift, and combined with the YSU drag this supports an Ekman-balanced
+PBL wind profile. Two degenerate alternatives are recorded as wrong:
+full Coriolis f·k×u without a PGF rotates the *mean* flow inertially
+(worse than omitting the term), and a forcing-diagnosed PGF without
+Coriolis accelerates the flow with nothing to balance it.
+Implementation: `wind_rans.F90::apply_geostrophic_forcing`, applied per
+RK3 stage from the previous stage's winds, BC-owned global faces
+skipped, increment tapered across the relaxation ring by the §7
+blending. Precedent: EULAG's f×(u − u_e) about geostrophically balanced
+environmental states (Prusa, Smolarkiewicz & Wyszogrodzki 2008);
+WRF/ICON need no such term because their compressible cores prognose
+the full mass field and regenerate the synoptic PGF from the lateral
+boundary conditions.
+
+The thermodynamic equation is untouched: θ is advected by the existing
+scalar RK3, including the θ′-split and the `w_real·dθ̄/dz` background term
 (`adv_std_apply_ref_vert`), which together with the buoyancy term supports
 gravity waves with the correct N².
 
@@ -122,7 +149,8 @@ One RANS dynamics step runs inside `advect()`, once per model time step Δt:
 ```
 1. projection (wind.F90::rans_project)     — FIRST, before any transport
 2. scalar advection (existing RK3)
-3. momentum RK3 (wind_rans):  u,v,w_real advected; buoyancy on w_real
+3. momentum RK3 (wind_rans):  u,v,w_real advected; buoyancy on w_real;
+   geostrophic forcing f·k×(u_e − u) on u,v (§2)
 4. horizontal Smagorinsky + Rayleigh lid damping (wind_rans)
 5. grid-w increment update (§4.2a)
 ```
@@ -160,7 +188,10 @@ Horizontal stencils near lateral tile edges read across the halo (halo width
 
 Buoyancy `B = g·θ′/θ̄` (cell-centred, evaluated once per step from the
 already-advected θ) is added to the w_real stage update with the same
-t_fac·Δt weight.
+t_fac·Δt weight. The geostrophic forcing (§2) is likewise added per stage
+with t_fac·Δt weighting, evaluated from the *previous stage's* winds (the
+same policy as the advective tendency); the ambient state u_e is frozen
+across the step (f·Δt ~ 1e-4, so sub-step variation is negligible).
 
 Global-boundary faces (u at i = ids, ide+1; v at j = jds, jde+1) are owned by
 the lateral BC relaxation and are never updated by the dynamics. w_real and
@@ -301,6 +332,30 @@ the projection immediately absorbs the hydrostatically balanced part of any
 horizontally uniform buoyancy error into λ, only *horizontal variations* of
 θ′ drive circulation — which is the physically correct behavior.
 
+### Thermodynamic pressure
+
+The dynamics never use a thermodynamic pressure (anelastic: the dynamic
+perturbation pressure is the projection multiplier), but the physics do —
+exner/temperature conversion, density, microphysics saturation. Pinning the
+interior pressure to the forcing (the pre-existing treatment) lets it drift
+out of consistency with the prognostic θ. Instead, under `kRANS_WINDS` the
+pressure is re-diagnosed hydrostatically from the model state
+(`domain_obj.F90::rans_diagnose_pressure`, run at the top of every
+non-forcing-mode `diagnostic_update`, i.e. at the step-start call after
+`apply_forcing` has advanced the top anchor, at the initialization ingest,
+and at the cheap `thermo_only` refresh before microphysics — so p, exner,
+T, ρ track the post-advection θ_v the microphysics is given): column-wise
+Exner integration
+
+    dπ_E/dz = −g / (cp·θ_v),   θ_v = θ·(1 + 0.61·qv)
+
+downward from the model top, whose pressure stays pinned to the
+time-advanced forcing. The synoptic pressure signal thus enters through
+the top anchor and the model's own thermal structure. This respects design
+principle 1: π_E is O(1) with O(1e-3) per-layer increments — safe in
+single precision — and the resulting p is only consumed pointwise, never
+differenced horizontally.
+
 ## 6. Horizontal Smagorinsky diffusion
 
 2-D deformation-based eddy viscosity at mass points, time-n velocities:
@@ -363,11 +418,10 @@ double-counting.
   inner edge. The specified-zone-exclusion formulation (λ = 0 identity
   rows in the ring) was implemented and then retired unused once
   option D made it unnecessary.
-  *Known approximation*: the nudging target is the earth-relative forcing
-  wind (`make_winds_grid_relative` is not applied to the forcing-side
-  arrays); the error is the local grid rotation angle, zero for idealized
-  grids and small for typical HICAR domains. TODO if large rotated domains
-  become a use case.
+  The forcing winds are rotated to grid-relative (`make_winds_grid_relative`)
+  *before* balancing, inside `rans_balance_forcing`, so the relaxation
+  targets — and the geostrophic ambient state u_e (§2), which reads the
+  same arrays — are grid-relative balanced states.
 * **w_real**: not forced after initialization (`apply_base_from_forcing` is
   *only* called at the first wind update under RANS — on later calls it
   would overwrite the prognostic w_real with forcing data).
@@ -394,31 +448,26 @@ horizontal-divergence imbalance.
 
 ## 9. What is deliberately NOT in v1
 
-**Known open item — large-scale forcing of the interior.** The prognostic
-interior carries no synoptic pressure-gradient force: nothing sustains the
-large-scale flow that the boundaries keep injecting. Over an advective
-timescale (~20–30 min on the 40 km Gaudergrat domain) the interior solution
-drifts away from the boundary inflow and the contrast sharpens at the inner
-edge of the relaxation zone, eventually re-intensifying there. Validation
-on the test case shows exactly this: stable, physical evolution for
-~20 simulated minutes, then slow re-growth pinned to the relaxation-zone
-edge. The established remedies, in increasing order of fidelity:
-(a) interior nudging of u/v toward the forcing tendency (analogous to
-spectral/grid nudging) with a weak timescale (~1 h); (b) adding the
-synoptic-scale PGF diagnosed from the forcing as a slowly varying body
-force; (c) Coriolis + geostrophic forcing. Option (a) is the natural next
-increment: it reuses the existing forcing pipeline and bounds the
-boundary–interior contrast by construction.
+**Resolved — large-scale forcing of the interior.** Earlier versions carried
+no synoptic pressure-gradient force, so the interior drifted from the
+boundary inflow on the advective timescale and the contrast re-intensified
+at the relaxation-zone edge (observed in the first Gaudergrat validations).
+This is now addressed by the geostrophic ambient-state forcing (§2), which
+was option (c) of the remedies considered — Coriolis + geostrophic forcing
+folded into one term. The weak interior nudge (option (a),
+`HICAR_RANS_NUDGE=1`, τ = 1800 s in `domain_obj.F90::apply_forcing`)
+remains as an opt-in experiment/mitigation switch only.
 
 | Item | Why deferred | Where it would go |
 |---|---|---|
-| Coriolis | sub-Rossby domains; boundary nudging carries synoptic balance | extra source in RK3 stage |
 | Moist buoyancy (qv, q_hydrometeor loading) | small vs θ′ for first validation | buoyancy term, §5 |
 | Incremental projection (carry λ) | O(Δt) pressure splitting acceptable; needs λ persistence across steps | `rans_project` |
 | Momentum FCT / monotone limiting | velocities are not sign-preserving quantities; 3rd-order upwind dissipation suffices | momentum kernels |
-| Constant-z momentum diffusion over steep slopes | reuse of `cz_diff` LUTs for staggered grids is non-trivial | §6 |
+| Constant-z momentum diffusion over steep slopes | reuse of `cz_diff` LUTs for staggered grids is non-trivial; error shrinks with Δx | §6 |
 | Namelist exposure of C_s, τ, z_d | validate defaults first | `opt_types` + `namelist_utilities` |
-| Grid-rotation of boundary nudging target | zero/small for current use cases | `apply_forcing` or forcing ingest |
+| 3-D turbulence closure (D13/D23 cross stresses) | split 2-D-horizontal + 1-D-PBL closure is the standard at the target Δx > 1 km | §6 |
+| Vertical turbulent mixing of w | negligible at mesoscale; WRF PBL schemes omit it too | momentum step |
+| Map-scale factors | HICAR-wide approximation (~1–2% at few-100-km extents) | host model |
 
 ## 10. Validation sequence
 

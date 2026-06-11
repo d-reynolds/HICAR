@@ -7,7 +7,10 @@
 !!   rans_momentum_step:
 !!     (1) WS-RK3 advection of u, v (staggered control volumes) and
 !!         w_real (cell-centred, reuses the standard scalar kernel),
-!!         with buoyancy g*theta'/theta_bar on w_real.
+!!         with buoyancy g*theta'/theta_bar on w_real and the
+!!         geostrophic/Coriolis forcing f k x (u_e - u) on u, v
+!!         (ambient state u_e = balanced forcing target; carries the
+!!         synoptic pressure gradient implicitly, EULAG-style).
 !!     (2) Horizontal Smagorinsky deformation diffusion of u, v, w_real.
 !!     (3) Rayleigh damping of w_real near the model lid.
 !!
@@ -41,7 +44,7 @@ module wind_rans
     use domain_interface,  only : domain_t
     use options_interface, only : options_t
     use adv_std,           only : adv_std_advect3d, adv_theta_ref
-    use mod_wrf_constants, only : gravity
+    use mod_wrf_constants, only : gravity, EOMEG, DEGRAD
     use timer_interface,   only : timer_t
 
     implicit none
@@ -161,6 +164,8 @@ contains
                     enddo
                 enddo
             enddo
+
+            call apply_geostrophic_forcing(domain, t_fac, dt, u_p, v_p, u_data, v_data)
 
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v), corners=.True.)
             call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v), corners=.True.)
@@ -350,6 +355,88 @@ contains
 
         end associate
     end subroutine build_transport_and_sources
+
+
+    !>--------------------------------------------------------
+    !! Geostrophic/Coriolis forcing, EULAG ambient-state form:
+    !!
+    !!   F = f k x (u_e - u)   =>   F_u = f (v - v_e),  F_v = f (u_e - u)
+    !!
+    !! with f = 2*Omega*sin(lat) and the ambient state u_e the
+    !! time-advanced BALANCED forcing target (forcing_hi u/v data,
+    !! which rans_balance_forcing left grid-relative and projected,
+    !! and apply_forcing advances by its tendency every step). The
+    !! ambient state is assumed to carry the synoptic pressure
+    !! gradient (geostrophic/thermal-wind balance), so this single
+    !! term supplies both Coriolis and the large-scale PGF: only
+    !! DEVIATIONS from the balanced state feel rotation, and the
+    !! deviation executes a bounded inertial oscillation instead of
+    !! secular drift. Adding Coriolis on the full wind instead
+    !! (f k x u, no PGF) would rotate the mean flow inertially —
+    !! worse than omitting the term.
+    !!
+    !! Applied per RK3 stage from the previous stage's winds (u_p,
+    !! v_p), same policy as the advective tendency. Global-boundary
+    !! faces are BC-owned and skipped; the relaxation-ring blending
+    !! afterwards tapers the increment near the boundaries.
+    !!--------------------------------------------------------
+    subroutine apply_geostrophic_forcing(domain, t_fac, dt, u_p, v_p, u_out, v_out)
+        implicit none
+        type(domain_t), intent(in) :: domain
+        real,           intent(in) :: t_fac, dt
+        real, intent(in)    :: u_p  (ims:ime+1, kms:kme, jms:jme)
+        real, intent(in)    :: v_p  (ims:ime,   kms:kme, jms:jme+1)
+        real, intent(inout) :: u_out(ims:ime+1, kms:kme, jms:jme)
+        real, intent(inout) :: v_out(ims:ime,   kms:kme, jms:jme+1)
+
+        integer :: i, j, k, c1, c2, i_s, i_e, j_s, j_e
+        real    :: fcor, vbar, vbar_e, ubar, ubar_e
+
+        associate(fu_t => domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d, &
+                  fv_t => domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d, &
+                  lat  => domain%vars_2d(domain%var_indx(kVARS%latitude)%v)%data_2d)
+
+        ! u faces: F_u = f * (v - v_e), v averaged from the 4 surrounding
+        ! v-points of the u-point's two neighbouring mass cells.
+        i_s = its;   if (domain%west_boundary)  i_s = its + 1
+        i_e = ite+1; if (domain%east_boundary)  i_e = ite
+        j_s = jts;   if (domain%south_boundary) j_s = jts + 1
+        j_e = jte;   if (domain%north_boundary) j_e = jte - 1
+        !$acc parallel loop gang vector collapse(3) default(present) &
+        !$acc   private(c1, c2, fcor, vbar, vbar_e)
+        do j = j_s, j_e
+            do k = kms, kme
+                do i = i_s, i_e
+                    c1 = max(i-1,ims); c2 = min(i,ime)
+                    fcor = 2.0 * EOMEG * sin(DEGRAD * 0.5 * (lat(c1,j) + lat(c2,j)))
+                    vbar   = 0.25 * (v_p (c1,k,j) + v_p (c1,k,j+1) + v_p (c2,k,j) + v_p (c2,k,j+1))
+                    vbar_e = 0.25 * (fv_t(c1,k,j) + fv_t(c1,k,j+1) + fv_t(c2,k,j) + fv_t(c2,k,j+1))
+                    u_out(i,k,j) = u_out(i,k,j) + t_fac * dt * fcor * (vbar - vbar_e)
+                enddo
+            enddo
+        enddo
+
+        ! v faces: F_v = f * (u_e - u)
+        i_s = its;   if (domain%west_boundary)  i_s = its + 1
+        i_e = ite;   if (domain%east_boundary)  i_e = ite - 1
+        j_s = jts;   if (domain%south_boundary) j_s = jts + 1
+        j_e = jte+1; if (domain%north_boundary) j_e = jte
+        !$acc parallel loop gang vector collapse(3) default(present) &
+        !$acc   private(c1, c2, fcor, ubar, ubar_e)
+        do j = j_s, j_e
+            do k = kms, kme
+                do i = i_s, i_e
+                    c1 = max(j-1,jms); c2 = min(j,jme)
+                    fcor = 2.0 * EOMEG * sin(DEGRAD * 0.5 * (lat(i,c1) + lat(i,c2)))
+                    ubar   = 0.25 * (u_p (i,k,c1) + u_p (i+1,k,c1) + u_p (i,k,c2) + u_p (i+1,k,c2))
+                    ubar_e = 0.25 * (fu_t(i,k,c1) + fu_t(i+1,k,c1) + fu_t(i,k,c2) + fu_t(i+1,k,c2))
+                    v_out(i,k,j) = v_out(i,k,j) + t_fac * dt * fcor * (ubar_e - ubar)
+                enddo
+            enddo
+        enddo
+
+        end associate
+    end subroutine apply_geostrophic_forcing
 
 
     !>--------------------------------------------------------
