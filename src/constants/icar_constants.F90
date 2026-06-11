@@ -572,6 +572,7 @@ module icar_constants
     integer, parameter :: kFLUXCOR_MONO   = 1
 
     integer, parameter :: kITERATIVE_WINDS = 1
+    integer, parameter :: kRANS_WINDS      = 2
 
     integer, parameter :: kLC_LAND       = 1
     integer, parameter :: kLC_WATER      = 2 ! 0  ! This should maybe become an argument in the namelist if we use different hi-es files?
