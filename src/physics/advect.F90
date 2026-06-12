@@ -829,12 +829,23 @@ contains
 
     ! end subroutine test_divergence
 
-    subroutine adv_std_compute_wind(u,v,w,density,jaco,jaco_u,jaco_v,jaco_w,dz, dx, options, dt, U_m, V_m, W_m, denom)
+    subroutine adv_std_compute_wind(u,v,w,density,jaco,jaco_u,jaco_v,jaco_w,dz, &
+                                    mapfac_my_u, mapfac_mx_v, mapfac_mxy, &
+                                    dx, options, dt, U_m, V_m, W_m, denom)
         implicit none
 
         real, dimension(ims:ime+1,kms:kme,jms:jme), intent(in) :: u, jaco_u
         real, dimension(ims:ime,kms:kme,jms:jme+1), intent(in) :: v, jaco_v
         real, dimension(ims:ime,kms:kme,jms:jme), intent(in) :: w, jaco_w, density, dz, jaco
+        ! Map-scale factors (all exactly 1.0 when use_map_factors is off):
+        ! face fluxes are divided by the transverse factor (true face
+        ! length = dx/m), the vertical flux and the cell denominator by/
+        ! times the cell-area factor m_x*m_y — the m for the vertical
+        ! cancels in the flux divergence (column-constant), leaving the
+        ! correct finite-volume form with sum_kernel unchanged.
+        real, dimension(ims:ime+1,jms:jme), intent(in) :: mapfac_my_u
+        real, dimension(ims:ime,jms:jme+1), intent(in) :: mapfac_mx_v
+        real, dimension(ims:ime,jms:jme),   intent(in) :: mapfac_mxy
         type(options_t),    intent(in)  :: options
         real, allocatable, intent(inout) :: U_m(:,:,:), V_m(:,:,:), W_m(:,:,:), denom(:,:,:)
         real,intent(in)::dt, dx
@@ -882,7 +893,8 @@ contains
         advect_density = options%adv%advect_density
 
 
-        !$acc data present(u,v,w,density,jaco,jaco_u,jaco_v,jaco_w,dz, dx, U_m, V_m, W_m, denom) create(rho)
+        !$acc data present(u,v,w,density,jaco,jaco_u,jaco_v,jaco_w,dz, dx, U_m, V_m, W_m, denom, &
+        !$acc              mapfac_my_u, mapfac_mx_v, mapfac_mxy) create(rho)
         if (advect_density) then
             !$acc parallel loop gang vector collapse(3)
             do j = jms,jme
@@ -909,7 +921,7 @@ contains
         do j = jms,jme
             do k = kms,kme
                 do i = ims,ime
-                    denom(i,k,j) = 1/(rho(i,k,j)*jaco(i,k,j))
+                    denom(i,k,j) = mapfac_mxy(i,j)/(rho(i,k,j)*jaco(i,k,j))
                 enddo
             enddo
         enddo
@@ -919,10 +931,10 @@ contains
             do k = kms,kme
                 do i = i_s_w,i_e_w+1
                     U_m(i,k,j) = u(i,k,j) * dt * (rho(i,k,j)+rho(i-1,k,j))*0.5 * &
-                        jaco_u(i,k,j) / dx
-                
+                        jaco_u(i,k,j) / (dx * mapfac_my_u(i,j))
+
                     V_m(i,k,j) = v(i,k,j) * dt * (rho(i,k,j)+rho(i,k,j-1))*0.5 * &
-                        jaco_v(i,k,j) / dx
+                        jaco_v(i,k,j) / (dx * mapfac_mx_v(i,j))
                 enddo
             enddo
         enddo
@@ -934,7 +946,7 @@ contains
                     W_m(i,k,j) = w(i,k,j) * dt * jaco_w(i,k,j) * &
                         ( rho(i,k,j)*dz(i,k+1,j) + &
                         rho(i,k+1,j)*dz(i,k,j) ) / &
-                        (dz(i,k,j)+dz(i,k+1,j))
+                        ((dz(i,k,j)+dz(i,k+1,j)) * mapfac_mxy(i,j))
                 enddo
             enddo
         enddo
@@ -942,7 +954,7 @@ contains
         !$acc parallel loop gang vector collapse(2) async(4)
         do j = j_s_w,j_e_w+1
             do i = i_s_w,i_e_w+1
-                W_m(i,kme,j) = w(i,kme,j) * dt * jaco_w(i,kme,j) * rho(i,kme,j)
+                W_m(i,kme,j) = w(i,kme,j) * dt * jaco_w(i,kme,j) * rho(i,kme,j) / mapfac_mxy(i,j)
             enddo
         enddo
         !$acc wait(1,2,3,4)
@@ -958,12 +970,23 @@ contains
     !! All bounds are explicit (no module-level state).
     !!------------------------------------------------------------
     subroutine adv_std_compute_wind_2d_fm(u_cell, v_cell, rho, &
-        jaco, jaco_u, jaco_v, dx, dt, &
+        jaco, jaco_u, jaco_v, &
+        mapfac_my_u, mapfac_mx_v, mapfac_mxy, &
+        dx, dt, &
         U_m, V_m, denom, ks, ke)
         implicit none
         integer, intent(in) :: ks, ke
         real, dimension(ims:ime, ks:ke, jms:jme), intent(in) :: u_cell, v_cell, rho
         real, dimension(ims:ime, ks:ke, jms:jme), intent(in) :: jaco, jaco_u, jaco_v
+        ! Map-scale factors, same placement as adv_std_compute_wind: face
+        ! fluxes divided by the transverse factor, denom multiplied by the
+        ! cell-area factor. The fine mesh shares the parent horizontal grid
+        ! (and indexing), so the parent factors apply directly. The fm
+        ! scheme is horizontal-only (vertical transport is the implicit
+        ! column solver), so no vertical-flux factor is needed.
+        real, dimension(ims:ime+1,jms:jme), intent(in) :: mapfac_my_u
+        real, dimension(ims:ime,jms:jme+1), intent(in) :: mapfac_mx_v
+        real, dimension(ims:ime,jms:jme),   intent(in) :: mapfac_mxy
         real, intent(in) :: dx, dt
         ! U_m, V_m are allocated here (mirroring adv_std_compute_wind for the
         ! regular scheme) so their bounds are always set consistently from the
@@ -991,12 +1014,12 @@ contains
             !$acc enter data create(flux_y_fm)
         endif
 
-        ! Compute 1/(rho * jaco) denominator
+        ! Compute mxy/(rho * jaco) denominator (cell-area map factor; 1.0 when off)
         !$acc parallel loop gang vector collapse(3) default(present)
         do j = jms, jme
             do k = ks, ke
                 do i = ims, ime
-                    denom(i,k,j) = 1.0 / (rho(i,k,j) * jaco(i,k,j))
+                    denom(i,k,j) = mapfac_mxy(i,j) / (rho(i,k,j) * jaco(i,k,j))
                 enddo
             enddo
         enddo
@@ -1007,7 +1030,7 @@ contains
             do k = ks, ke
                 do i = i_s_w, i_e_w+1
                     U_m(i,k,j) = u_cell(i,k,j) * dt * &
-                        0.5 * (rho(i-1,k,j) + rho(i,k,j)) * jaco_u(i,k,j) / dx
+                        0.5 * (rho(i-1,k,j) + rho(i,k,j)) * jaco_u(i,k,j) / (dx * mapfac_my_u(i,j))
                 enddo
             enddo
         enddo
@@ -1018,7 +1041,7 @@ contains
             do k = ks, ke
                 do i = i_s_w, i_e_w+1
                     V_m(i,k,j) = v_cell(i,k,j) * dt * &
-                        0.5 * (rho(i,k,j-1) + rho(i,k,j)) * jaco_v(i,k,j) / dx
+                        0.5 * (rho(i,k,j-1) + rho(i,k,j)) * jaco_v(i,k,j) / (dx * mapfac_mx_v(i,j))
                 enddo
             enddo
         enddo

@@ -1749,6 +1749,13 @@ contains
                 description = "flag for using SLEVE vertical coordinates (Schär et al. 2002) (T/F)"
                 default = ".True."
                 group = "Domain"
+            case ("use_map_factors")
+                description = "Apply map-scale factors (computed from the hi-res lat/lon fields) in the"//achar(10)//BLNK_CHR_N// &
+                    "advection fluxes and wind-solver divergence/correction operators, correcting for"//achar(10)//BLNK_CHR_N// &
+                    "projection distortion of the nominal dx. Falls back to 1.0 (off) with a warning"//achar(10)//BLNK_CHR_N// &
+                    "if the lat/lon fields are degenerate (idealized grids). (T/F)"
+                default = ".True."
+                group = "Domain"
             case ("terrain_smooth_windowsize")
                 description = "Size of the smoothing window used to split large and small scale terrain variations"//achar(10)//BLNK_CHR_N// &
                     "for calculation of the SLEVE coordinate."

@@ -1137,7 +1137,7 @@ contains
         logical :: read_namelist, print_info, gennml
 
         real, dimension(MAXLEVELS, kMAX_NESTS) :: dz_levels
-        logical, dimension(kMAX_NESTS) :: sleve, use_agl_height
+        logical, dimension(kMAX_NESTS) :: sleve, use_agl_height, use_map_factors
 
         real, dimension(kMAX_NESTS) :: dx, flat_z_height, decay_rate_L_topo, decay_rate_S_topo, sleve_n, agl_cap, max_agl_height, height_lowest_level, model_top_height, stretch_fac
         real, dimension(kMAX_NESTS) :: init_surf_temp, init_sst
@@ -1158,7 +1158,7 @@ contains
                                         snowpack_mk_var, snowpack_cdot_var, snowpack_snow_stress_var, snowpack_n3_var
 
         namelist /domain/ dx, nz, longitude_system, init_conditions_file, &
-                            landvar,lakedepthvar, snowh_var, agl_cap, use_agl_height, &
+                            landvar,lakedepthvar, snowh_var, agl_cap, use_agl_height, use_map_factors, &
                             hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
                             soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var,           &
                             vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var,  &
@@ -1195,6 +1195,7 @@ contains
         call set_nml_var_default(decay_rate_S_topo, 'decay_rate_S_topo', print_info, gennml)
         call set_nml_var_default(sleve_n, 'sleve_n', print_info, gennml)
         call set_nml_var_default(use_agl_height, 'use_agl_height', print_info, gennml)
+        call set_nml_var_default(use_map_factors, 'use_map_factors', print_info, gennml)
         call set_nml_var_default(agl_cap, 'agl_cap', print_info, gennml)
 
         call set_nml_var_default(dz_levels, 'dz_levels', print_info, gennml)
@@ -1274,6 +1275,7 @@ contains
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             sleve(n_indx) = sleve(1)
             use_agl_height(n_indx) = use_agl_height(1)
+            use_map_factors(n_indx) = use_map_factors(1)
             ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
 
             open(io_newunit(name_unit), file=filename)
@@ -1298,6 +1300,7 @@ contains
         call set_nml_var(domain_options%decay_rate_S_topo, decay_rate_S_topo(n_indx), 'decay_rate_S_topo', decay_rate_S_topo(1))
         call set_nml_var(domain_options%sleve_n, sleve_n(n_indx), 'sleve_n', sleve_n(1))
         call set_nml_var(domain_options%use_agl_height, use_agl_height(n_indx), 'use_agl_height', use_agl_height(1))
+        call set_nml_var(domain_options%use_map_factors, use_map_factors(n_indx), 'use_map_factors', use_map_factors(1))
         call set_nml_var(domain_options%agl_cap, agl_cap(n_indx), 'agl_cap', agl_cap(1))
 
         call set_nml_var(domain_options%auto_level, auto_level(n_indx), 'auto_level', auto_level(1))
@@ -3225,6 +3228,7 @@ contains
         call append_kv_real   (config_str, pos, 'domain', 'sleve_n',                      this%domain%sleve_n)
         call append_kv_logical(config_str, pos, 'domain', 'use_agl_height',               this%domain%use_agl_height)
         call append_kv_real   (config_str, pos, 'domain', 'agl_cap',                      this%domain%agl_cap)
+        call append_kv_logical(config_str, pos, 'domain', 'use_map_factors',              this%domain%use_map_factors)
         call append_kv_int    (config_str, pos, 'domain', 'longitude_system',             this%domain%longitude_system)
         call append_kv_real   (config_str, pos, 'domain', 'init_surf_temp',               this%domain%init_surf_temp)
         call append_kv_real   (config_str, pos, 'domain', 'init_sst',                     this%domain%init_sst)

@@ -81,6 +81,18 @@ module domain_interface
     logical :: west_boundary = .True.
     integer :: FILTER_WIDTH = 7
 
+    ! Map-scale factors m = (nominal dx) / (true ground distance), computed
+    ! at init from the hi-res lat/lon fields (init_map_factors). All 1.0
+    ! when use_map_factors is off or the lat/lon fields are degenerate
+    ! (idealized grids) — kernels multiply unconditionally; x*1.0 is exact.
+    ! _u arrays live on the u grid, _v on the v grid; mapfac_mxy = m_x*m_y
+    ! at mass points (the cell-area factor). max_mapfac feeds a
+    ! conservative CFL correction in compute_dt.
+    real, allocatable :: mapfac_mx_u(:,:), mapfac_my_u(:,:)
+    real, allocatable :: mapfac_mx_v(:,:), mapfac_my_v(:,:)
+    real, allocatable :: mapfac_mxy(:,:)
+    real :: max_mapfac = 1.0
+
     ! store the start (s) and end (e) for the i,j,k dimensions
     integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)
                 ims,ime, jms,jme, kms,kme, & ! for the memory in these arrays (m)

@@ -125,6 +125,7 @@ contains
                                       domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
                                       domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d, &
                                       domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
+                                      domain%mapfac_my_u, domain%mapfac_mx_v, domain%mapfac_mxy, &
                                       domain%dx,options,dt, U_m, V_m, W_m, denom)
             if (options%adv%flux_corr==kFLUXCOR_MONO) call set_sign_arrays(U_m,V_m,W_m)
             call adv_wind_time%stop()
