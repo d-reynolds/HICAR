@@ -52,7 +52,7 @@ class bcolors:
 # Tolerance spec
 # ----------------------------------------------------------------------------
 class ToleranceSpec:
-    """Resolves the (rtol, atol) pair to apply to a given variable.
+    """Resolves the (rtol, atol, frac) triple to apply to a given variable.
 
     Spec file (YAML) format:
 
@@ -62,13 +62,22 @@ class ToleranceSpec:
         variables:
           pressure: {rtol: 1.0e-6, atol: 1.0e-2}
           qv:       {rtol: 1.0e-4, atol: 1.0e-12}
+          hfls:     {rtol: 1.0e-3, atol: 5.0e-1, frac: 1.0e-4}
         ignore:
           - time
+
+    `frac` (default 0) is the maximum allowed FRACTION of finite values that may
+    violate atol+rtol*|baseline| before the variable is flagged DIFF. Use it for
+    fields with rare, legitimate single-cell outliers (e.g. threshold/regime
+    flips such as melt onset) where a max-based tolerance would have to be so
+    loose it loses all discriminating power for the bulk of the field.
     """
 
-    def __init__(self, default_rtol=0.0, default_atol=0.0, per_var=None, ignore=None):
+    def __init__(self, default_rtol=0.0, default_atol=0.0, default_frac=0.0,
+                 per_var=None, ignore=None):
         self.default_rtol = float(default_rtol)
         self.default_atol = float(default_atol)
+        self.default_frac = float(default_frac)
         self.per_var = per_var or {}
         self.ignore = set(ignore or [])
 
@@ -84,16 +93,19 @@ class ToleranceSpec:
             per_var[name] = (
                 float(tol.get("rtol", defaults.get("rtol", 0.0))),
                 float(tol.get("atol", defaults.get("atol", 0.0))),
+                float(tol.get("frac", defaults.get("frac", 0.0))),
             )
         return cls(
             default_rtol=defaults.get("rtol", 0.0),
             default_atol=defaults.get("atol", 0.0),
+            default_frac=defaults.get("frac", 0.0),
             per_var=per_var,
             ignore=spec.get("ignore", []) or [],
         )
 
     def for_var(self, name):
-        return self.per_var.get(name, (self.default_rtol, self.default_atol))
+        return self.per_var.get(name,
+                                (self.default_rtol, self.default_atol, self.default_frac))
 
 
 # ----------------------------------------------------------------------------
@@ -107,9 +119,11 @@ def _index_label(flat_index, shape, dims):
     return ", ".join(f"{d}={int(i)}" for d, i in zip(dims, idx))
 
 
-def compare_variable(name, v1, v2, rtol, atol):
+def compare_variable(name, v1, v2, rtol, atol, frac=0.0):
     """Compare one variable. Returns a result dict with status in
-    {'ok', 'diff', 'nan', 'shape', 'skip'} and supporting diagnostics."""
+    {'ok', 'diff', 'nan', 'shape', 'skip'} and supporting diagnostics.
+    Up to frac*n_finite violating values are tolerated (rare-outlier allowance,
+    see ToleranceSpec); the tolerated count is reported in the result."""
     dims = list(v1.dims)
     a1 = np.asarray(v1.values)
     a2 = np.asarray(v2.values)
@@ -160,12 +174,13 @@ def compare_variable(name, v1, v2, rtol, atol):
     violations = finite & (abs_err > threshold)
     n_violations = int(np.count_nonzero(violations))
 
-    result = {"name": name, "rtol": rtol, "atol": atol,
+    n_finite = int(np.count_nonzero(finite))
+    result = {"name": name, "rtol": rtol, "atol": atol, "frac": frac,
               "max_abs": max_abs, "max_rel": max_rel,
               "n_violations": n_violations,
-              "n_finite": int(np.count_nonzero(finite))}
+              "n_finite": n_finite}
 
-    if n_violations == 0:
+    if n_violations <= int(frac * n_finite):
         result["status"] = "ok"
         return result
 
@@ -198,14 +213,18 @@ def plot_diff(a1, a2, var_name, label1, label2, figures_dir):
     diff = a1 - a2
 
     if diff.ndim >= 4:
-        a1 = a1[-1, a1.shape[1] // 2, :, :]
-        a2 = a2[-1, a2.shape[1] // 2, :, :]
-        diff = diff[-1, diff.shape[1] // 2, :, :]
-        slice_label = "t=-1, mid-level"
+        # Physically-3D field (time, layer, y, x): show the mean across all
+        # layers at the last timestep, rather than a single mid-level slice
+        # (which can be ~0 for fields whose signal lives in other layers).
+        a1 = np.nanmean(a1[-1], axis=0)
+        a2 = np.nanmean(a2[-1], axis=0)
+        diff = np.nanmean(diff[-1], axis=0)
+        slice_label = "t=-1, layer-mean"
     elif diff.ndim == 3:
+        # 2D surface field (time, y, x): last timestep on all three panels.
         a1 = a1[-1, :, :]
         a2 = a2[-1, :, :]
-        diff = np.nansum(diff, axis=0)
+        diff = diff[-1, :, :]
         slice_label = "t=-1"
     elif diff.ndim == 2:
         slice_label = "2D field"
@@ -332,14 +351,17 @@ def main():
             v1 = v1[slc]
             v2 = v2[slc]
 
-        rtol, atol = spec.for_var(name)
-        r = compare_variable(name, v1, v2, rtol, atol)
+        rtol, atol, frac = spec.for_var(name)
+        r = compare_variable(name, v1, v2, rtol, atol, frac)
         results.append(r)
 
         st = r["status"]
         if st == "ok":
             extra = (f"max|abs|={r['max_abs']:.3e} max|rel|={r['max_rel']:.3e}"
                      if "max_abs" in r else r.get("message", ""))
+            if r.get("n_violations", 0) > 0:
+                extra += (f"  [{r['n_violations']}/{r['n_finite']} outliers "
+                          f"tolerated, frac<={r['frac']:.1e}]")
             print(f"  {name:24s}: {bcolors.GREEN}OK{bcolors.NC}   {extra}")
         elif st == "nan":
             failed = True

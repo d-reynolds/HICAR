@@ -438,9 +438,24 @@ if (NETCDF_FOUND)
 		# nf-config --flibs emits a bare "-lnetcdf" with no matching -L on split-prefix
 		# installs (netcdf-c and netcdf-fortran in different roots). Resolve to an absolute
 		# path so the linker doesn't have to search, and so static linking works.
-		find_library(NETCDF_C_LIBRARY NAMES netcdf
-			HINTS ${NETCDF_DIR} ENV NETCDF_DIR ENV NETCDF_C_DIR ENV NETCDF
-			PATH_SUFFIXES lib lib64)
+		#
+		# Prefer the netcdf-c library FindNetCDF already resolved from NETCDF_DIR with
+		# NO_DEFAULT_PATH. A plain find_library here (no NO_DEFAULT_PATH) searches the
+		# system default paths too, so a stray homebrew/conda libnetcdf.dylib can shadow
+		# the intended (often parallel) netcdf and silently break parallel I/O at runtime
+		# ("Parallel operation on file opened for non-parallel access"). Fall back to a
+		# NETCDF_DIR-scoped search, then the broad search, only if that is unavailable.
+		if(NETCDF_LIBRARIES_C)
+			set(NETCDF_C_LIBRARY "${NETCDF_LIBRARIES_C}")
+		else()
+			find_library(NETCDF_C_LIBRARY NAMES netcdf
+				HINTS "${NETCDF_DIR}/lib" "$ENV{NETCDF_DIR}/lib" NO_DEFAULT_PATH)
+			if(NOT NETCDF_C_LIBRARY)
+				find_library(NETCDF_C_LIBRARY NAMES netcdf
+					HINTS ${NETCDF_DIR} ENV NETCDF_DIR ENV NETCDF_C_DIR ENV NETCDF
+					PATH_SUFFIXES lib lib64)
+			endif()
+		endif()
 		# Replace -lnetcdf with the absolute path at the *same position* so that
 		# libnetcdf.a stays before -lpnetcdf and -lhdf5 in link order.  APPEND
 		# would push it past those libraries, breaking single-pass archive resolution.
@@ -502,6 +517,21 @@ elseif(SNOWPACK_FOUND)
     # Link SNOWPACK and MeteoIO libraries
     target_link_libraries(hicar_lib PUBLIC ${SNOWPACK_FORTRAN_LIBRARY} ${SNOWPACK_LIBRARY} ${METEOIO_LIBRARY})
     target_include_directories(hicar_lib PUBLIC ${SNOWPACK_INCLUDE_DIR})
+
+    # The C++ SNOWPACK Fortran bindings (static libsnowpack_fortran.a) reference
+    # C++ standard-library symbols (operator new, __cxa_throw, std::logic_error,
+    # ...), but the final HICAR executable is linked by the Fortran driver, which
+    # does not pull in the C++ runtime. Link it explicitly: libc++ on macOS/clang,
+    # libstdc++ with GNU/Linux. CXX_STDLIB is set by FindSNOWPACK when SNOWPACK is
+    # built from source; fall back to a platform default when it is pre-installed.
+    if(NOT CXX_STDLIB)
+        if(APPLE)
+            set(CXX_STDLIB "c++")
+        else()
+            set(CXX_STDLIB "stdc++")
+        endif()
+    endif()
+    target_link_libraries(hicar_lib PUBLIC ${CXX_STDLIB})
     
 	add_definitions(-DSNOWPACK)
     message(STATUS "SNOWPACK support enabled")

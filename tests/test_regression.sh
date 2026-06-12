@@ -71,7 +71,7 @@ fi
 # --- resolve the blessed reference commit -----------------------------------
 REF_HASH="$BLESSED_COMMIT"
 if [ -z "$REF_HASH" ]; then
-    REF_HASH=$(bash "$hicar_repo/tests/resolve_blessed_commit.sh" "$hicar_repo") || {
+    REF_HASH=$(bash "$hicar_repo/tests/resolve_blessed_commit.sh" "$hicar_repo" --exclude-head) || {
         echo -e "${RED}Could not resolve a blessed commit (none found, or gh not authed).${NC}"
         echo -e "${RED}Bless one first (bless-baseline.yml or test_regression.sh --bless), or pass --blessed-commit.${NC}"
         exit 1

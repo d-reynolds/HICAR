@@ -90,7 +90,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sha=$(bash .github/scripts/resolve_blessed_commit.sh "$GITHUB_WORKSPACE")
+          sha=$(bash tests/resolve_blessed_commit.sh "$GITHUB_WORKSPACE" --exclude-head)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "blessed regression commit: $sha"
       # Cache the recompiled blessed exe so it's rebuilt only when the blessed
