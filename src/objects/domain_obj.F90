@@ -3608,7 +3608,7 @@ contains
                         do k = kms, kme
                             do i = ims,ime
                                 f_data(i,k,j) = f_data(i,k,j) + (f_dqdt(i,k,j) * dt)
-                                rf_loc = relax_filter(min(i,this%ime),k,min(j,this%jme))
+                                rf_loc = relax_filter(min(i,ime),k,min(j,jme))
                                 if (rf_loc >= 1.0) then
                                     var_data(i,k,j) = f_data(i,k,j)
                                 else
