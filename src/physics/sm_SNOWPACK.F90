@@ -318,6 +318,7 @@ module module_sm_SNOWPACKdrv
                     p => domain%vars_3d(domain%var_indx(kVARS%pressure)%v)%data_3d,                       &
                     roughness_z0 => domain%vars_2d(domain%var_indx(kVARS%roughness_z0)%v)%data_2d,       &
                     incoming_shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
+                    albedo => domain%vars_2d(domain%var_indx(kVARS%albedo)%v)%data_2d, &
                     ! shortwave_terrain => domain%vars_2d(domain%var_indx(kVARS%shortwave_terrain)%v)%data_2d, &
                     longwave_in => domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d,   &
                     ground_temp => domain%vars_3d(domain%var_indx(kVARS%soil_temperature)%v)%data_3d,               &
@@ -347,14 +348,22 @@ module module_sm_SNOWPACKdrv
                 ! call meteo(i,j)%set_ustar(0.3d0)          ! Friction velocity [m/s]
                 call meteo(i,j)%set_z0(real(roughness_z0(i,j), kind=8))           ! Roughness length [m] - matches ROUGHNESS_LENGTH config -- CURRENTLY OVERWRITTEN IN SNOWPACK
                 call meteo(i,j)%set_iswr(real(incoming_shortwave(i,j), kind=8))         ! Incoming shortwave [W/m2] - CRYOWRF Coupler: l_iswr
-                ! call meteo(i,j)%set_rswr(real(shortwave_terrain(i,j), kind=8))    ! Reflected shortwave [W/m2] from HICAR terrain radiation
+                ! Reflected shortwave from the previous step's surface albedo. The
+                ! CurrentMeteo constructor zeroes rswr, so without this the LEHNING_2
+                ! albedo regression (Cswout*Mdata.rswr, Laws_sn.cc:350) sees rswr=0 on
+                ! the first sub-step of every SNOWPACK call; later sub-steps get
+                ! rswr=iswr*pAlbedo from Snowpack.cc:810.
+                call meteo(i,j)%set_rswr(real(incoming_shortwave(i,j) * albedo(i,j), kind=8))
 
                 call meteo(i,j)%set_ea(-999.0d0)            ! Atmospheric emissivity - CRYOWRF Coupler: Mdata.ea, setting to -999 to force recalculation in SNOWPACK
 
                 ! Compute net longwave from incoming LW (HICAR) minus outgoing LW (surface emission)
                 ! Positive = net energy into snowpack
-                lw_out = 0.98d0 * STBOLT * skin_temperature(i,j)**4
-                call meteo(i,j)%set_lw_net(real(longwave_in(i,j) - lw_out, kind=8))
+                ! Promote skin temperature to double BEFORE **4 (and subtract in
+                ! double), matching the port's lw_out: a real32 T**4 intermediate
+                ! seeds a ~6e-8 K/substep skin divergence between the builds.
+                lw_out = 0.98d0 * STBOLT * real(skin_temperature(i,j), kind=8)**4
+                call meteo(i,j)%set_lw_net(real(longwave_in(i,j), kind=8) - lw_out)
                 call meteo(i,j)%set_tss(real(skin_temperature(i,j), kind=8))          ! Snow surface temperature [K]
 
                 ! NOTE: because SOIL_FLUX is set to false above, ts0 has to be the ground surface temperature from NoahMP
@@ -565,6 +574,7 @@ module module_sm_SNOWPACKdrv
         integer :: ne_arr(1:kMAX_SNOWPACK_ELEMENTS)
         integer(c_short) :: sn_k, hicar_k
         type(element_data) :: elem
+        real(kind=8) :: z_node_arr(1:kMAX_SNOWPACK_ELEMENTS+1)
 
         ne_arr = 1
 
@@ -617,6 +627,18 @@ module module_sm_SNOWPACKdrv
 
                 call snowpack_set_all_node_T(stations_in(i,j)%cxxmem%addr, real(T_node(i,n_node:1:-1,j), kind=8), n_node)
                 call snowpack_set_all_element_L(stations_in(i,j)%cxxmem%addr, real(Layer_Thick(i,n_elem:1:-1,j), kind=8), n_elem)
+                ! Node heights: cumulative element lengths from the base (C++ element
+                ! 0 = base = HICAR k=n_elem). Without this the station starts with
+                ! Ndata[].z = 0 everywhere, and the first compSnowCreep — which reads
+                ! NDS[nE].z before updating it — sees dz <= 0 for every element and
+                ! applies the wind-slab settling enhancement to the whole column in
+                ! any cell with vw > 5 m/s (a one-step transient that biases deep
+                ! settling by 36/(36+5(vw-5)) over a 3 h run).
+                z_node_arr(1) = 0.0d0
+                do k = 1, int(n_elem)
+                    z_node_arr(k+1) = z_node_arr(k) + real(Layer_Thick(i, int(n_elem)-k+1, j), kind=8)
+                enddo
+                call snowpack_set_all_node_z(stations_in(i,j)%cxxmem%addr, z_node_arr(1:int(n_node)), n_node)
                 call snowpack_set_all_element_Te(stations_in(i,j)%cxxmem%addr, real(T_elem(i,n_elem:1:-1,j), kind=8), n_elem)
                 call snowpack_set_all_element_rg(stations_in(i,j)%cxxmem%addr, real(Rg(i,n_elem:1:-1,j), kind=8), n_elem)
                 call snowpack_set_all_element_rb(stations_in(i,j)%cxxmem%addr, real(Rb(i,n_elem:1:-1,j), kind=8), n_elem)
@@ -878,7 +900,10 @@ module module_sm_SNOWPACKdrv
         call try_read_snp_var(filename, options%domain%snowpack_sp_var, domain, kVARS%Sp)
         call try_read_snp_var(filename, options%domain%snowpack_mk_var, domain, kVARS%mk)
         call try_read_snp_var(filename, options%domain%snowpack_cdot_var, domain, kVARS%CDot)
-        ! call try_read_snp_var(filename, options%domain%snowpack_snow_stress_var, domain, kVARS%snow_stress)
+        ! Seed file stores the model-convention NEGATIVE Cauchy stress (surface-first,
+        ! = -g*cos_sl*(mass_above + m/2)), so reading it gives step-1 stress increments
+        ! ~0 (no phantom-loading CDot) symmetrically with the Fortran-port build.
+        call try_read_snp_var(filename, options%domain%snowpack_snow_stress_var, domain, kVARS%snow_stress)
 
         domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d(:,:,:) = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_I)%v)%data_3d,1.0),0.0)
         domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d(:,:,:) = max(min(domain%vars_3d(domain%var_indx(kVARS%Vol_Frac_W)%v)%data_3d,1.0),0.0)
