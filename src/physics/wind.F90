@@ -284,10 +284,14 @@ contains
             jaco_w => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d, &
             rho => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
             dz => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
+            mf_my_u => domain%mapfac_my_u, &
+            mf_mx_v => domain%mapfac_mx_v, &
+            mf_mxy  => domain%mapfac_mxy, &
             dx => domain%dx &
         )
 
-        !$acc data present(div, u, v, w, dz, jaco, jaco_u, jaco_v, jaco_w, rho, dx) create(rho_i, u_met, v_met, w_met)
+        !$acc data present(div, u, v, w, dz, jaco, jaco_u, jaco_v, jaco_w, rho, dx, &
+        !$acc              mf_my_u, mf_mx_v, mf_mxy) create(rho_i, u_met, v_met, w_met)
 
         !Multiplication of U/V by metric terms, converting jacobian to staggered-grid where possible, otherwise making assumption of
         !Constant jacobian at edges
@@ -420,12 +424,19 @@ contains
         end if ! end if advect_density
 
 
+        ! Map factors (finite-volume form on the projected grid): each face
+        ! flux is divided by its transverse factor (true face length =
+        ! dx/m) and the cell sum is multiplied by the cell-area factor
+        ! m_x*m_y. The vertical term below needs no factor — m is
+        ! column-constant, so it cancels between the top and bottom faces.
+        ! All factors are exactly 1.0 when use_map_factors is off.
         !$acc parallel loop gang vector collapse(3) async(1) wait(0)
         do j = jms, jme
             do k = kms, kme
             do i = ims, ime
-                div(i,k,j) = (u_met(i+1, k, j) - u_met(i, k, j) + &
-                              v_met(i, k, j+1) - v_met(i, k, j)) / dx
+                div(i,k,j) = mf_mxy(i,j) * &
+                             (u_met(i+1, k, j)/mf_my_u(i+1,j) - u_met(i, k, j)/mf_my_u(i,j) + &
+                              v_met(i, k, j+1)/mf_mx_v(i,j+1) - v_met(i, k, j)/mf_mx_v(i,j)) / dx
 
             enddo
             enddo

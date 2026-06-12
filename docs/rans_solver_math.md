@@ -121,6 +121,53 @@ do not extend far enough for staggered control volumes at tile edges), using
 *identical* weighting formulas, so momentum and scalar transport are
 consistent to interpolation order.
 
+### Map-scale factors
+
+The nominal `dx` is a grid distance; on a projected grid the true ground
+distance is `dx/m` with m the map-scale factor (`use_map_factors`
+namelist, default on; host-model machinery, not RANS-specific). m is
+computed once at init from the hi-res lat/lon using local WGS84 radii of
+curvature in double precision (`domain_obj.F90::init_map_factors`) — a
+spherical-earth formula carries an up-to-~0.3% latitude bias, larger than
+the distortion of a well-centred projection. Direct two-point factors on
+the natural stagger (m_x at u-points, m_y at v-points), 4-point averages
+for the transverse factors, `m_x·m_y` as the cell-area factor at mass
+points. Degenerate lat/lon (idealized grids) falls back to m ≡ 1 with a
+warning; with m ≡ 1 every use site multiplies by exactly 1.0, so the off
+state is bit-identical to the pre-map-factor code.
+
+The finite-volume placement keeps `sum_kernel`/`flux3` untouched: face
+fluxes are divided by their transverse factor (true face length = dx/m —
+`U_m /= m_y|_u`, `V_m /= m_x|_v`), the vertical flux by the cell-area
+factor (`W_m /= m_x·m_y`), and the cell denominator multiplied by it
+(`denom = m_x·m_y/(ρJ)`); the vertical-flux factors cancel per column
+(m is column-constant), recovering
+
+    dq/dt = −(m_x·m_y/ρJ)[ Δ(ρJu q/m_y)/Δx + Δ(ρJv q/m_x)/Δy ]
+            −(1/ρJ) Δ(ρJ_w w q)/Δz.
+
+`calc_divergence` carries the same form (faces ÷ transverse m, cell sum ×
+m_x·m_y, vertical unchanged), and the correction operator G multiplies
+its whole horizontal bracket — λ-gradient *and* dzdx cross term, since
+the true slope is m·(grid slope) — by m_x|_u (resp. m_y|_v). **The probed
+operator A = D∘G absorbs all of this automatically on the next probe**;
+no stencil work. CFL: dt is divided by max(m) (conservative one-liner in
+`update_dt`).
+
+The snow-drift fine-mesh advection (`adv_std_compute_wind_2d_fm`) carries
+the same factors — it shares the parent horizontal grid, and its vertical
+transport is the implicit column solver, so only the horizontal
+flux/denominator placement applies.
+
+*Not* m-corrected (O(m−1) on diagnostics, accepted): the slope terms in
+`calc_w_real` (kinematic w_real diagnosis), Smagorinsky deformation, Sx/
+thermal-wind adjustments, and the MPDATA advection path (`adv = "std"`
+only). The vertical λ-gradient in the w correction carries no factor *by
+construction*: z is true meters (map factors are horizontal-projection
+metrics), and the divergence operator's vertical term is equally m-free
+(column-constant m cancels between W_m and the cell denominator), so D
+and G remain mutually consistent in the vertical.
+
 Constant-flow preservation: for a uniform velocity field the staggered-CV
 flux divergence telescopes to the average of the two adjacent mass cells'
 mass-flux divergences, which the projection closure has zeroed — exactly in

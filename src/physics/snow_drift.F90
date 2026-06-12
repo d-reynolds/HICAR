@@ -760,7 +760,9 @@ contains
 
         ! Compute 3D fine-mesh wind Courant numbers (U_m_fm, V_m_fm, denom_fm)
         call adv_std_compute_wind_2d_fm(u_fm, v_fm, rho_fm, &
-            jaco_fm, jaco_u_fm, jaco_v_fm, dx, dt, &
+            jaco_fm, jaco_u_fm, jaco_v_fm, &
+            domain%mapfac_my_u, domain%mapfac_mx_v, domain%mapfac_mxy, &
+            dx, dt, &
             U_m_fm, V_m_fm, denom_fm, 1, snc_N_loc)
 
         if (options%adv%flux_corr == kFLUXCOR_MONO) then

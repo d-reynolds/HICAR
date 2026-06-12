@@ -303,8 +303,15 @@ contains
                   jaco_v => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
                   jaco_w => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d, &
                   dz     => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
+                  mf_my_u => domain%mapfac_my_u, &
+                  mf_mx_v => domain%mapfac_mx_v, &
+                  mf_mxy  => domain%mapfac_mxy, &
                   theta  => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d)
 
+        ! Map factors enter exactly as in adv_std_compute_wind: face fluxes
+        ! divided by the transverse factor, the vertical flux by the
+        ! cell-area factor m_x*m_y (which the CV denominators in the stage
+        ! kernels multiply back — the vertical m cancels per column).
         !$acc parallel loop gang vector collapse(3) default(present) private(rho_face)
         do j = jms, jme
             do k = kms, kme
@@ -314,7 +321,7 @@ contains
                     else
                         rho_face = 1.0
                     endif
-                    fu(i,k,j) = u(i,k,j) * rho_face * jaco_u(i,k,j) * dtdx
+                    fu(i,k,j) = u(i,k,j) * rho_face * jaco_u(i,k,j) * dtdx / mf_my_u(i,j)
                 enddo
             enddo
         enddo
@@ -328,7 +335,7 @@ contains
                     else
                         rho_face = 1.0
                     endif
-                    fv(i,k,j) = v(i,k,j) * rho_face * jaco_v(i,k,j) * dtdx
+                    fv(i,k,j) = v(i,k,j) * rho_face * jaco_v(i,k,j) * dtdx / mf_mx_v(i,j)
                 enddo
             enddo
         enddo
@@ -345,7 +352,7 @@ contains
                     else
                         rho_face = rho(i,kme,j)
                     endif
-                    fw(i,k,j) = w(i,k,j) * rho_face * jaco_w(i,k,j) * dt
+                    fw(i,k,j) = w(i,k,j) * rho_face * jaco_w(i,k,j) * dt / mf_mxy(i,j)
 
                     buoy(i,k,j) = gravity * (theta(i,k,j) - adv_theta_ref(i,k,j)) &
                                           / adv_theta_ref(i,k,j)
@@ -519,6 +526,7 @@ contains
 
         associate(rho    => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                   jaco_u => domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, &
+                  mf_mxy => domain%mapfac_mxy, &
                   dz     => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d)
 
         !$acc parallel loop gang vector collapse(3) default(present) &
@@ -618,7 +626,10 @@ contains
                     else
                         rho_u = 1.0
                     endif
-                    denom_u = 1.0 / (rho_u * jaco_u(i,k,j))
+                    ! CV-averaged cell-area map factor (exactly 1.0 when map
+                    ! factors are off); the O(dm) cross-column mismatch in the
+                    ! vertical term is below the documented CV metric residual.
+                    denom_u = 0.5 * (mf_mxy(c1,j) + mf_mxy(c2,j)) / (rho_u * jaco_u(i,k,j))
 
                     fdiv = (f_e - f_w) + (f_n - f_s) + zdiv
                     u_out(i,k,j) = u_n(i,k,j) - t_fac * fdiv * denom_u
@@ -664,6 +675,7 @@ contains
 
         associate(rho    => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                   jaco_v => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
+                  mf_mxy => domain%mapfac_mxy, &
                   dz     => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d)
 
         !$acc parallel loop gang vector collapse(3) default(present) &
@@ -745,7 +757,8 @@ contains
                     else
                         rho_v = 1.0
                     endif
-                    denom_v = 1.0 / (rho_v * jaco_v(i,k,j))
+                    ! CV-averaged cell-area map factor (see advect_u_stage note)
+                    denom_v = 0.5 * (mf_mxy(i,c1) + mf_mxy(i,c2)) / (rho_v * jaco_v(i,k,j))
 
                     fdiv = (f_e - f_w) + (f_n - f_s) + zdiv
                     v_out(i,k,j) = v_n(i,k,j) - t_fac * fdiv * denom_v

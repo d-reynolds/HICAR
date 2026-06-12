@@ -429,6 +429,7 @@ module options_types
         real    :: stretch_fac          ! Stretch factor for the vertical grid, used in auto_level
 
         logical :: use_agl_height       ! interpolate from forcing to model layers using Z above ground level, not sea level
+        logical :: use_map_factors      ! apply map-scale factors (from hi-res lat/lon) in advection and wind-solver operators
         real    :: agl_cap              ! height up to which AGL height is used for vertical interpolation
 
         ! variable names from init/BC/wind/... files

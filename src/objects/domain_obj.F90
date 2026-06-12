@@ -58,7 +58,8 @@ contains
 
         call init_land_variables(this, options)
 
-        
+        call init_map_factors(this, options)
+
         !$acc enter data copyin(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
         !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
         !$acc                   this%ihs, this%ihe, this%jhs, this%jhe, &
@@ -69,6 +70,176 @@ contains
         !update all relevant data_2d/data_3d fields of vars_2d/vars_3d to device
         call this%update_device()
     end subroutine init_domain
+
+    !>------------------------------------------------------------
+    !! Map-scale factors from the hi-res lat/lon fields.
+    !!
+    !! m = (nominal dx) / (true ground distance), so the true cell extent
+    !! is dx/m. Distances between adjacent grid points use the local
+    !! WGS84 radii of curvature (meridional M, transverse N) in double
+    !! precision — a spherical-earth formula carries an up-to-~0.3%
+    !! latitude-dependent bias, larger than the projection distortion of
+    !! a well-centred grid. Where the staggered point lies between two
+    !! mass points the factor is a direct two-point distance (m_x at
+    !! u-points, m_y at v-points); the transverse factors are 4-point
+    !! averages of those. mapfac_mxy = m_x*m_y at mass points is the
+    !! cell-area factor used by the flux-divergence assembly.
+    !!
+    !! use_map_factors = .False., or degenerate lat/lon (idealized
+    !! grids), leaves every factor at exactly 1.0: downstream kernels
+    !! multiply unconditionally, and x*1.0 is exact, so the off state
+    !! reproduces the pre-map-factor code bit-for-bit.
+    !!------------------------------------------------------------
+    subroutine init_map_factors(this, options)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        type(options_t), intent(in)    :: options
+
+        integer :: i, j, n_bad, n_clamped
+        real    :: d
+        real, parameter :: MAPFAC_MIN = 0.5, MAPFAC_MAX = 2.0
+
+        associate(ims => this%ims, ime => this%ime, &
+                  jms => this%jms, jme => this%jme)
+
+        allocate(this%mapfac_mx_u(ims:ime+1, jms:jme),   source=1.0)
+        allocate(this%mapfac_my_u(ims:ime+1, jms:jme),   source=1.0)
+        allocate(this%mapfac_mx_v(ims:ime,   jms:jme+1), source=1.0)
+        allocate(this%mapfac_my_v(ims:ime,   jms:jme+1), source=1.0)
+        allocate(this%mapfac_mxy (ims:ime,   jms:jme),   source=1.0)
+        this%max_mapfac = 1.0
+
+        if (options%domain%use_map_factors) then
+            associate(lat  => this%vars_2d(this%var_indx(kVARS%latitude)%v)%data_2d, &
+                      lon  => this%vars_2d(this%var_indx(kVARS%longitude)%v)%data_2d, &
+                      mx_u => this%mapfac_mx_u, my_u => this%mapfac_my_u, &
+                      mx_v => this%mapfac_mx_v, my_v => this%mapfac_my_v, &
+                      mxy  => this%mapfac_mxy)
+
+            n_bad     = 0
+            n_clamped = 0
+
+            ! Direct two-point factors on the natural stagger; memory-edge
+            ! staggered points (no second mass point) clamp to the first
+            ! interior value.
+            do j = jms, jme
+                do i = ims+1, ime
+                    d = ellipsoid_dist(lat(i-1,j), lon(i-1,j), lat(i,j), lon(i,j))
+                    if (d > 0.01*this%dx) then
+                        mx_u(i,j) = this%dx / d
+                    else
+                        n_bad = n_bad + 1
+                    endif
+                enddo
+                mx_u(ims,j)   = mx_u(ims+1,j)
+                mx_u(ime+1,j) = mx_u(ime,j)
+            enddo
+            do j = jms+1, jme
+                do i = ims, ime
+                    d = ellipsoid_dist(lat(i,j-1), lon(i,j-1), lat(i,j), lon(i,j))
+                    if (d > 0.01*this%dx) then
+                        my_v(i,j) = this%dx / d
+                    else
+                        n_bad = n_bad + 1
+                    endif
+                enddo
+            enddo
+            do i = ims, ime
+                my_v(i,jms)   = my_v(i,jms+1)
+                my_v(i,jme+1) = my_v(i,jme)
+            enddo
+
+            if (n_bad > 0) then
+                ! Degenerate lat/lon — revert to the exact off state.
+                mx_u = 1.0
+                my_v = 1.0
+                if (STD_OUT_PE) write(*,*) "WARNING: degenerate lat/lon spacing at ", n_bad, &
+                                           " grid points -- map factors disabled (all 1.0)"
+            else
+                do j = jms, jme
+                    do i = ims, ime+1
+                        if (mx_u(i,j) < MAPFAC_MIN .or. mx_u(i,j) > MAPFAC_MAX) then
+                            n_clamped = n_clamped + 1
+                            mx_u(i,j) = min(max(mx_u(i,j), MAPFAC_MIN), MAPFAC_MAX)
+                        endif
+                    enddo
+                enddo
+                do j = jms, jme+1
+                    do i = ims, ime
+                        if (my_v(i,j) < MAPFAC_MIN .or. my_v(i,j) > MAPFAC_MAX) then
+                            n_clamped = n_clamped + 1
+                            my_v(i,j) = min(max(my_v(i,j), MAPFAC_MIN), MAPFAC_MAX)
+                        endif
+                    enddo
+                enddo
+                if (n_clamped > 0 .and. STD_OUT_PE) then
+                    write(*,*) "WARNING: ", n_clamped, " map factors outside [0.5, 2.0] were clamped --"
+                    write(*,*) "         check that dx matches the hi-res grid spacing"
+                endif
+
+                ! Transverse factors: 4-point averages of the direct ones
+                do j = jms, jme
+                    do i = ims, ime+1
+                        my_u(i,j) = 0.25 * (my_v(max(i-1,ims),j) + my_v(max(i-1,ims),j+1) + &
+                                            my_v(min(i,ime),j)   + my_v(min(i,ime),j+1))
+                    enddo
+                enddo
+                do j = jms, jme+1
+                    do i = ims, ime
+                        mx_v(i,j) = 0.25 * (mx_u(i,max(j-1,jms)) + mx_u(i+1,max(j-1,jms)) + &
+                                            mx_u(i,min(j,jme))   + mx_u(i+1,min(j,jme)))
+                    enddo
+                enddo
+                ! Cell-area factor at mass points
+                do j = jms, jme
+                    do i = ims, ime
+                        mxy(i,j) = 0.5*(mx_u(i,j) + mx_u(i+1,j)) * 0.5*(my_v(i,j) + my_v(i,j+1))
+                    enddo
+                enddo
+
+                ! Tile-local max is sufficient: compute_dt pairs it with the
+                ! tile-local max wind, and dt is MPI_MIN-reduced globally.
+                this%max_mapfac = max(maxval(mx_u), maxval(my_v))
+                if (STD_OUT_PE) write(*,"(A,F8.5,A,F8.5)") "  Map factors (rank 0): min = ", &
+                    min(minval(mx_u), minval(my_v)), ",  max = ", this%max_mapfac
+            endif
+            end associate
+        endif
+        end associate
+
+        !$acc enter data copyin(this%mapfac_mx_u, this%mapfac_my_u, this%mapfac_mx_v, &
+        !$acc                   this%mapfac_my_v, this%mapfac_mxy)
+    end subroutine init_map_factors
+
+
+    !> True ground distance between two nearby lat/lon points using the
+    !! local WGS84 radii of curvature; double precision internally (the
+    !! angular differences are O(1e-5) rad at sub-km spacing).
+    pure function ellipsoid_dist(lat1, lon1, lat2, lon2) result(d)
+        implicit none
+        real, intent(in) :: lat1, lon1, lat2, lon2
+        real :: d
+        real(kind=8), parameter :: a_wgs  = 6378137.0d0
+        real(kind=8), parameter :: e2_wgs = 6.69437999014d-3
+        real(kind=8), parameter :: d2r    = 3.14159265358979323846d0 / 180.0d0
+        real(kind=8) :: phi, sin2, m_rad, n_rad, dphi, dlam, dn, de
+
+        phi  = 0.5d0 * (real(lat1,8) + real(lat2,8)) * d2r
+        sin2 = sin(phi)**2
+        m_rad = a_wgs * (1.0d0 - e2_wgs) / (1.0d0 - e2_wgs*sin2)**1.5d0
+        n_rad = a_wgs / sqrt(1.0d0 - e2_wgs*sin2)
+
+        dphi = (real(lat2,8) - real(lat1,8)) * d2r
+        dlam =  real(lon2,8) - real(lon1,8)
+        if (dlam >  180.0d0) dlam = dlam - 360.0d0
+        if (dlam < -180.0d0) dlam = dlam + 360.0d0
+        dlam = dlam * d2r
+
+        dn = m_rad * dphi
+        de = n_rad * cos(phi) * dlam
+        d  = real(sqrt(dn*dn + de*de))
+    end function ellipsoid_dist
+
 
     module subroutine update_device(this)
         implicit none
