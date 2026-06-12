@@ -9,11 +9,7 @@
 !!  Dylan Reynolds (d.reynolds.nw@gmail.com)
 !!
 !! ----------------------------------------------------------------------------
-module nest_manager
-    use options_interface,  only : options_t
-    use domain_interface,   only : domain_t
-    use flow_object_interface, only : flow_obj_t, comp_arr_t
-    use initialization,             only : init_model_state
+submodule(nest_manager) nest_manager_implementation
     use microphysics,               only : mp_init
     use advection,                  only : adv_init
     use radiation,                  only : radiation_init
@@ -26,15 +22,12 @@ module nest_manager
     use icar_constants
 
     implicit none
-    private
     integer :: current_nest = -1
-
-    public:: end_nest_context, start_nest_context, wake_nest, switch_nest_context, any_nests_not_done, nest_next_up, should_update_nests, can_update_child_nest
 
 
 contains
 
-    subroutine switch_nest_context(domain, options)
+    module subroutine switch_nest_context(domain, options)
         implicit none
         type(domain_t), intent(inout) :: domain
         type(options_t), intent(inout) :: options
@@ -63,7 +56,7 @@ contains
     !!  @param options  
     !!  The options_t object for the nest context.
     !! ----------------------------------------------------------------------------
-    subroutine start_nest_context(domain, options)
+    module subroutine start_nest_context(domain, options)
         implicit none
         type(domain_t), intent(inout) :: domain
         type(options_t), intent(inout) :: options
@@ -87,14 +80,14 @@ contains
         current_nest = domain%nest_indx
     end subroutine start_nest_context
 
-    subroutine end_nest_context()
+    module subroutine end_nest_context()
         implicit none
 
         current_nest = -1
         
     end subroutine  end_nest_context
 
-    subroutine wake_nest(domain)
+    module subroutine wake_nest(domain)
         implicit none
         type(domain_t), intent(inout) :: domain
 
@@ -109,7 +102,7 @@ contains
 
     end subroutine wake_nest
 
-    function any_nests_not_done(flow_objs) result(any_not_done)
+    module function any_nests_not_done(flow_objs) result(any_not_done)
         implicit none
         type(comp_arr_t), intent(in) :: flow_objs(:)
         logical :: any_not_done
@@ -127,7 +120,7 @@ contains
 
     end function any_nests_not_done
 
-    function nest_next_up(flow_objs, options) result(next)
+    module function nest_next_up(flow_objs, options) result(next)
         implicit none
         type(comp_arr_t), intent(in) :: flow_objs(:)
         type(options_t), intent(in) :: options
@@ -151,7 +144,7 @@ contains
 
     end function nest_next_up
 
-    function should_update_nests(flow_objs, options) result(can_update)
+    module function should_update_nests(flow_objs, options) result(can_update)
         implicit none
         type(comp_arr_t), intent(in) :: flow_objs(:)
         type(options_t), intent(in) :: options
@@ -200,7 +193,7 @@ contains
 
     end function ahead_or_at_child
 
-    function can_update_child_nest(flow_obj, child_flow_obj)
+    module function can_update_child_nest(flow_obj, child_flow_obj)
         implicit none
         class(flow_obj_t), intent(in) :: flow_obj
         class(flow_obj_t), intent(in) :: child_flow_obj
@@ -214,4 +207,4 @@ contains
 
     end function can_update_child_nest
 
-end module nest_manager
+end submodule nest_manager_implementation

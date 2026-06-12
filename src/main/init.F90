@@ -16,12 +16,8 @@
 !!  Ethan Gutmann (gutmann@ucar.edu)
 !!
 !! ----------------------------------------------------------------------------
-module initialization
-    use options_interface,  only : options_t
-    use domain_interface,   only : domain_t
-    use boundary_interface, only : boundary_t
+submodule(initialization) initialization_implementation
     use namelist_utils,     only : inter_nest_namelist_check
-    use flow_object_interface, only : comp_arr_t
     use microphysics,               only : mp_init, mp_var_request
     use advection,                  only : adv_init, adv_var_request
     use radiation,                  only : radiation_init, ra_var_request
@@ -34,7 +30,6 @@ module initialization
     use omp_lib,                    only : omp_get_max_threads
     use icar_constants
     use ioserver_interface,         only : ioserver_t
-    use ioclient_interface,         only : ioclient_t
     use iso_fortran_env,            only : output_unit
     use mpi_f08
 #ifdef _OPENACC
@@ -43,13 +38,11 @@ module initialization
 
 
     implicit none
-    private
-    public::split_processes, init_options, init_model, init_physics, init_model_state
 
 contains
 
 
-    subroutine split_processes(components, ioclient, n_nests, options)
+    module subroutine split_processes(components, ioclient, n_nests, options)
         implicit none
         type(comp_arr_t), intent(inout) :: components(:)
         type(ioclient_t), intent(inout) :: ioclient(:)
@@ -256,7 +249,7 @@ contains
 
     end subroutine split_processes
 
-    subroutine init_options(options, namelist_file, info_only, gen_nml, only_namelist_check)
+    module subroutine init_options(options, namelist_file, info_only, gen_nml, only_namelist_check)
         implicit none
         type(options_t), allocatable, intent(out) :: options(:)
         character(len=*), intent(in) :: namelist_file
@@ -330,7 +323,7 @@ contains
 
     end subroutine init_options
 
-    subroutine init_model(options,domain,boundary,ioclient,nest_indx)
+    module subroutine init_model(options,domain,boundary,ioclient,nest_indx)
         implicit none
         type(options_t), intent(inout) :: options(:)
         type(domain_t),  intent(inout) :: domain
@@ -357,7 +350,7 @@ contains
 
     end subroutine init_model
 
-    subroutine init_model_state(options, domain, boundary, ioclient)
+    module subroutine init_model_state(options, domain, boundary, ioclient)
         implicit none
         type(options_t), intent(inout) :: options
         type(domain_t),  intent(inout) :: domain
@@ -412,7 +405,7 @@ contains
     end subroutine init_model_state
 
 
-    subroutine init_physics(options, domain)
+    module subroutine init_physics(options, domain)
         implicit none
         type(options_t), intent(inout) :: options
         type(domain_t),  intent(inout) :: domain
@@ -494,4 +487,4 @@ contains
 
     end subroutine collect_physics_requests
 
-end module
+end submodule initialization_implementation

@@ -1,14 +1,15 @@
-module flow_events
+!> ----------------------------------------------------------------------------
+!!  Implementation submodule of flow_events (flow_events_h.F90): the heavy
+!!  USEs live here so they do not bloat flow_events.mod, which driver.F90
+!!  has to import.
+!! ----------------------------------------------------------------------------
+submodule(flow_events) flow_events_implementation
     use iso_fortran_env, only: output_unit
     use mpi_f08
-    use options_interface,  only : options_t
     use domain_interface,   only : domain_t
-    use boundary_interface, only : boundary_t
     use time_object,        only : Time_type
-    use flow_object_interface, only : flow_obj_t, comp_arr_t
     use icar_constants!,             only : kITERATIVE_WINDS, kWIND_LINEAR
     use ioserver_interface,         only : ioserver_t
-    use ioclient_interface,         only : ioclient_t
     use nest_manager, only: any_nests_not_done, nest_next_up, should_update_nests, &
         end_nest_context, switch_nest_context, wake_nest
     use time_step, only: step
@@ -17,12 +18,10 @@ module flow_events
     use string, only : as_string
 
     implicit none
-    private
-    public:: component_init, component_loop, component_program_end
 
 contains
 
-subroutine component_init(component, options, boundary, ioclient, nest_index)
+module subroutine component_init(component, options, boundary, ioclient, nest_index)
     implicit none
     class(flow_obj_t), intent(inout) :: component
     type(options_t), intent(inout) :: options(:)
@@ -367,7 +366,7 @@ subroutine component_main_loop(component, options)
 
 end subroutine component_main_loop
 
-subroutine component_loop(components, options, boundary, ioclient)
+module subroutine component_loop(components, options, boundary, ioclient)
     implicit none
     type(comp_arr_t), intent(inout) :: components(:)
     type(options_t), intent(inout) :: options(:)
@@ -433,7 +432,7 @@ subroutine component_end_of_nest_loop(component,boundary,nest_indx)
 
 end subroutine component_end_of_nest_loop
 
-subroutine component_program_end(component, options)
+module subroutine component_program_end(component, options)
     implicit none
     type(comp_arr_t), intent(inout) :: component(:)
     type(options_t), intent(in) :: options(:)
@@ -587,4 +586,4 @@ subroutine component_program_end(component, options)
 
 end subroutine component_program_end
 
-end module flow_events
+end submodule flow_events_implementation
