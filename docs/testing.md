@@ -36,7 +36,7 @@ cd build/
 make check
 ```
 
-tests are defined under the `tests/` folder. `test_driver.F90` manages the execution of the different test modules, which are defined as `test_XXXX.F90`. Note that only some of the test cases are integrated with `test_driver.F90`, while most are legacy tests developed to work with ICAR.
+tests are defined under the `tests/` folder. `test_driver.F90` manages the execution of the different test modules, which are defined as `test_XXXX.F90` (test-drive suites: `advect`, `snow_drift`, `control_flow`, `halo_exch`, `geo`, `time`, `utilities`). Run a single suite with `mpiexec -np 2 tests/HICAR-tester <suite>`. The ICAR-era standalone tests were salvaged into the `geo`/`time`/`utilities` suites in 2026-06
 
 ## SNOWPACK C++ vs Fortran parity (developers)
 

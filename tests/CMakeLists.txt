@@ -44,6 +44,9 @@ set(
   snow_drift
   control_flow
   halo_exch
+  geo
+  time
+  utilities
 )
 set(
   SOURCE_FILES

@@ -46,6 +46,10 @@ jobs:
       - run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies
       - run: bash .github/scripts/hicar_install_utils.sh hicar_install
       - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
+      # Cheapest failure first: exercises every CLI option of driver.F90
+      # (exit codes + output) against the freshly built exe.
+      - name: CLI options
+        run: bash tests/test_cli_options.sh "$GITHUB_WORKSPACE"
       - name: Unit / invariant tests
         run: cd build && mpiexec -np 4 tests/HICAR-tester
       - name: Integration (Standard case)
