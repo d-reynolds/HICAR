@@ -1,0 +1,141 @@
+# HICAR full-test (CPU / GNU, GitHub-hosted).
+#
+# The correctness gate. Two builds:
+#   * debug   -> unit tests, Standard integration, reproducibility (bounds + NaN
+#                init catch crashes/instabilities)
+#   * release -> all integration cases, regression vs stored baseline
+# If BOTH pass, the `sign` job marks the commit with a `hicar-full-test=success`
+# commit status. The GPU lane reads that status to decide whether it can skip
+# re-running this suite (see gpu.yml).
+#
+# Triggers: every PR, nightly, manual, and workflow_call (so gpu.yml can invoke
+# it for an unsigned commit).
+name: HICAR full-test (CPU)
+
+on:
+  pull_request:
+    branches: [master, develop]
+  schedule:
+    - cron: '0 2 * * *'   # 02:00 UTC nightly
+  workflow_dispatch:
+  workflow_call:
+
+# statuses: write is needed by the sign job to mark the commit.
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: fulltest-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --- debug build: crash / instability / reproducibility ---------------------
+  cpu-debug:
+    runs-on: ubuntu-22.04
+    env:
+      HICAR_MODE: debug
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/cache@v4
+        with:
+          path: ~/installdir
+          key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
+          restore-keys: hicar-deps-${{ runner.os }}-
+      - run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies
+      - run: bash .github/scripts/hicar_install_utils.sh hicar_install
+      - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
+      # Cheapest failure first: exercises every CLI option of driver.F90
+      # (exit codes + output) against the freshly built exe.
+      - name: CLI options
+        run: bash tests/test_cli_options.sh "$GITHUB_WORKSPACE"
+      - name: Unit / invariant tests
+        run: cd build && mpiexec -np 4 tests/HICAR-tester
+      - name: Integration (Standard case)
+        run: bash tests/Test_Cases/test_case_runner.sh "$GITHUB_WORKSPACE" Standard
+      - name: Reproducibility (decomposition + restart)
+        run: bash tests/test_reproducibility.sh "$GITHUB_WORKSPACE" all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cpu-debug-diagnostics
+          path: |
+            tests/Test_Cases/input/*.err
+            tests/figures/**
+          if-no-files-found: ignore
+
+  # --- release build: full config matrix + regression ------------------------
+  cpu-release:
+    runs-on: ubuntu-22.04
+    env:
+      HICAR_MODE: release
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/cache@v4
+        with:
+          path: ~/installdir
+          key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
+          restore-keys: hicar-deps-${{ runner.os }}-
+      - run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies
+      - run: bash .github/scripts/hicar_install_utils.sh hicar_install
+      - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
+      - name: Integration (all config cases — run only)
+        run: |
+          cd tests/Test_Cases
+          bash test_case_runner.sh "$GITHUB_WORKSPACE" \
+            "Standard,Standard_restart,Nested,Nested_restart"
+      # Resolve the regression reference: the most recent ancestor of this commit
+      # carrying a hicar-regression-blessed=success status (no stored file).
+      - name: Resolve blessed regression commit
+        id: blessed
+        continue-on-error: true   # no blessed commit yet -> regression step is skipped/soft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(bash tests/resolve_blessed_commit.sh "$GITHUB_WORKSPACE" --exclude-head)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "blessed regression commit: $sha"
+      # Cache the recompiled blessed exe so it's rebuilt only when the blessed
+      # commit changes, not on every run.
+      - name: Cache blessed regression exe
+        if: steps.blessed.outputs.sha != ''
+        uses: actions/cache@v4
+        with:
+          path: |
+            bin/HICAR_blessed
+            bin/.regression_hash
+          key: regression-exe-${{ runner.os }}-${{ steps.blessed.outputs.sha }}
+      - name: Regression vs blessed commit (recompiles blessed exe, diffs outputs)
+        if: steps.blessed.outputs.sha != ''
+        continue-on-error: true   # flip to false once a blessed commit is established
+        run: |
+          bash tests/test_regression.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/build" \
+            "Standard,Nested" --blessed-commit "${{ steps.blessed.outputs.sha }}" --mode exact
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cpu-release-diagnostics
+          path: |
+            tests/regression_report_*.json
+            tests/figures/**
+          if-no-files-found: ignore
+
+  # --- sign: mark the commit as having passed full-test ----------------------
+  sign:
+    needs: [cpu-debug, cpu-release]
+    runs-on: ubuntu-22.04
+    permissions:
+      statuses: write
+    steps:
+      - name: Sign commit (hicar-full-test = success)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST "/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -f state=success \
+            -f context=hicar-full-test \
+            -f description="Passed HICAR full-test (CPU debug + release)" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "Signed ${{ github.sha }} as hicar-full-test=success"

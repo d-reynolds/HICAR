@@ -9,7 +9,11 @@ program test_driver
                             select_suite, run_selected, get_argument
     use test_halo_exch, only : collect_halo_exch_suite
     use test_advect, only : collect_advect_suite
+    use test_snow_drift, only : collect_snow_drift_suite
     use test_control_flow, only : collect_control_flow_suite
+    use test_geo, only : collect_geo_suite
+    use test_time, only : collect_time_suite
+    use test_utilities, only : collect_utilities_suite
     use mpi_f08
 #ifdef _OPENACC
     use openacc
@@ -75,7 +79,11 @@ program test_driver
     testsuites = [ &
         new_testsuite("halo_exch", collect_halo_exch_suite), &
         new_testsuite("control_flow", collect_control_flow_suite), &
-        new_testsuite("advection", collect_advect_suite) &
+        new_testsuite("advection", collect_advect_suite), &
+        new_testsuite("snow_drift", collect_snow_drift_suite), &
+        new_testsuite("geo", collect_geo_suite), &
+        new_testsuite("time", collect_time_suite), &
+        new_testsuite("utilities", collect_utilities_suite) &
         ]
     ! -------------------------------------------------------------------------------------------------
     ! -------------------------------------------------------------------------------------------------

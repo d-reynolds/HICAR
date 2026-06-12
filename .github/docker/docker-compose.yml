@@ -1,0 +1,46 @@
+# Build (and optionally dev-run) the HICAR self-hosted GPU CI runner.
+#
+# This compose file is primarily for BUILDING the image:
+#        docker compose -f .github/docker/docker-compose.yml build
+#
+# For PRODUCTION, run via .github/docker/run-runner.sh (or the systemd unit)
+# instead of `compose up`: that uses `docker run --rm` to give every job a FRESH
+# container, so a job's filesystem writes never persist to the next job.
+#
+# `compose up -d` below is a convenience for quick dev runs ONLY: `restart:
+# always` re-execs the runner in the SAME container, so its writable layer
+# persists between jobs (acceptable for trusted dev, weaker isolation than the
+# per-job-fresh script).
+#
+# Either way, create .github/docker/runner.env from runner.env.example first.
+# The runner registers with labels [self-hosted, gpu, nvhpc] and picks up gpu.yml jobs.
+services:
+  hicar-gpu-runner:
+    build:
+      # Context is the parent `.github` dir so both scripts/ and docker/ are visible.
+      context: ..
+      dockerfile: docker/Dockerfile.gpu-runner
+      args:
+        # NVHPC 26.3 — matches the nvfortran that builds HICAR cleanly (26.1 has an
+        # internal compiler error in output_obj.F90). cuda_multi picks a CUDA <= the
+        # host driver at runtime. If you bump versions, update NVHPC_VER to match.
+        NVHPC_TAG: 26.3-devel-cuda_multi-ubuntu22.04
+        NVHPC_VER: "26.3"
+    image: hicar-gpu-runner:latest
+    env_file:
+      - runner.env
+    restart: always
+    # GPU access via the NVIDIA Container Runtime. This works when the toolkit is
+    # in CDI mode (where the legacy `--gpus` / deploy.devices path is disabled and
+    # errors with "invoking the NVIDIA Container Runtime Hook directly ... is not
+    # supported. Please use ... --runtime=nvidia"). Requires the nvidia runtime to
+    # be registered (nvidia-ctk runtime configure --runtime=docker).
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    # IPC/shm headroom for MPI + CUDA.
+    shm_size: "2gb"
+    ulimits:
+      memlock: -1
+      stack: 67108864

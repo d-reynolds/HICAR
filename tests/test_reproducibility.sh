@@ -68,33 +68,33 @@ figures_dir="$hicar_repo/tests/figures"
 OUTPUT_FILENAME="Gaudergrat_250m_2017-02-14_00-00-00.nc"
 
 # Make forcing file list
-if [ ! -f ./input/file_list_TestCase.txt ]; then
-    "$hicar_repo/helpers/filelist_script.sh" "forcing/*" input/file_list_TestCase.txt
+if [ ! -f "${hicar_repo}/tests/Test_Cases/input/file_list_TestCase.txt" ]; then
+    "$hicar_repo/helpers/filelist_script.sh" "${hicar_repo}/tests/Test_Cases/forcing/*" "${hicar_repo}/tests/Test_Cases/input/file_list_TestCase.txt"
 fi
 
 # Copy supporting files if missing
-if [ ! -f ./input/VEGPARM.TBL ]; then
-    echo "Copying .TBL files to ./input"
-    cp "$hicar_repo/run/"*.TBL ./input/
+if [ ! -f "${hicar_repo}/tests/Test_Cases/input/VEGPARM.TBL" ]; then
+    echo "Copying .TBL files to ${hicar_repo}/tests/Test_Cases/input"
+    cp "${hicar_repo}/run/"*.TBL "${hicar_repo}/tests/Test_Cases/input/"
 fi
-if [ ! -d ./input/rrtmg_support ]; then
-    cp -r "$hicar_repo/run/rrtmg_support" ./input
+if [ ! -d "${hicar_repo}/tests/Test_Cases/input/rrtmg_support" ]; then
+    cp -r "${hicar_repo}/run/rrtmg_support" "${hicar_repo}/tests/Test_Cases/input"
 fi
-if [ ! -d ./input/mp_support ]; then
-    cp -r "$hicar_repo/run/mp_support" ./input
+if [ ! -d "${hicar_repo}/tests/Test_Cases/input/mp_support" ]; then
+    cp -r "${hicar_repo}/run/mp_support" "${hicar_repo}/tests/Test_Cases/input"
 fi
 
 if [ "$use_gpu" = true ]; then
-    if [ ! -d ./input/rrtmgp_support ]; then
-        cp -r "$hicar_repo/run/rrtmgp_support" ./input
+    if [ ! -d "${hicar_repo}/tests/Test_Cases/input/rrtmgp_support" ]; then
+        cp -r "${hicar_repo}/run/rrtmgp_support" "${hicar_repo}/tests/Test_Cases/input"
     fi
 fi
 # Generate default namelist
-default_file=input/default_hicar_options.nml
+default_file="${hicar_repo}/tests/Test_Cases/input/default_hicar_options.nml"
 if [ -f "$default_file" ]; then
     rm "$default_file"
 fi
-echo "Generating default namelist to ./input"
+echo "Generating default namelist to ${hicar_repo}/tests/Test_Cases/input"
 $hicar_exe --gen-nml "$default_file"
 
 # Find mpiexec (same logic as test_case_runner.sh)
@@ -136,7 +136,7 @@ if [ -z "$python_exe" ]; then
 fi
 
 if ! $python_exe -c "import xarray, numpy, netCDF4" &> /dev/null; then
-    PY_ENV_PATH=$(pwd)/venv
+    PY_ENV_PATH=${hicar_repo}/tests/Test_Cases/venv
     echo -e "Creating virtual environment at ${BLUE}${PY_ENV_PATH}${NC}"
     mkdir -p "$PY_ENV_PATH"
     $python_exe -m venv "${PY_ENV_PATH}"
@@ -148,7 +148,7 @@ export OMP_NUM_THREADS=1
 
 # Cleanup trap for temp files
 cleanup() {
-    rm -f input/*.bak
+    rm -f "${hicar_repo}/tests/Test_Cases/input"/*.bak
 }
 trap cleanup EXIT
 
@@ -160,11 +160,11 @@ generate_standard_nml() {
     local output_dir="$2"
     local restart_dir="$3"
 
+    cd ${hicar_repo}/tests/Test_Cases/input
     cp "$default_file" "$out_nml"
 
     # Apply Standard.sh settings
-    cd input
-    ../input/nml_gen_scripts/Standard.sh "$(basename "$out_nml")"
+    ${hicar_repo}/tests/Test_Cases/input/nml_gen_scripts/Standard.sh "$(basename "$out_nml")"
     cd ..
 
     # Override wind, Sx, and output_vars for reproducibility testing
@@ -184,6 +184,9 @@ generate_standard_nml() {
     sed -i'.bak' "s|output_folder = '../output/Standard/'|output_folder = '${output_dir}'|g" "$out_nml"
     sed -i'.bak' "s|restart_folder = '../restart/Standard/'|restart_folder = '${restart_dir}'|g" "$out_nml"
     rm -f "${out_nml}.bak"
+
+    cd $hicar_repo
+
 }
 
 
@@ -195,11 +198,11 @@ generate_restart_nml() {
     local output_dir="$2"
     local restart_dir="$3"
 
+    cd ${hicar_repo}/tests/Test_Cases/input
     cp "$default_file" "$out_nml"
 
     # Apply Standard_restart.sh settings
-    cd input
-    ../input/nml_gen_scripts/Standard_restart.sh "$(basename "$out_nml")"
+    ${hicar_repo}/tests/Test_Cases/input/nml_gen_scripts/Standard_restart.sh "$(basename "$out_nml")"
     cd ..
 
     # Override wind, Sx, and output_vars for reproducibility testing
@@ -221,6 +224,8 @@ generate_restart_nml() {
     sed -i'.bak' "s|output_folder = '../output/Standard/'|output_folder = '${output_dir}'|g" "$out_nml"
     sed -i'.bak' "s|restart_folder = '../restart/Standard/'|restart_folder = '${restart_dir}'|g" "$out_nml"
     rm -f "${out_nml}.bak"
+
+    cd $hicar_repo
 }
 
 # -------------------------------------------------------
@@ -236,6 +241,8 @@ run_hicar() {
 
     local base_label
     base_label=$(echo "$label" | tr ' ' '_')
+
+    cd $hicar_repo/tests/Test_Cases/input
 
     if [ ! -z "$mpiexec_path" ]; then
         $mpiexec_path -np "$run_np" $hicar_exe "$nml_file" 1>"${base_label}.out" 2>"${base_label}.err" &
@@ -297,14 +304,116 @@ run_hicar() {
     else
         echo -e "${GREEN}${label} completed successfully${NC}"
     fi
+    cd $hicar_repo
 
     return $status
+}
+
+# -------------------------------------------------------
+# Helper: run_fm_decomposition  (sets test_fm_decomp_result)
+# -------------------------------------------------------
+# Fine-mesh (snow_drift) advection decomposition check. Unlike the full-model
+# decomposition test above, this exercises the fine-mesh advection + flux limiter
+# in isolation via the HICAR-tester unit executable. Run verbose ("-v"), the
+# snow_drift suite prints qs_fm at fixed GLOBAL indices as "FMPROBE i j k val"
+# (a normal, non-verbose unit run stays quiet); we run it at two rank counts and
+# diff those lines. In verbose mode the driver does NOT redirect non-root stdout,
+# so every rank prints its own interior cells — together the full domain — and the
+# join below compares every cell both decompositions own. Independent of the
+# full-model run and runs even when the full-model decomposition test is skipped
+# (e.g. <2 GPUs), since the tester is a CPU executable. SKIPs if HICAR-tester was
+# not built (the GPU lane skips its device link).
+run_fm_decomposition() {
+    echo
+    echo "-------------------------------------------------------"
+    echo -e "  ${BLUE}Fine-Mesh Advection Decomposition Test${NC}"
+    echo "-------------------------------------------------------"
+
+    # Locate the build dir whose tests/HICAR-tester exists.
+    local build_dir="${HICAR_BUILD_DIR:-}"
+    if [ -z "$build_dir" ] || [ ! -x "$build_dir/tests/HICAR-tester" ]; then
+        build_dir=""
+        for cand in "$hicar_repo/build" "$hicar_repo/Build" "$hicar_repo"; do
+            if [ -x "$cand/tests/HICAR-tester" ]; then
+                build_dir="$cand"
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$build_dir" ]; then
+        echo -e "${BLUE}HICAR-tester not found (build it with 'make HICAR-tester'); skipping fine-mesh decomposition test.${NC}"
+        test_fm_decomp_result="SKIP"
+        return 0
+    fi
+
+    # MPI launcher prefix (everything up to the rank-count flag). Reuse the
+    # launcher already discovered above for the full-model runs.
+    local launcher=""
+    if [ -n "$mpiexec_path" ]; then
+        launcher="$mpiexec_path -np"
+    elif command -v srun &> /dev/null; then
+        launcher="srun -N 1 $SRUN_FLAGS -n"
+    else
+        echo -e "${BLUE}No MPI launcher available; skipping fine-mesh decomposition test.${NC}"
+        test_fm_decomp_result="SKIP"
+        return 0
+    fi
+
+    # 1 vs 4 ranks. With "-v" every rank prints its own interior, so the union is
+    # the full domain regardless of rank count and the comparison covers every cell.
+    local np_low=1 np_high=4
+    local tmp
+    tmp="$(mktemp -d)"
+
+    # Run the snow_drift suite verbose at <np> ranks; emit the FMPROBE lines as a
+    # sorted "ZZZ_ZZZ_ZZ value" stream keyed by global (i,j,k) so they can be
+    # joined across decompositions. "-v" enables the dump (off by default).
+    run_fm_one() {
+        local np="$1" out="$2"
+        ( cd "$build_dir" && OMP_NUM_THREADS=1 \
+            $launcher "$np" ./tests/HICAR-tester -v snow_drift ) 2>&1 \
+            | grep '^FMPROBE' | awk '{printf "%03d_%03d_%02d %s\n",$2,$3,$4,$5}' | sort > "$out"
+    }
+
+    echo -e "Running HICAR-tester snow_drift at ${BLUE}${np_low}${NC} and ${BLUE}${np_high}${NC} ranks"
+    run_fm_one "$np_low"  "$tmp/low.txt"
+    run_fm_one "$np_high" "$tmp/high.txt"
+
+    local n_low n_high
+    n_low=$(wc -l < "$tmp/low.txt"); n_high=$(wc -l < "$tmp/high.txt")
+    if [ "$n_low" -eq 0 ] || [ "$n_high" -eq 0 ]; then
+        echo -e "  ${RED}FAIL: a run produced no FMPROBE output (crash?). low=${n_low} high=${n_high}${NC}"
+        test_fm_decomp_result="FAIL"
+        rm -rf "$tmp"
+        return 0
+    fi
+
+    # Compare the cells owned by BOTH decompositions (join on the global i_j_k key).
+    join "$tmp/low.txt" "$tmp/high.txt" > "$tmp/joined.txt"
+    awk '$2 != $3 {print}' "$tmp/joined.txt" > "$tmp/mismatch.txt"
+    local n_common n_bad
+    n_common=$(wc -l < "$tmp/joined.txt"); n_bad=$(wc -l < "$tmp/mismatch.txt")
+
+    echo "  compared ${n_common} common interior cells"
+    if [ "$n_bad" -eq 0 ]; then
+        echo -e "  ${GREEN}PASS: fine-mesh advection is bit-for-bit decomposition-reproducible${NC}"
+        test_fm_decomp_result="PASS"
+    else
+        echo -e "  ${RED}FAIL: ${n_bad} cell(s) differ between ${np_low} and ${np_high} ranks${NC}"
+        echo "  first mismatches (cell  ${np_low}-rank  ${np_high}-rank):"
+        head -8 "$tmp/mismatch.txt" | sed 's/^/    /'
+        test_fm_decomp_result="FAIL"
+    fi
+
+    rm -rf "$tmp"
 }
 
 # ===============================================================
 # Test Results Tracking
 # ===============================================================
 test_decomp_result=""
+test_fm_decomp_result=""
 test_restart_result=""
 
 echo
@@ -344,31 +453,31 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
     echo "-------------------------------------------------------"
 
     # Clear previous figures for this test
-    rm -rf "${figures_dir}/decomposition"
+    rm -rf "${hicar_repo}/tests/Test_Cases/figures/decomposition"
 
     # Create output/restart directories
     for suffix in Repro_MPI_${decomp_np_half} Repro_MPI_${decomp_np_full}; do
-        rm -rf "output/${suffix}" "restart/${suffix}"
-        mkdir -p "output/${suffix}" "restart/${suffix}"
+        rm -rf "${hicar_repo}/tests/Test_Cases/output/${suffix}" "${hicar_repo}/tests/Test_Cases/restart/${suffix}"
+        mkdir -p "${hicar_repo}/tests/Test_Cases/output/${suffix}" "${hicar_repo}/tests/Test_Cases/restart/${suffix}"
     done
 
     # Generate and run with half ranks
-    generate_standard_nml "input/Repro_MPI_${decomp_np_half}.nml" "../output/Repro_MPI_${decomp_np_half}/" "../restart/Repro_MPI_${decomp_np_half}/"
-    cd input
+    generate_standard_nml "${hicar_repo}/tests/Test_Cases/input/Repro_MPI_${decomp_np_half}.nml" "${hicar_repo}/tests/Test_Cases/output/Repro_MPI_${decomp_np_half}/" "${hicar_repo}/tests/Test_Cases/restart/Repro_MPI_${decomp_np_half}/"
+
     run_hicar "Repro_MPI_${decomp_np_half}.nml" "$decomp_np_half" "MPI_${decomp_np_half}ranks"
     mpi_half_status=$?
-    cd ..
+
 
     if [ $mpi_half_status -ne 0 ]; then
         echo -e "${RED}Domain Decomposition: FAILED (${decomp_np_half}-rank run failed)${NC}"
         test_decomp_result="FAIL"
     else
         # Generate and run with full ranks
-        generate_standard_nml "input/Repro_MPI_${decomp_np_full}.nml" "../output/Repro_MPI_${decomp_np_full}/" "../restart/Repro_MPI_${decomp_np_full}/"
-        cd input
+        generate_standard_nml "${hicar_repo}/tests/Test_Cases/input/Repro_MPI_${decomp_np_full}.nml" "${hicar_repo}/tests/Test_Cases/output/Repro_MPI_${decomp_np_full}/" "${hicar_repo}/tests/Test_Cases/restart/Repro_MPI_${decomp_np_full}/"
+
         run_hicar "Repro_MPI_${decomp_np_full}.nml" "$decomp_np_full" "MPI_${decomp_np_full}ranks"
         mpi_full_status=$?
-        cd ..
+
 
         if [ $mpi_full_status -ne 0 ]; then
             echo -e "${RED}Domain Decomposition: FAILED (${decomp_np_full}-rank run failed)${NC}"
@@ -377,11 +486,11 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
             # Compare outputs
             echo
             echo "Comparing MPI outputs..."
-            $python_exe "$compare_script" \
-                "output/Repro_MPI_${decomp_np_half}/${OUTPUT_FILENAME}" \
-                "output/Repro_MPI_${decomp_np_full}/${OUTPUT_FILENAME}" \
+            ${python_exe} ${compare_script} \
+                "${hicar_repo}/tests/Test_Cases/output/Repro_MPI_${decomp_np_half}/${OUTPUT_FILENAME}" \
+                "${hicar_repo}/tests/Test_Cases/output/Repro_MPI_${decomp_np_full}/${OUTPUT_FILENAME}" \
                 --tolerance 0.0 \
-                --figures-dir "${figures_dir}/decomposition"
+                --figures-dir "${hicar_repo}/tests/Test_Cases/figures/decomposition"
             if [ $? -eq 0 ]; then
                 test_decomp_result="PASS"
             else
@@ -391,6 +500,9 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
     fi
 
     fi # end skip check
+
+    # Fine-mesh advection decomposition check (HICAR-tester; CPU, GPU-independent).
+    run_fm_decomposition
 fi
 
 # ===============================================================
@@ -403,7 +515,7 @@ if [ "$test_mode" == "restart" ] || [ "$test_mode" == "all" ]; then
     echo "-------------------------------------------------------"
 
     # Clear previous figures for this test
-    rm -rf "${figures_dir}/restart"
+    rm -rf "${hicar_repo}/tests/Test_Cases/figures/restart"
 
     # Determine np for restart test
     if [ "$use_gpu" = true ]; then
@@ -424,31 +536,31 @@ if [ "$test_mode" == "restart" ] || [ "$test_mode" == "all" ]; then
 
     # Create output/restart directories
     # Both runs share the same output/restart dirs (HICAR restart appends to existing output)
-    rm -rf "output/Repro_Restart" "restart/Repro_Restart" "output/Repro_Restart_continuous_backup"
-    mkdir -p "output/Repro_Restart" "restart/Repro_Restart"
+    rm -rf "${hicar_repo}/tests/Test_Cases/output/Repro_Restart" "${hicar_repo}/tests/Test_Cases/restart/Repro_Restart" "${hicar_repo}/tests/Test_Cases/output/Repro_Restart_continuous_backup"
+    mkdir -p "${hicar_repo}/tests/Test_Cases/output/Repro_Restart" "${hicar_repo}/tests/Test_Cases/restart/Repro_Restart"
 
     # Run continuous (full 10 min)
-    generate_standard_nml "input/Repro_Restart_cont.nml" "../output/Repro_Restart/" "../restart/Repro_Restart/"
-    cd input
+    generate_standard_nml "${hicar_repo}/tests/Test_Cases/input/Repro_Restart_cont.nml" "${hicar_repo}/tests/Test_Cases/output/Repro_Restart/" "${hicar_repo}/tests/Test_Cases/restart/Repro_Restart/"
+
     run_hicar "Repro_Restart_cont.nml" "$restart_np" "Restart_continuous"
     cont_status=$?
-    cd ..
+
 
     if [ $cont_status -ne 0 ]; then
         echo -e "${RED}Restart Reproducibility: FAILED (continuous run failed)${NC}"
         test_restart_result="FAIL"
     else
         # Save backup of continuous output before restart overwrites it
-        mkdir -p "output/Repro_Restart_continuous_backup"
-        cp "output/Repro_Restart/${OUTPUT_FILENAME}" "output/Repro_Restart_continuous_backup/${OUTPUT_FILENAME}"
+        mkdir -p "${hicar_repo}/tests/Test_Cases/output/Repro_Restart_continuous_backup"
+        cp "${hicar_repo}/tests/Test_Cases/output/Repro_Restart/${OUTPUT_FILENAME}" "${hicar_repo}/tests/Test_Cases/output/Repro_Restart_continuous_backup/${OUTPUT_FILENAME}"
 
         # Run restart (picks up from checkpoint at 5 min)
         # Uses the same output and restart dirs (HICAR appends to existing output file)
-        generate_restart_nml "input/Repro_Restart_rst.nml" "../output/Repro_Restart/" "../restart/Repro_Restart/"
-        cd input
+        generate_restart_nml "${hicar_repo}/tests/Test_Cases/input/Repro_Restart_rst.nml" "${hicar_repo}/tests/Test_Cases/output/Repro_Restart/" "${hicar_repo}/tests/Test_Cases/restart/Repro_Restart/"
+
         run_hicar "Repro_Restart_rst.nml" "$restart_np" "Restart_from_checkpoint"
         rst_status=$?
-        cd ..
+
 
         if [ $rst_status -ne 0 ]; then
             echo -e "${RED}Restart Reproducibility: FAILED (restart run failed)${NC}"
@@ -457,12 +569,12 @@ if [ "$test_mode" == "restart" ] || [ "$test_mode" == "all" ]; then
             # Compare final timestep: continuous backup vs post-restart output
             echo
             echo "Comparing restart outputs (last timestep only)..."
-            $python_exe "$compare_script" \
-                "output/Repro_Restart_continuous_backup/${OUTPUT_FILENAME}" \
-                "output/Repro_Restart/${OUTPUT_FILENAME}" \
+            ${python_exe} ${compare_script} \
+                "${hicar_repo}/tests/Test_Cases/output/Repro_Restart_continuous_backup/${OUTPUT_FILENAME}" \
+                "${hicar_repo}/tests/Test_Cases/output/Repro_Restart/${OUTPUT_FILENAME}" \
                 --tolerance 0.1 \
                 --last-timestep-only \
-                --figures-dir "${figures_dir}/restart"
+                --figures-dir "${hicar_repo}/tests/Test_Cases/figures/restart"
             if [ $? -eq 0 ]; then
                 test_restart_result="PASS"
             else
@@ -489,6 +601,15 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
         echo -e "  Domain Decomposition:              ${BLUE}SKIP (insufficient GPUs)${NC}"
     else
         echo -e "  Domain Decomposition (${decomp_np_half} vs ${decomp_np_full}):   ${RED}${test_decomp_result}${NC}"
+        any_fail=1
+    fi
+
+    if [ "$test_fm_decomp_result" == "PASS" ]; then
+        echo -e "  Fine-Mesh Advection Decomposition: ${GREEN}PASS${NC}"
+    elif [ "$test_fm_decomp_result" == "SKIP" ]; then
+        echo -e "  Fine-Mesh Advection Decomposition: ${BLUE}SKIP (HICAR-tester not built)${NC}"
+    else
+        echo -e "  Fine-Mesh Advection Decomposition: ${RED}${test_fm_decomp_result}${NC}"
         any_fail=1
     fi
 fi
