@@ -41,6 +41,7 @@ endif()
 set(
   tests
   advect
+  snow_drift
   control_flow
   halo_exch
 )
@@ -88,7 +89,7 @@ elseif (COMPILER STREQUAL "intel")
 elseif (COMPILER STREQUAL "cray")
   target_compile_options("${PROJECT_NAME}-tester" PUBLIC -h noomp -c -eI -G0 -m2 -rl -R bcdsp) #-R cpbs --cray-print-opts
 elseif (COMPILER STREQUAL "nvfortran")
-		target_compile_options("${PROJECT_NAME}-tester" PUBLIC -O3 -Minfo=accel -march=native -acc=gpu -gpu=mem:separate,ccnative,deepcopy)
+		target_compile_options("${PROJECT_NAME}-tester" PUBLIC -O0 -g -Minfo=accel -march=native -acc=gpu -gpu=mem:separate,ccnative)
 endif()
 
 # Create a custom target for downloading test data

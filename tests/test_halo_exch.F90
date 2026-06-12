@@ -53,7 +53,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 171, 517, DOMAIN_NZ, image=my_index, comms=comms, adv_order=3)
+        call grid%set_grid_dimensions( 171, 517, DOMAIN_NZ, global_nz=DOMAIN_NZ, image=my_index, comms=comms, adv_order=3)
         call halo_exch_standard(grid,error,batch_in=.True.,test_str_in="batch exchange")
 
         call grid_2d%set_grid_dimensions( 171, 517, 0, image=my_index, global_nz=DOMAIN_NZ, comms=comms, adv_order=3)
@@ -78,7 +78,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 171, 517, DOMAIN_NZ, image=my_index, comms=comms, adv_order=3)
+        call grid%set_grid_dimensions( 171, 517, DOMAIN_NZ, global_nz=DOMAIN_NZ, image=my_index, comms=comms, adv_order=3)
         call snow_grid%set_grid_dimensions( 171, 517, kSNOW_GRID_Z, global_nz=DOMAIN_NZ, image=my_index, comms=comms, adv_order=3)
 
         call halo_exch_standard(grid,error,test_str_in="var exchange")
@@ -129,7 +129,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 171, 517, DOMAIN_NZ, image=my_index, comms=comms, adv_order=3, nx_extra = 1)
+        call grid%set_grid_dimensions( 171, 517, DOMAIN_NZ, global_nz=DOMAIN_NZ, image=my_index, comms=comms, adv_order=3, nx_extra = 1)
 
         call halo_exch_standard(grid,error,test_str_in="var staggered on u grid")
         if (allocated(error)) return
@@ -152,7 +152,7 @@ module test_halo_exch
         CALL MPI_Comm_dup( MPI_COMM_WORLD, comms, ierr )
 
         !initialize grids
-        call grid%set_grid_dimensions( 171, 517, DOMAIN_NZ, image=my_index, comms=comms, adv_order=3, ny_extra = 1)
+        call grid%set_grid_dimensions( 171, 517, DOMAIN_NZ, global_nz=DOMAIN_NZ, image=my_index, comms=comms, adv_order=3, ny_extra = 1)
 
         call halo_exch_standard(grid,error,test_str_in="var staggered on v grid")
         if (allocated(error)) return

@@ -1,12 +1,41 @@
 #!/usr/bin/env python3
-"""Compare two HICAR NetCDF output files for reproducibility testing.
+"""Compare two HICAR NetCDF output files for regression / reproducibility / CPU-GPU testing.
+
+This is the single comparison engine used by all HICAR test lanes:
+
+  * exact      — bit-for-bit (CPU regression vs a CPU baseline on a fixed toolchain)
+  * tolerance  — per-variable relative+absolute tolerances (CPU<->GPU, gnu<->nvfortran),
+                 driven by a YAML spec (see tests/tolerances.yaml)
+
+It is deliberately strict about the things that matter for "the model won't crash and
+behaves as expected":
+
+  * NaN / Inf introduced by FILE2 (the candidate) that are not present in FILE1 (the
+    baseline) are ALWAYS a failure, regardless of tolerance. The previous implementation
+    used nanmax/nansum and silently ignored NaNs — a run that blew up to NaN could pass.
+  * A variable present in the baseline but missing from the candidate is a failure
+    (a dropped/renamed output). A variable added by the candidate is reported as a warning.
+  * On failure it localizes the worst offender (variable, dimension indices, both values,
+    abs and rel error) so a developer learns *what* broke and *where*.
 
 Usage:
-    compare_outputs.py FILE1 FILE2 --tolerance TOL [--last-timestep-only] [--figures-dir DIR]
+    compare_outputs.py FILE1 FILE2 [options]
+
+    FILE1 is treated as the reference / baseline, FILE2 as the candidate.
+
+Common invocations:
+    # bit-for-bit (legacy default; --tolerance 0.0 == exact)
+    compare_outputs.py baseline.nc candidate.nc --mode exact
+
+    # per-variable tolerance for the GPU lane
+    compare_outputs.py cpu_ref.nc gpu.nc --tolerance-spec tests/tolerances.yaml \
+        --github-annotations --report-json report.json
 """
 import argparse
+import json
 import os
 import sys
+
 import numpy as np
 import xarray as xr
 
@@ -14,12 +43,148 @@ import xarray as xr
 class bcolors:
     BLUE = '\033[0;36m'
     GREEN = '\033[0;32m'
+    YELLOW = '\033[0;33m'
     RED = '\033[0;31m'
     NC = '\033[0m'
 
 
+# ----------------------------------------------------------------------------
+# Tolerance spec
+# ----------------------------------------------------------------------------
+class ToleranceSpec:
+    """Resolves the (rtol, atol) pair to apply to a given variable.
+
+    Spec file (YAML) format:
+
+        defaults:
+          rtol: 1.0e-5
+          atol: 1.0e-8
+        variables:
+          pressure: {rtol: 1.0e-6, atol: 1.0e-2}
+          qv:       {rtol: 1.0e-4, atol: 1.0e-12}
+        ignore:
+          - time
+    """
+
+    def __init__(self, default_rtol=0.0, default_atol=0.0, per_var=None, ignore=None):
+        self.default_rtol = float(default_rtol)
+        self.default_atol = float(default_atol)
+        self.per_var = per_var or {}
+        self.ignore = set(ignore or [])
+
+    @classmethod
+    def from_file(cls, path):
+        import yaml  # local import so exact-mode runs need no pyyaml
+        with open(path) as fh:
+            spec = yaml.safe_load(fh) or {}
+        defaults = spec.get("defaults", {}) or {}
+        per_var = {}
+        for name, tol in (spec.get("variables", {}) or {}).items():
+            tol = tol or {}
+            per_var[name] = (
+                float(tol.get("rtol", defaults.get("rtol", 0.0))),
+                float(tol.get("atol", defaults.get("atol", 0.0))),
+            )
+        return cls(
+            default_rtol=defaults.get("rtol", 0.0),
+            default_atol=defaults.get("atol", 0.0),
+            per_var=per_var,
+            ignore=spec.get("ignore", []) or [],
+        )
+
+    def for_var(self, name):
+        return self.per_var.get(name, (self.default_rtol, self.default_atol))
+
+
+# ----------------------------------------------------------------------------
+# Per-variable comparison
+# ----------------------------------------------------------------------------
+def _index_label(flat_index, shape, dims):
+    """Turn a flat index into a human-readable 'dim=i, dim=j, ...' label."""
+    if not shape:
+        return "(scalar)"
+    idx = np.unravel_index(flat_index, shape)
+    return ", ".join(f"{d}={int(i)}" for d, i in zip(dims, idx))
+
+
+def compare_variable(name, v1, v2, rtol, atol):
+    """Compare one variable. Returns a result dict with status in
+    {'ok', 'diff', 'nan', 'shape', 'skip'} and supporting diagnostics."""
+    dims = list(v1.dims)
+    a1 = np.asarray(v1.values)
+    a2 = np.asarray(v2.values)
+
+    # Non-numeric data (characters, etc.) — only exact-equality is meaningful.
+    if not (np.issubdtype(a1.dtype, np.number) and np.issubdtype(a2.dtype, np.number)):
+        equal = a1.shape == a2.shape and bool(np.all(a1 == a2))
+        return {"name": name, "status": "ok" if equal else "diff",
+                "message": "non-numeric", "rtol": rtol, "atol": atol}
+
+    a1 = a1.astype(np.float64)
+    a2 = a2.astype(np.float64)
+
+    if a1.shape != a2.shape:
+        return {"name": name, "status": "shape", "rtol": rtol, "atol": atol,
+                "shape1": list(a1.shape), "shape2": list(a2.shape)}
+
+    # --- NaN / Inf: introduced by the candidate is always a failure ----------
+    bad1 = ~np.isfinite(a1)
+    bad2 = ~np.isfinite(a2)
+    introduced = bad2 & ~bad1
+    n_introduced = int(np.count_nonzero(introduced))
+    if n_introduced > 0:
+        first = int(np.argmax(introduced.ravel()))
+        return {"name": name, "status": "nan", "rtol": rtol, "atol": atol,
+                "n_introduced": n_introduced,
+                "where": _index_label(first, a1.shape, dims),
+                "baseline_value": float(a1.ravel()[first])}
+
+    # Compare only positions finite in both (pre-existing fills are ignored).
+    finite = np.isfinite(a1) & np.isfinite(a2)
+    if not np.any(finite):
+        return {"name": name, "status": "ok", "rtol": rtol, "atol": atol,
+                "max_abs": 0.0, "max_rel": 0.0, "n_violations": 0,
+                "message": "no finite values to compare"}
+
+    abs_err = np.abs(a2 - a1)
+    abs_err = np.where(finite, abs_err, 0.0)
+
+    denom = np.abs(a1)
+    rel_err = np.where(finite & (denom > 0), abs_err / np.where(denom > 0, denom, 1.0), 0.0)
+
+    max_abs = float(np.max(abs_err))
+    max_rel = float(np.max(rel_err))
+
+    # isclose semantics: violation where |a2-a1| > atol + rtol*|a1|
+    threshold = atol + rtol * denom
+    violations = finite & (abs_err > threshold)
+    n_violations = int(np.count_nonzero(violations))
+
+    result = {"name": name, "rtol": rtol, "atol": atol,
+              "max_abs": max_abs, "max_rel": max_rel,
+              "n_violations": n_violations,
+              "n_finite": int(np.count_nonzero(finite))}
+
+    if n_violations == 0:
+        result["status"] = "ok"
+        return result
+
+    # Localize the worst offender by how far it exceeds its own threshold.
+    margin = np.where(violations, abs_err - threshold, -np.inf)
+    worst = int(np.argmax(margin.ravel()))
+    result["status"] = "diff"
+    result["where"] = _index_label(worst, a1.shape, dims)
+    result["baseline_value"] = float(a1.ravel()[worst])
+    result["candidate_value"] = float(a2.ravel()[worst])
+    result["worst_abs"] = float(abs_err.ravel()[worst])
+    result["worst_rel"] = float(rel_err.ravel()[worst])
+    return result
+
+
+# ----------------------------------------------------------------------------
+# Plotting (unchanged behaviour, used for failing variables)
+# ----------------------------------------------------------------------------
 def plot_diff(a1, a2, var_name, label1, label2, figures_dir):
-    """Save a comparison figure for a variable that failed the tolerance check."""
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -28,64 +193,87 @@ def plot_diff(a1, a2, var_name, label1, label2, figures_dir):
         print(f"  {bcolors.RED}matplotlib not available, skipping figure for {var_name}{bcolors.NC}")
         return
 
+    a1 = np.asarray(a1, dtype=np.float64)
+    a2 = np.asarray(a2, dtype=np.float64)
     diff = a1 - a2
 
-    # For 3D+ arrays, take a 2D slice: last time, mid-level
     if diff.ndim >= 4:
-        # (time, level, lat, lon) — last time, mid-level
         a1 = a1[-1, a1.shape[1] // 2, :, :]
         a2 = a2[-1, a2.shape[1] // 2, :, :]
         diff = diff[-1, diff.shape[1] // 2, :, :]
-        slice_label = f"t=-1, level={a1.shape[0] // 2 if a1.ndim > 2 else 'mid'}"
+        slice_label = "t=-1, mid-level"
     elif diff.ndim == 3:
-        # Could be (time, lat, lon) or (level, lat, lon)
         a1 = a1[-1, :, :]
         a2 = a2[-1, :, :]
-        diff = np.sum(diff[:, :, :],axis=0)
+        diff = np.nansum(diff, axis=0)
         slice_label = "t=-1"
     elif diff.ndim == 2:
         slice_label = "2D field"
     else:
-        # 1D or scalar — skip plotting
         return
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-
     vmin = min(np.nanmin(a1), np.nanmin(a2))
     vmax = max(np.nanmax(a1), np.nanmax(a2))
-
     im0 = axes[0].imshow(a1, origin='lower', vmin=vmin, vmax=vmax)
-    axes[0].set_title(f"{label1}")
-    plt.colorbar(im0, ax=axes[0], shrink=0.8)
-
+    axes[0].set_title(label1); plt.colorbar(im0, ax=axes[0], shrink=0.8)
     im1 = axes[1].imshow(a2, origin='lower', vmin=vmin, vmax=vmax)
-    axes[1].set_title(f"{label2}")
-    plt.colorbar(im1, ax=axes[1], shrink=0.8)
-
+    axes[1].set_title(label2); plt.colorbar(im1, ax=axes[1], shrink=0.8)
     im2 = axes[2].imshow(diff, origin='lower', cmap='RdBu_r')
-    axes[2].set_title("Difference (file1 - file2)")
-    plt.colorbar(im2, ax=axes[2], shrink=0.8)
-
+    axes[2].set_title("Difference (file1 - file2)"); plt.colorbar(im2, ax=axes[2], shrink=0.8)
     fig.suptitle(f"{var_name}  ({slice_label})", fontsize=13)
     fig.tight_layout()
-
     outpath = os.path.join(figures_dir, f"{var_name}.png")
     fig.savefig(outpath, dpi=150)
     plt.close(fig)
     print(f"    Saved figure: {outpath}")
 
 
+# ----------------------------------------------------------------------------
+def gh_annotation(level, title, message):
+    """Emit a GitHub Actions workflow annotation (rendered in the PR checks UI)."""
+    msg = message.replace('\n', '%0A')
+    print(f"::{level} title={title}::{msg}")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Compare two HICAR output files")
-    parser.add_argument("file1", help="First NetCDF file")
-    parser.add_argument("file2", help="Second NetCDF file")
-    parser.add_argument("--tolerance", type=float, default=0.0,
-                        help="Maximum allowed absolute difference (0.0 = exact match)")
-    parser.add_argument("--last-timestep-only", action="store_true",
-                        help="Only compare the last timestep common to both files")
-    parser.add_argument("--figures-dir", default=None,
-                        help="Directory to save comparison plots for failing variables")
-    args = parser.parse_args()
+    p = argparse.ArgumentParser(description="Compare two HICAR output files")
+    p.add_argument("file1", help="Reference / baseline NetCDF file")
+    p.add_argument("file2", help="Candidate NetCDF file")
+    p.add_argument("--mode", choices=["exact", "tolerance"], default=None,
+                   help="exact = bit-for-bit; tolerance = use spec/flags. "
+                        "Default: exact unless a spec or nonzero --tolerance is given.")
+    p.add_argument("--tolerance", type=float, default=None,
+                   help="Legacy global absolute tolerance (atol). 0.0 = exact match.")
+    p.add_argument("--tolerance-spec", default=None,
+                   help="YAML file of per-variable rtol/atol (see tests/tolerances.yaml)")
+    p.add_argument("--default-rtol", type=float, default=0.0)
+    p.add_argument("--default-atol", type=float, default=0.0)
+    p.add_argument("--last-timestep-only", action="store_true")
+    p.add_argument("--allow-trim", action="store_true",
+                   help="Trim mismatched array shapes to the common size instead of failing "
+                        "(needed for continuous-vs-restart reproducibility comparisons).")
+    p.add_argument("--ignore-added", action="store_true",
+                   help="Do not warn about variables present only in the candidate.")
+    p.add_argument("--figures-dir", default=None)
+    p.add_argument("--report-json", default=None,
+                   help="Write a machine-readable JSON report to this path.")
+    p.add_argument("--github-annotations", action="store_true",
+                   help="Emit ::error:: / ::warning:: annotations for the PR checks UI.")
+    args = p.parse_args()
+
+    # Resolve the tolerance spec.
+    if args.tolerance_spec:
+        spec = ToleranceSpec.from_file(args.tolerance_spec)
+        mode = args.mode or "tolerance"
+    else:
+        # Legacy --tolerance maps onto a global atol.
+        atol = args.tolerance if args.tolerance is not None else args.default_atol
+        rtol = args.default_rtol
+        spec = ToleranceSpec(default_rtol=rtol, default_atol=atol)
+        if args.mode == "exact":
+            spec = ToleranceSpec(0.0, 0.0)
+        mode = args.mode or ("tolerance" if (atol > 0 or rtol > 0) else "exact")
 
     try:
         ds1 = xr.open_dataset(args.file1)
@@ -94,69 +282,112 @@ def main():
         print(f"{bcolors.RED}Error opening files: {e}{bcolors.NC}")
         return 1
 
-    # Find common data variables (skip coordinate-only vars)
-    common_vars = sorted(set(ds1.data_vars) & set(ds2.data_vars))
-    if not common_vars:
-        print(f"{bcolors.RED}No common variables found between the two files{bcolors.NC}")
-        return 1
+    vars1 = set(ds1.data_vars)
+    vars2 = set(ds2.data_vars)
+    missing = sorted((vars1 - vars2) - spec.ignore)   # in baseline, gone from candidate
+    added = sorted((vars2 - vars1) - spec.ignore)     # new in candidate
+    common = sorted((vars1 & vars2) - spec.ignore)
 
-    # Create figures directory if requested
     if args.figures_dir:
         os.makedirs(args.figures_dir, exist_ok=True)
+    label1 = os.path.basename(os.path.dirname(args.file1)) or "file1"
+    label2 = os.path.basename(os.path.dirname(args.file2)) or "file2"
 
-    # Labels for plot titles (basename of each file's parent dir)
-    label1 = os.path.basename(os.path.dirname(args.file1))
-    label2 = os.path.basename(os.path.dirname(args.file2))
-
-    print(f"Comparing {bcolors.BLUE}{args.file1}{bcolors.NC}")
-    print(f"     with {bcolors.BLUE}{args.file2}{bcolors.NC}")
+    print(f"Comparing {bcolors.BLUE}{args.file1}{bcolors.NC}  (baseline)")
+    print(f"     with {bcolors.BLUE}{args.file2}{bcolors.NC}  (candidate)")
+    print(f"  mode = {mode}" + (f"   spec = {args.tolerance_spec}" if args.tolerance_spec else ""))
     if args.last_timestep_only:
         print("  (last timestep only)")
-    print("-" * 60)
+    print("-" * 78)
 
-    error_flag = False
+    results = []
+    failed = False
 
-    for var_name in common_vars:
-        v1 = ds1[var_name]
-        v2 = ds2[var_name]
+    # Dropped variables are regressions.
+    for name in missing:
+        failed = True
+        msg = f"variable '{name}' present in baseline but MISSING from candidate"
+        print(f"  {name:24s}: {bcolors.RED}MISSING{bcolors.NC}")
+        results.append({"name": name, "status": "missing"})
+        if args.github_annotations:
+            gh_annotation("error", "Dropped output variable", msg)
 
+    for name in added:
+        results.append({"name": name, "status": "added"})
+        if not args.ignore_added:
+            print(f"  {name:24s}: {bcolors.YELLOW}ADDED (candidate only){bcolors.NC}")
+            if args.github_annotations:
+                gh_annotation("warning", "New output variable",
+                              f"variable '{name}' present only in candidate")
+
+    for name in common:
+        v1 = ds1[name]
+        v2 = ds2[name]
         if args.last_timestep_only and "time" in v1.dims:
             v1 = v1.isel(time=-1)
             v2 = v2.isel(time=-1)
+        if args.allow_trim and v1.shape != v2.shape:
+            common_shape = tuple(min(s1, s2) for s1, s2 in zip(v1.shape, v2.shape))
+            slc = tuple(slice(0, s) for s in common_shape)
+            v1 = v1[slc]
+            v2 = v2[slc]
 
-        a1 = v1.values
-        a2 = v2.values
+        rtol, atol = spec.for_var(name)
+        r = compare_variable(name, v1, v2, rtol, atol)
+        results.append(r)
 
-        # Shapes may differ (e.g. different number of timesteps); trim to common size
-        if a1.shape != a2.shape:
-            common_shape = tuple(min(s1, s2) for s1, s2 in zip(a1.shape, a2.shape))
-            slices = tuple(slice(0, s) for s in common_shape)
-            a1 = a1[slices]
-            a2 = a2[slices]
-
-        diff = np.abs(a1 - a2)
-        max_diff = float(np.nanmax(diff)) if diff.size > 0 else 0.0
-        sum_diff = float(np.nansum(diff)) if diff.size > 0 else 0.0
-
-        status = f"{bcolors.GREEN}OK{bcolors.NC}" if max_diff <= args.tolerance else f"{bcolors.RED}DIFF{bcolors.NC}"
-        print(f"  {var_name:20s}: max|diff| = {max_diff:.6e} sum|diff| = {sum_diff:.6e}  [{status}]")
-
-        if max_diff > args.tolerance:
-            error_flag = True
+        st = r["status"]
+        if st == "ok":
+            extra = (f"max|abs|={r['max_abs']:.3e} max|rel|={r['max_rel']:.3e}"
+                     if "max_abs" in r else r.get("message", ""))
+            print(f"  {name:24s}: {bcolors.GREEN}OK{bcolors.NC}   {extra}")
+        elif st == "nan":
+            failed = True
+            msg = (f"{r['n_introduced']} new NaN/Inf value(s); first at {r['where']} "
+                   f"(baseline was {r['baseline_value']:.6e})")
+            print(f"  {name:24s}: {bcolors.RED}NaN/Inf{bcolors.NC}  {msg}")
+            if args.github_annotations:
+                gh_annotation("error", f"NaN/Inf introduced in {name}", msg)
             if args.figures_dir:
-                plot_diff(a1, a2, var_name, label1, label2, args.figures_dir)
+                plot_diff(ds1[name].values, ds2[name].values, name, label1, label2, args.figures_dir)
+        elif st == "shape":
+            failed = True
+            msg = f"shape {r['shape1']} (baseline) != {r['shape2']} (candidate)"
+            print(f"  {name:24s}: {bcolors.RED}SHAPE{bcolors.NC}   {msg}")
+            if args.github_annotations:
+                gh_annotation("error", f"Shape mismatch in {name}", msg)
+        elif st == "diff":
+            failed = True
+            msg = (f"{r['n_violations']}/{r['n_finite']} values exceed tol "
+                   f"(rtol={rtol:.1e}, atol={atol:.1e}); worst at {r['where']}: "
+                   f"baseline={r['baseline_value']:.6e} candidate={r['candidate_value']:.6e} "
+                   f"(abs={r['worst_abs']:.3e}, rel={r['worst_rel']:.3e})")
+            print(f"  {name:24s}: {bcolors.RED}DIFF{bcolors.NC}    {msg}")
+            if args.github_annotations:
+                gh_annotation("error", f"{name} differs beyond tolerance", msg)
+            if args.figures_dir:
+                plot_diff(ds1[name].values, ds2[name].values, name, label1, label2, args.figures_dir)
 
-    print("-" * 60)
-
+    print("-" * 78)
     ds1.close()
     ds2.close()
 
-    if error_flag:
-        print(f"{bcolors.RED}FAILED: Files differ beyond tolerance {args.tolerance}{bcolors.NC}")
+    n_fail = sum(1 for r in results if r["status"] in ("diff", "nan", "shape", "missing"))
+    summary = {"passed": not failed, "mode": mode,
+               "n_compared": len(common), "n_failed": n_fail,
+               "n_missing": len(missing), "n_added": len(added),
+               "results": results}
+    if args.report_json:
+        with open(args.report_json, "w") as fh:
+            json.dump(summary, fh, indent=2)
+        print(f"  JSON report: {bcolors.BLUE}{args.report_json}{bcolors.NC}")
+
+    if failed:
+        print(f"{bcolors.RED}FAILED: {n_fail} variable(s) differ beyond tolerance / "
+              f"introduced NaN / changed shape / were dropped.{bcolors.NC}")
         return 1
-    else:
-        print(f"{bcolors.GREEN}PASSED: All variables match within tolerance {args.tolerance}{bcolors.NC}")
-        return 0
+    print(f"{bcolors.GREEN}PASSED: all {len(common)} compared variable(s) within tolerance.{bcolors.NC}")
+    return 0
 
 
 if __name__ == "__main__":
