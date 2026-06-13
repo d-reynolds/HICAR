@@ -30,7 +30,7 @@ HICAR currently supports either the GNU Fortran or Cray compilers. The Cray comp
 
 #### Static data requirements
 
-HICAR uses a domain file which defines land-surface variables and some terrain-descriptors. To generate a HICAR domain file using an existing DEM and land use data, the  python script gen_HICAR_dom.py, located in helpers/ can be used. See below for more details on how to run this script.
+HICAR uses a domain file which defines land-surface variables and some terrain-descriptors. To generate a HICAR domain file using an existing DEM and land use data, the python script gen_HICAR_dom.py, located in helpers/domains/, can be used. See below for more details on how to run this script.
 
 Example static data for running a 1-day simulation can be found under [HICAR-model/Test-data](https://github.com/HICAR-Model/Test-Data)
 

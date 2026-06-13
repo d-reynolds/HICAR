@@ -31,3 +31,5 @@ FSM2trans/lib/*
 tests/Test_Cases*
 tests/figures/
 lib/*
+helpers/domains/HORAYZON/
+__pycache__/
