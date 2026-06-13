@@ -120,8 +120,6 @@ contains
             stop
         endif
 
-        if (this%general%phys_suite /= '') call set_phys_suite(this)
-        
         call default_var_requests(this)
 
         if (n_indx == 1) call version_check(this%general)
@@ -996,10 +994,10 @@ contains
                                             use_cu_options, use_rad_options, use_pbl_options, use_sfc_options, &
                                             use_wind_options, use_sm_options
 
-        character(len=kMAX_FILE_LENGTH), dimension(kMAX_NESTS) :: start_date, end_date, calendar, version, comment, phys_suite
+        character(len=kMAX_FILE_LENGTH), dimension(kMAX_NESTS) :: start_date, end_date, calendar, version, comment
         character(len=kMAX_NAME_LENGTH)                        :: start_date_checked, end_date_checked
         namelist /general/    debug, interactive, calendar,          &
-                              version, comment, phys_suite,                 &
+                              version, comment,                 &
                               start_date, end_date, &
                               nests, parent_nest, &
                               use_mp_options,     &
@@ -1030,7 +1028,6 @@ contains
         call set_nml_var_default(calendar, 'calendar', print_info, gennml)
         call set_nml_var_default(start_date, 'start_date', print_info, gennml)
         call set_nml_var_default(end_date, 'end_date', print_info, gennml)
-        call set_nml_var_default(phys_suite, 'phys_suite', print_info, gennml)
         call set_nml_var_default(nests, 'nests', print_info, gennml)
         call set_nml_var_default(parent_nest, 'parent_nest', print_info, gennml)
         call set_nml_var_default(use_mp_options, 'use_mp_options', print_info, gennml)
@@ -1064,7 +1061,6 @@ contains
         call set_nml_var(gen_options%calendar, calendar(n_indx), 'calendar', calendar(1))
         call set_nml_var(gen_options%version, version(n_indx), 'version', version(1))
         call set_nml_var(gen_options%comment, comment(n_indx), 'comment', comment(1))
-        call set_nml_var(gen_options%phys_suite, phys_suite(n_indx), 'phys_suite',  phys_suite(1))
         call set_nml_var(gen_options%debug, debug(n_indx), 'debug', debug(1))
         call set_nml_var(gen_options%interactive, interactive(n_indx), 'interactive', interactive(1)) 
         call set_nml_var(gen_options%nests, nests(n_indx), 'nests',  nests(1))
@@ -2549,37 +2545,6 @@ contains
     end subroutine time_parameters_namelist
     
     
-    subroutine set_phys_suite(options)
-        implicit none
-        type(options_t),    intent(inout) :: options
-    
-        select case (options%general%phys_suite)
-            case('HICAR')
-                if (options%domain%dx >= 1000 .and. STD_OUT_PE) then
-                    write(*,*) '------------------------------------------------'
-                    write(*,*) 'WARNING: Setting HICAR namelist options'
-                    write(*,*) 'When user has selected dx => 1000.'
-                    write(*,*) 'High-resolution wind solver will be used,'
-                    write(*,*) 'which may not be appropriate for this resolution'
-                    write(*,*) '------------------------------------------------'
-                endif
-                !Add base HICAR options here
-                
-                !options%physics%boundarylayer = at some point, add a scale aware / LES turbulence scheme
-                
-                options%physics%windtype = 1
-                options%physics%convection = 0
-                options%wind%Sx = .True.
-                options%time%RK3 = .True.
-                options%domain%use_agl_height = .True.
-                options%domain%agl_cap = 800
-                options%domain%sleve = .True.
-                options%adv%advect_density = .True.
-
-        end select
-    
-    end subroutine
-    
     !> ----------------------------------------------------------------------------
     !!  Read in the name of the boundary condition files from a text file
     !!
@@ -3285,7 +3250,6 @@ contains
         call append_kv_logical(config_str, pos, 'general', 'ideal',            this%general%ideal)
         call append_kv_int    (config_str, pos, 'general', 'nests',            this%general%nests)
         call append_kv_int    (config_str, pos, 'general', 'parent_nest',      this%general%parent_nest)
-        call append_kv_str    (config_str, pos, 'general', 'phys_suite',       trim(this%general%phys_suite))
         call append_kv_logical(config_str, pos, 'general', 'use_mp_options',   this%general%use_mp_options)
         call append_kv_logical(config_str, pos, 'general', 'use_lt_options',   this%general%use_lt_options)
         call append_kv_logical(config_str, pos, 'general', 'use_adv_options',  this%general%use_adv_options)

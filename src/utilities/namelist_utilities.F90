@@ -1648,10 +1648,6 @@ contains
                 min = 0
                 max = kMAX_NESTS
                 group = "General"
-            case ("phys_suite")
-                description = "Physics suite to use, current options: (HICAR)"
-                group = "General"
-                type = 1
             case ("use_mp_options")
                 description = "Read the microphysics namelist section to set options relevant for the Thompson MP schemes (T/F)"
                 default = ".True."

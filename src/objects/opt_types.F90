@@ -320,7 +320,7 @@ module options_types
     ! ------------------------------------------------
     type general_options_type
 
-        character (len=kMAX_NAME_LENGTH) :: version, comment, phys_suite
+        character (len=kMAX_NAME_LENGTH) :: version, comment
 
         logical :: debug                ! outputs a little more information at runtime (not much at present)
         logical :: interactive          ! set to true if running at the commandline to see %complete printed
