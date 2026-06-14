@@ -8,11 +8,13 @@
 # commit status. The GPU lane reads that status to decide whether it can skip
 # re-running this suite (see gpu.yml).
 #
-# The `example-namelists` job (push to main/develop only) reuses the release
-# build's executable to regenerate helpers/example_namelists/*.nml and commit
-# them back — it shares cpu-release's build instead of compiling HICAR a second
-# time. It is a sibling of the test jobs (needs cpu-release for the exe, runs
-# regardless of whether the tests pass) and does not affect `sign`.
+# The `example-namelists` job (push to develop only) reuses the release build's
+# executable to regenerate helpers/example_namelists/*.nml and commit them back
+# — it shares cpu-release's build instead of compiling HICAR a second time. It is
+# a sibling of the test jobs (needs cpu-release for the exe, runs regardless of
+# whether the tests pass) and does not affect `sign`. It targets develop (not
+# main) because it pushes a commit directly, which main's PR-only ruleset blocks;
+# main gets the refreshed namelists via the develop -> main PR.
 #
 # Triggers: every PR, push to main/develop, nightly, manual, and workflow_call
 # (so gpu.yml can invoke it for an unsigned commit).
@@ -149,25 +151,33 @@ jobs:
       - name: Sign commit (hicar-full-test = success)
         env:
           GH_TOKEN: ${{ github.token }}
+          # On a pull_request event github.sha is the ephemeral merge commit, but
+          # branch-ruleset required status checks are evaluated on the PR HEAD
+          # commit — so post there for PRs (falls back to github.sha for pushes,
+          # which is what the GPU lane's signed-commit skip logic reads).
+          SIGN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          gh api -X POST "/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+          gh api -X POST "/repos/${{ github.repository }}/statuses/${SIGN_SHA}" \
             -f state=success \
             -f context=hicar-full-test \
             -f description="Passed HICAR full-test (CPU debug + release)" \
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "Signed ${{ github.sha }} as hicar-full-test=success"
+          echo "Signed ${SIGN_SHA} as hicar-full-test=success"
 
-  # --- example namelists: regenerate + commit (push to main/develop only) ----
+  # --- example namelists: regenerate + commit (push to develop only) ---------
   # Reuses cpu-release's already-built executable (no second HICAR build).
   # Runs regardless of whether the test jobs passed — it only needs the release
   # build to have produced an exe — so it is independent of the correctness gate
   # and never blocks or is blocked by `sign`. Skipped on PRs (it commits back).
   example-namelists:
     needs: cpu-release
-    # push to main/develop only, AND only in the direct full-test run: when
-    # gpu.yml reuses this workflow via workflow_call, github.workflow is the
-    # CALLER's name, so this gate keeps the regenerate/commit from running twice.
-    if: ${{ always() && github.event_name == 'push' && github.workflow == 'HICAR full-test (CPU)' }}
+    # push to develop ONLY, AND only in the direct full-test run. develop (not
+    # main) because main is PR-protected — this job pushes a commit directly, and
+    # a direct push to main is rejected by the branch ruleset. main receives the
+    # refreshed namelists when develop is merged into it via PR. The github.workflow
+    # guard stops the regenerate/commit running twice when gpu.yml reuses this
+    # workflow via workflow_call (there github.workflow is the CALLER's name).
+    if: ${{ always() && github.event_name == 'push' && github.ref_name == 'develop' && github.workflow == 'HICAR full-test (CPU)' }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write   # commit the regenerated namelists back to the branch
