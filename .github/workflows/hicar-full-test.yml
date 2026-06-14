@@ -14,9 +14,9 @@ name: HICAR full-test (CPU)
 
 on:
   pull_request:
-    branches: [master, develop]
+    branches: [main, develop]
   push:
-    branches: [master, develop]
+    branches: [main, develop]
   schedule:
     - cron: '0 2 * * *'   # 02:00 UTC nightly
   workflow_dispatch:

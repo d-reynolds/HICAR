@@ -1,7 +1,7 @@
 # GPU test suite (NVFortran, self-hosted).
 #
 # SECURITY POSTURE unchanged: the self-hosted runner NEVER runs untrusted PR code.
-# Triggers are only push to master/develop, nightly, and manual dispatch — no
+# Triggers are only push to main/develop, nightly, and manual dispatch — no
 # pull_request trigger.
 #
 # FLOW:
@@ -16,9 +16,9 @@ name: GPU test suite (NVFortran)
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
-    branches: [master, develop]
+    branches: [main, develop]
   schedule:
     - cron: '0 4 * * *'   # 04:00 UTC — after the CPU full-test nightly (02:00)
   workflow_dispatch:

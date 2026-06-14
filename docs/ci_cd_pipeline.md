@@ -70,7 +70,7 @@ queryable, and shown as a green check on the commit.
 
 ### 3.2 `gpu.yml` — the GPU test suite ✅ / 🟡
 
-NVFortran, self-hosted. Triggers: **push to master/develop** (+ a temporary
+NVFortran, self-hosted. Triggers: **push to main/develop** (+ a temporary
 `ci_pipeline` shakeout trigger), **nightly (04:00 UTC**, after the CPU nightly),
 **workflow_dispatch**. **No `pull_request` trigger** (see Security, §5).
 
@@ -225,7 +225,7 @@ into the image) because `-gpu=ccnative` needs the device visible at build time.
 
 **Security posture: the runner never executes untrusted PR code.**
 
-- `gpu.yml` has **no `pull_request` trigger** — only push to master/develop,
+- `gpu.yml` has **no `pull_request` trigger** — only push to main/develop,
   nightly, and dispatch. A fork PR cannot cause execution on the hardware.
 - The runner is **ephemeral** and run as a **fresh container per job**
   (`run-runner.sh`), so no state persists between jobs.
@@ -303,4 +303,4 @@ We do **not** test the full Cartesian product of physics options. Instead:
   rebuilds the blessed commit when it changes (cached by hash in
   `bin/HICAR_blessed`), which adds a HICAR build to the release job.
 - The temporary `ci_pipeline` push trigger in `gpu.yml` must be removed before
-  merging to master.
+  merging to main.

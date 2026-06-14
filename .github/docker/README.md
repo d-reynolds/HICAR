@@ -52,7 +52,7 @@ the code at that ref on your hardware. This setup is hardened so that **only cod
 a maintainer has already vetted ever runs**:
 
 * **No untrusted PR code, ever.** `gpu.yml` has **no `pull_request` trigger** — it
-  runs only on push to `master`/`develop`, the nightly schedule, and manual
+  runs only on push to `main`/`develop`, the nightly schedule, and manual
   `workflow_dispatch`. A fork PR cannot cause execution on the box. Contributor
   PRs get GPU validation only after review + merge (or a maintainer dispatching
   the workflow against a ref they've read).
