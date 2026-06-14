@@ -8,8 +8,14 @@
 # commit status. The GPU lane reads that status to decide whether it can skip
 # re-running this suite (see gpu.yml).
 #
-# Triggers: every PR, nightly, manual, and workflow_call (so gpu.yml can invoke
-# it for an unsigned commit).
+# The `example-namelists` job (push to main/develop only) reuses the release
+# build's executable to regenerate helpers/example_namelists/*.nml and commit
+# them back — it shares cpu-release's build instead of compiling HICAR a second
+# time. It is a sibling of the test jobs (needs cpu-release for the exe, runs
+# regardless of whether the tests pass) and does not affect `sign`.
+#
+# Triggers: every PR, push to main/develop, nightly, manual, and workflow_call
+# (so gpu.yml can invoke it for an unsigned commit).
 name: HICAR full-test (CPU)
 
 on:
@@ -82,6 +88,15 @@ jobs:
           restore-keys: hicar-deps-${{ runner.os }}-
       - run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies
       - run: bash .github/scripts/hicar_install_utils.sh hicar_install
+      # Publish the freshly built release exe so the example-namelists job can
+      # reuse it (no second HICAR build). Uploaded right after the build, so it
+      # is available even if a later test step in this job fails.
+      - name: Upload release executable (shared with example-namelists)
+        uses: actions/upload-artifact@v4
+        with:
+          name: hicar-release-exe
+          path: bin/HICAR
+          if-no-files-found: error
       - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
       - name: Integration (all config cases — run only)
         run: |
@@ -141,3 +156,61 @@ jobs:
             -f description="Passed HICAR full-test (CPU debug + release)" \
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo "Signed ${{ github.sha }} as hicar-full-test=success"
+
+  # --- example namelists: regenerate + commit (push to main/develop only) ----
+  # Reuses cpu-release's already-built executable (no second HICAR build).
+  # Runs regardless of whether the test jobs passed — it only needs the release
+  # build to have produced an exe — so it is independent of the correctness gate
+  # and never blocks or is blocked by `sign`. Skipped on PRs (it commits back).
+  example-namelists:
+    needs: cpu-release
+    # push to main/develop only, AND only in the direct full-test run: when
+    # gpu.yml reuses this workflow via workflow_call, github.workflow is the
+    # CALLER's name, so this gate keeps the regenerate/commit from running twice.
+    if: ${{ always() && github.event_name == 'push' && github.workflow == 'HICAR full-test (CPU)' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write   # commit the regenerated namelists back to the branch
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      # The reused exe is dynamically linked against the dependency libs
+      # (HDF5/NetCDF/FFTW) in ~/installdir/lib — restore that cache so it can
+      # load. This is just the cache the build jobs already populated; no rebuild.
+      - uses: actions/cache@v4
+        with:
+          path: ~/installdir
+          key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
+          restore-keys: hicar-deps-${{ runner.os }}-
+
+      - name: Download release executable
+        id: dl
+        continue-on-error: true   # absent if the release build failed -> skip
+        uses: actions/download-artifact@v4
+        with:
+          name: hicar-release-exe
+          path: bin
+
+      - name: Regenerate example namelists
+        if: steps.dl.outcome == 'success'
+        run: |
+          chmod +x bin/HICAR
+          # exe links HDF5/NetCDF/FFTW from the restored deps cache
+          export LD_LIBRARY_PATH="$HOME/installdir/lib:$LD_LIBRARY_PATH"
+          bash helpers/example_namelists/generate_examples.sh "$GITHUB_WORKSPACE/bin/HICAR"
+
+      - name: Commit regenerated namelists (if changed)
+        if: steps.dl.outcome == 'success'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- helpers/example_namelists/; then
+            echo "Example namelists already up to date — nothing to commit."
+            exit 0
+          fi
+          git add helpers/example_namelists/*.nml
+          git commit -m "ci: regenerate example namelists [skip ci]"
+          git pull --rebase origin "${{ github.ref_name }}" || true
+          git push origin "HEAD:${{ github.ref_name }}"

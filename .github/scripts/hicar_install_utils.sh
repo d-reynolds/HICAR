@@ -71,6 +71,16 @@ if [ -z "$INSTALLDIR" ]; then
 fi
 export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
 
+# Under GitHub Actions, each step runs in a fresh shell, so an `export` here is
+# lost by the next step. Persist the runtime library path to $GITHUB_ENV so the
+# later steps that RUN the HICAR executable (CLI test, unit tests, integration)
+# can resolve the dependency libs (HDF5/NetCDF/FFTW) in $INSTALLDIR/lib. Guarded
+# so the path is added once, not accumulated across the deps/build/data steps.
+if [ -n "$GITHUB_ENV" ] && [[ ":${PERSISTED_LD_LIBRARY_PATH:-}:" != *":${INSTALLDIR}/lib:"* ]]; then
+    echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"   # already has ${INSTALLDIR}/lib prefixed above
+    echo "PERSISTED_LD_LIBRARY_PATH=${INSTALLDIR}/lib" >> "$GITHUB_ENV"
+fi
+
 function install_zlib {
     echo install_zlib
     cd $WORKDIR

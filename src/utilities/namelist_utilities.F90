@@ -1741,11 +1741,11 @@ contains
                     "or negative integer representing number of levels below model top."
                 min = -MAXLEVELS
                 max = 1.e6
-                default = "-1."
+                default = "0"
                 group = "Domain"
             case ("sleve")
                 description = "flag for using SLEVE vertical coordinates (Schär et al. 2002) (T/F)"
-                default = ".False."
+                default = ".True."
                 group = "Domain"
             case ("terrain_smooth_windowsize")
                 description = "Size of the smoothing window used to split large and small scale terrain variations"//achar(10)//BLNK_CHR_N// &
@@ -1788,7 +1788,7 @@ contains
                     "        geogebra plots can be found at https://www.geogebra.org/u/maxsesselmann."
                 allocate(values(5))
                 values = [0, 1, 2, 3, 4]
-                default = "0"
+                default = "1"
                 group = "Domain"
             case("height_lowest_level")
                 description = "Lowest level height in meters, can only be forced when using auto_level=1 or 4."
@@ -1800,7 +1800,7 @@ contains
                 description = "Model top height in meters, only used when auto_level = 1, 2, 3 or 4."
                 min = 1000.0
                 max = 30000.0
-                default = "10000.0"
+                default = "8000.0"
                 group = "Domain"
             case("stretch_fac")
                 description = "Factor that controls distribution of the vertical levels, only used when auto_level = 1, 2, 3 or 4."//achar(10)//BLNK_CHR_N// &
