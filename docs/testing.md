@@ -89,7 +89,7 @@ bless Environment gate) is GitHub plumbing you don't need locally.
 |---|---|
 | full-test / cpu-debug | `HICAR_MODE=debug bash .github/scripts/hicar_install_utils.sh hicar_install`, then `cd build && mpiexec -np 4 tests/HICAR-tester`, `bash tests/Test_Cases/test_case_runner.sh . Standard`, `bash tests/test_reproducibility.sh . all` |
 | full-test / cpu-release | `HICAR_MODE=release ... hicar_install`, then `bash tests/Test_Cases/test_case_runner.sh . "Standard,Standard_restart,Nested,Nested_restart"` and `bash tests/test_regression.sh . build "Standard,Nested" --mode exact` (resolves the blessed commit via gh) |
-| snowpack-compare | build both exes (`HICAR_MODE=release HICAR_CMAKE_EXTRA="-DSNOWPACK=ON" ... hicar_install`; again with `-DSNOWPACK_FORTRAN=ON -DOPENACC=OFF`), then `bash tests/snowpack/test_snowpack_compare.sh . <cpp_exe> <fortran_exe>` |
+| snowpack-compare | build both exes (`HICAR_MODE=release HICAR_CMAKE_EXTRA="-DSNOWPACK_CPP=ON" ... hicar_install` for the C++ reference; again with `-DOPENACC=OFF` for the default native-Fortran port), then `bash tests/snowpack/test_snowpack_compare.sh . <cpp_exe> <fortran_exe>` |
 | gpu | self-hosted only; with NVHPC+GPU locally: `bash tests/compare_cpu_gpu.sh ...` |
 
 Using the same `hicar_install` entrypoint (with the same `HICAR_MODE` /

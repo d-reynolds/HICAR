@@ -56,7 +56,7 @@ done
 
 [ -d "$snowpack_dir/.git" ] || [ -f "$snowpack_dir/.git" ] || {
     echo -e "${RED}No SNOWPACK git checkout at ${snowpack_dir}.${NC}"
-    echo "Configure a build first (-DSNOWPACK_FORTRAN=ON fetches it), or pass --snowpack-dir."
+    echo "Configure a build first, or pass --snowpack-dir."
     exit 1
 }
 

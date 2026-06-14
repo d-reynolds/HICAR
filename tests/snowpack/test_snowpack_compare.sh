@@ -6,8 +6,8 @@
 # SNOWPACK snow model, from a prescribed multi-layer snowpack, using two
 # executables that differ ONLY in the snow driver:
 #
-#   reference (A): built with -DSNOWPACK=ON          (C++ Alpine3D/SNOWPACK)
-#   candidate (B): built with -DSNOWPACK_FORTRAN=ON  (native-Fortran port)
+#   reference (A): built with -DSNOWPACK_CPP=ON  (C++ Alpine3D/SNOWPACK)
+#   candidate (B): default build                 (native-Fortran port)
 #
 # Both are CPU/gfortran builds reading the SAME seeded domain through the SAME
 # namelist, so any output difference is the snow implementation. Outputs are
@@ -77,7 +77,7 @@ if [ "$2" = "--bless" ]; then
     if [ -z "$sp_sha" ] || [ "$sp_sha" = "unknown" ]; then
         echo -e "${RED}Cannot determine the SNOWPACK anchor SHA: no git checkout at${NC}"
         echo -e "${RED}${snowpack_dir} and no snowpack_commit in ${meta}.${NC}"
-        echo "Build (-DSNOWPACK_FORTRAN=ON) or run the comparison first, or pass --snowpack-dir."
+        echo "Build SNOWPACK or run the comparison first, or pass --snowpack-dir."
         exit 1
     fi
     head_sha=$(git -C "$hicar_repo" rev-parse HEAD)

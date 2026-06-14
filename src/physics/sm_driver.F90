@@ -33,12 +33,10 @@ module snow_model_driver
 #ifdef FSM
     use module_sm_FSMdrv,   only : sm_FSM_init, sm_FSM
 #endif
-#ifdef SNOWPACK
-#ifdef SNOWPACK_FORTRAN
+#ifndef SNOWPACK_CPP
     use snowpack_driver, only : snowpack_init, snowpack_step
 #else
     use module_sm_SNOWPACKdrv, only : sm_snowpack_init, sm_SNOWPACK
-#endif
 #endif
     use snow_drift,            only : snow_drift_var_request, snow_drift_init
     use module_snowslide,      only : snowslide_var_request, snowslide_init, snowslide_step
@@ -197,8 +195,7 @@ contains
             stop "FSM2 not compiled in this version of HICAR"
 #endif
         else if (options%physics%snowmodel==kSM_SNOWPACK) then
-#ifdef SNOWPACK
-#ifdef SNOWPACK_FORTRAN
+#ifndef SNOWPACK_CPP
             if (STD_OUT_PE .and. .not.context_change) write(*,*) "    SnowModel: Snowpack (GPU/OpenACC)"
             call snowpack_init(domain,options,context_change)
 #else
@@ -272,11 +269,6 @@ contains
             !$acc   domain%vars_3d(domain%var_indx(kVARS%snow_stress)%v)%data_3d, &
             !$acc   domain%vars_3d(domain%var_indx(kVARS%N3)%v)%data_3d)
 
-#endif
-#else
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    User asked to use Snowpack, but it is not compiled in this version of HICAR"
-            if (STD_OUT_PE .and. .not.context_change) write(*,*) "    Please de-select Snowpack as the snow model in the namelist, or recompile HICAR with the Snowpack library linked"
-            stop "Snowpack not compiled in this version of HICAR"
 #endif
 
         endif
@@ -506,8 +498,7 @@ contains
 #endif
 
             else if (options%physics%snowmodel==kSM_SNOWPACK) then
-#ifdef SNOWPACK
-#ifdef SNOWPACK_FORTRAN
+#ifndef SNOWPACK_CPP
                 ! GPU SNOWPACK: data stays on device, no host/device transfers needed
                 !$acc enter data copyin(current_rain, current_snow, windspd)
                 call snowpack_step(domain,options,lsm_dt,current_rain,current_snow,windspd)
@@ -595,7 +586,6 @@ contains
                     call noahmp_soil_only(domain, options, lsm_dt, NoahmpIO_arg)
                 end if
 
-#endif
             endif
             end associate
 

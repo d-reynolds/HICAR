@@ -150,13 +150,25 @@ Full list of user options, not including standard cmake options, are:
     FC=                # Set the fortran compiler to use (can be auto-detected for most cases)
 
     FSM=               # Option to link HICAR to optional FSM code libraries compiled separately
-        ON             # (DEFAULT; If no libraries are found, HICAR is not linked to FSM)
-        OFF            #
+        OFF            # (DEFAULT)
+        ON             # If no libraries are found, HICAR is not linked to FSM
+
+    SNOWPACK_CPP=      # Snow-model implementation. SNOWPACK is always compiled in;
+                       #   this flag only selects which implementation is used.
+        OFF            # (DEFAULT) native-Fortran SNOWPACK port (snowpack_driver.F90);
+                       #   fetches the SNOWPACK fortran-bindings repo at configure time
+        ON             # C++ Alpine3D/SNOWPACK wrapper (sm_SNOWPACK.F90); builds C++ SNOWPACK + MeteoIO
 
     ASSERTIONS=        # Check for logical assertions at runtime. Used sparingly, little effect.
         ON             # (DEFAULT)
         OFF            #
 ```
+
+> Note: SNOWPACK (native-Fortran port) is now always compiled into HICAR; there
+> is no flag to build without it. `-DSNOWPACK_CPP=ON` selects the C++ wrapper
+> instead. `-DSNOWPACK_FORTRAN=ON` is deprecated (the port is the default) and
+> `-DSNOWPACK=OFF` is no longer supported. Re-configuring an existing build
+> directory keeps previously cached values; use a fresh build directory.
 
 The following flags are used to help cmake locate installed dependencies. Though not explicitly necesarry, they help cmake find dependencies, especially if they have been installed to unusual locations on the system.
 

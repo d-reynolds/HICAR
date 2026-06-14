@@ -98,10 +98,11 @@ Warns if the commit hasn't passed full-test.
 
 ### 3.4 `snowpack-compare.yml` — SNOWPACK C++ vs Fortran parity, with bless ✅
 
-Builds HICAR twice on the same gfortran toolchain (`-DSNOWPACK=ON` C++ bindings
-vs `-DSNOWPACK_FORTRAN=ON` native port), runs a 3 h seeded-snowpack comparison
-(`tests/snowpack/test_snowpack_compare.sh`) against `tests/snowpack/tolerances_snowpack.yaml`.
-Triggers: PRs touching the snow drivers, nightly, manual.
+Builds HICAR twice on the same gfortran toolchain (`-DSNOWPACK_CPP=ON` C++
+bindings vs the default native-Fortran port), runs a 3 h seeded-snowpack
+comparison (`tests/snowpack/test_snowpack_compare.sh`) against
+`tests/snowpack/tolerances_snowpack.yaml`. Triggers: PRs touching the snow
+drivers, nightly, manual.
 
 **Parity blessing.** Analogous to the regression bless, but with a second,
 independent status context and one extra payload: a manual dispatch with

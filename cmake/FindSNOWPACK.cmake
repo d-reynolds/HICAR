@@ -70,15 +70,21 @@ FIND_LIB(snowpack SNOWPACK_LIBRARY "${SNOWPACK_DIR}")
 FIND_LIB(snowpack_fortran SNOWPACK_FORTRAN_LIBRARY "${SNOWPACK_DIR}")
 FIND_LIB(meteoio METEOIO_LIBRARY "${METEOIO_DIR}")
 
-if (SNOWPACK_FORTRAN) 
-    # If GPU SNOWPACK is enabled, also look for the GPU Fortran bindings library
-    message(STATUS "SNOWPACK_FORTRAN is enabled, only fetching snowpack repo...")
+if (NOT SNOWPACK_CPP)
+    # Native-Fortran SNOWPACK port (default): fetch the snowpack repo only (the
+    # fortran/*.F90 bindings are compiled into HICAR; no C++ build needed).
+    message(STATUS "Native-Fortran SNOWPACK port: fetching snowpack repo only...")
 
     set(SNOWPACK_DIR "${CMAKE_BINARY_DIR}/external/SNOWPACK" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
     set(SNOWPACK_BUILD "${CMAKE_BINARY_DIR}/external/SNOWPACK-build" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
     set(SNOWPACK_STAMPS "${CMAKE_BINARY_DIR}/external/SNOWPACK-stamps" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
 
-    # Fetch SNOWPACK
+    # Fetch SNOWPACK — DOWNLOAD ONLY. HICAR compiles the fortran/*.F90 bindings
+    # into its own target and never builds SNOWPACK's CMake project. SOURCE_SUBDIR
+    # points at a directory that contains no CMakeLists.txt, so
+    # FetchContent_MakeAvailable populates the sources without calling
+    # add_subdirectory() on them. (Replaces the now-deprecated single-argument
+    # FetchContent_Populate(SNOWPACK); see CMake policy CMP0169.)
     FetchContent_Declare(SNOWPACK
         GIT_REPOSITORY    https://git.wsl.ch/snow-models/snowpack.git
         GIT_TAG           fortran-bindings
@@ -86,8 +92,9 @@ if (SNOWPACK_FORTRAN)
         PREFIX            "${SNOWPACK_STAMPS}"
         SOURCE_DIR        "${SNOWPACK_DIR}"
         BINARY_DIR        "${SNOWPACK_BUILD}"
+        SOURCE_SUBDIR     __hicar_download_only__
     )
-	FetchContent_Populate(SNOWPACK)
+	FetchContent_MakeAvailable(SNOWPACK)
 
     set(SNOWPACK_FOUND TRUE)
 

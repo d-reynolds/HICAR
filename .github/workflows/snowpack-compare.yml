@@ -4,8 +4,9 @@
 # driver, and checks that the native-Fortran SNOWPACK port tracks the C++
 # Alpine3D/SNOWPACK reference on a full-model run from a prescribed snowpack:
 #
-#   reference: -DSNOWPACK=ON          (C++ bindings, sm_SNOWPACK.F90)
-#   candidate: -DSNOWPACK_FORTRAN=ON  (native-Fortran port, snowpack_driver.F90)
+#   reference: -DSNOWPACK_CPP=ON  (C++ bindings, sm_SNOWPACK.F90)
+#   candidate: default build      (native-Fortran port, snowpack_driver.F90 —
+#                                  the port is now the default snow model)
 #
 # A 3 h Standard-domain run is seeded with a 14-layer / 1 m snowpack on every
 # land cell (tests/snowpack/make_snowpack_init.py), then all output variables are compared
@@ -92,16 +93,19 @@ jobs:
       # --- Build A: C++ SNOWPACK (reference) ---------------------------------
       - name: Build HICAR with C++ SNOWPACK
         env:
-          HICAR_CMAKE_EXTRA: "-DSNOWPACK=ON"
+          HICAR_CMAKE_EXTRA: "-DSNOWPACK_CPP=ON"
         run: |
           bash .github/scripts/hicar_install_utils.sh hicar_install
           cp bin/HICAR "$GITHUB_WORKSPACE/HICAR_snowpack_cpp"
 
       # --- Build B: native-Fortran SNOWPACK (candidate) ----------------------
       # hicar_install wipes build/* and rebuilds; the C++ exe is already saved.
+      # The native-Fortran port is the default snow model, so no SNOWPACK flag is
+      # needed here — this is the default build (with OpenACC off for the GNU CPU
+      # comparison).
       - name: Build HICAR with native-Fortran SNOWPACK
         env:
-          HICAR_CMAKE_EXTRA: "-DSNOWPACK_FORTRAN=ON -DOPENACC=OFF"
+          HICAR_CMAKE_EXTRA: "-DOPENACC=OFF"
         run: |
           bash .github/scripts/hicar_install_utils.sh hicar_install
           cp bin/HICAR "$GITHUB_WORKSPACE/HICAR_snowpack_fortran"

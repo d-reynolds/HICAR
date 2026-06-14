@@ -242,12 +242,12 @@ contains
             kFM_GRID_Z = this%sm%suspension_fine_mesh_levels
         endif
 
-#ifndef SNOWPACK_FORTRAN
+#ifdef SNOWPACK_CPP
         if (this%sm%saltation_model == kSALTATION_DOORSCHOT) then
             if (STD_OUT_PE) write(*,*) "  "
-            if (STD_OUT_PE) write(*,*) "  ATTENTION: The Doorschot saltation model is only compatible with the SNOWPACK GPU port"
-            if (STD_OUT_PE) write(*,*) "  ATTENTION: and is not currently compatible with the SNOWPACK CPU implementation. "
-            if (STD_OUT_PE) write(*,*) "  ATTENTION: setting saltation_model to default to avoid errors. "
+            if (STD_OUT_PE) write(*,*) "  ATTENTION: The Doorschot saltation model is only compatible with the native Fortran SNOWPACK port"
+            if (STD_OUT_PE) write(*,*) "  ATTENTION: and is not currently compatible with the SNOWPACK CPP wrapper implementation. "
+            if (STD_OUT_PE) write(*,*) "  ATTENTION: setting saltation_model to default (sorensen) to avoid errors. "
             this%sm%saltation_model = kSALTATION_SORENSEN
         endif
 #endif

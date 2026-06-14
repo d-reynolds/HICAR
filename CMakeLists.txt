@@ -14,6 +14,12 @@ if(DEFINED ENV{CONDA_PREFIX})
   message(STATUS "Ignoring Conda environment path: $ENV{CONDA_PREFIX}")
 endif()
 
+# Put all fetched external dependencies (noah_mp, rte-rrtmgp, rrtmgp_data,
+# icar_supporting_files, test-drive, ...) under build/external — alongside
+# SNOWPACK/MeteoIO — instead of CMake's default build/_deps. Must be set before
+# any FetchContent use (incl. the tests subdirectory's test-drive finder).
+set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/external")
+
 #########################################
 ####### Set up the user variables #######
 set(MODE "release" CACHE STRING "Set compilation flags, useful for debugging")
@@ -57,15 +63,29 @@ endif()
 
 option(ASSERTIONS "Check logical assertions at runtime" ON)
 option(FSM "Link to the FSM2 snow model, requires separate compilation of the FSM2 model" OFF)
-option(SNOWPACK "Link to the SNOWPACK snow model, requires separate compilation of the SNOWPACK model" OFF)
-option(SNOWPACK_FORTRAN "Use GPU-accelerated pure-Fortran SNOWPACK (replaces C++ SNOWPACK)" OFF)
+option(SNOWPACK_CPP "Use the C++ Alpine3D/SNOWPACK wrapper instead of the native-Fortran port" OFF)
 option(NCCL "Link to the NCCL library, if available" ON)
 option(OPENACC "Enable OpenACC support for GPU acceleration" OFF)
 option(SRUN_FLAGS "srun flags to use for running the test cases" "")
 
-# SNOWPACK_FORTRAN implies both SNOWPACK and OPENACC
-if(SNOWPACK_FORTRAN)
-    set(SNOWPACK ON CACHE BOOL "Enable SNOWPACK support in HICAR" FORCE)
+# SNOWPACK is always compiled into HICAR; SNOWPACK_CPP is the single switch that
+# selects the implementation (the whole build keys off it directly — there is no
+# internal SNOWPACK / SNOWPACK_FORTRAN variable):
+#   default            -> native-Fortran SNOWPACK port (snowpack_driver.F90)
+#   -DSNOWPACK_CPP=ON  -> C++ Alpine3D/SNOWPACK wrapper (sm_SNOWPACK.F90, -DSNOWPACK_CPP)
+#
+# Removed/deprecated flags (warn, then honor the closest modern equivalent):
+if(DEFINED SNOWPACK AND NOT SNOWPACK)
+    message(WARNING "-DSNOWPACK=OFF is no longer supported: SNOWPACK is always compiled "
+        "(native-Fortran port by default). Pass -DSNOWPACK_CPP=ON for the C++ wrapper.")
+endif()
+if(DEFINED SNOWPACK_FORTRAN)
+    message(DEPRECATION "SNOWPACK_FORTRAN is deprecated: the native-Fortran SNOWPACK port is "
+        "now the build default. Pass -DSNOWPACK_CPP=ON to select the C++ wrapper instead.")
+    if(NOT SNOWPACK_FORTRAN)
+        set(SNOWPACK_CPP ON CACHE BOOL "Use the C++ Alpine3D/SNOWPACK wrapper" FORCE)
+    endif()
+    unset(SNOWPACK_FORTRAN CACHE)
 endif()
 #########################################
 
@@ -254,8 +274,9 @@ find_package(MPI REQUIRED)
 find_package(OpenMP)
 find_package(FFTW REQUIRED)
 find_package(NetCDF REQUIRED)
-if (SNOWPACK_FORTRAN)
-	# GPU SNOWPACK: compile pure-Fortran GPU modules directly, no C++ SNOWPACK needed
+if (NOT SNOWPACK_CPP)
+	# Native-Fortran port (default): compile the pure-Fortran snowpack modules
+	# directly, no C++ SNOWPACK needed.
 	if(NOT SNOWPACK_DIR OR SNOWPACK_DIR STREQUAL "")
 		find_package(SNOWPACK REQUIRED)
 	endif()
@@ -267,13 +288,10 @@ if (SNOWPACK_FORTRAN)
 	list(APPEND SOURCE_FILES ${SNOWPACK_FORTRAN_SOURCES})
 	# Remove the C++ SNOWPACK Fortran driver (replaced by snowpack_driver)
 	list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/sm_SNOWPACK.F90)
-	message(STATUS "SNOWPACK GPU sources: ${SNOWPACK_FORTRAN_SOURCES}")
-elseif (SNOWPACK)
-	find_package(SNOWPACK REQUIRED)
+	message(STATUS "SNOWPACK sources (native-Fortran port): ${SNOWPACK_FORTRAN_SOURCES}")
 else()
-	# remove sm_SNOWPACK.F90, which contains the SNOWPACK driver, from the source files if SNOWPACK support is disabled
-	FILE(GLOB_RECURSE SNOWPACK_INTERFACE  ${PROJECT_SOURCE_DIR}/src/physics/sm_SNOWPACK.F90)
-	list(REMOVE_ITEM SOURCE_FILES ${SNOWPACK_INTERFACE})
+	# C++ Alpine3D/SNOWPACK wrapper: keep sm_SNOWPACK.F90, link the C++ libs.
+	find_package(SNOWPACK REQUIRED)
 endif()
 
 #########################################################
@@ -497,10 +515,10 @@ if (FSM)
 	add_definitions(-DFSM)
 endif()
 
-if(SNOWPACK_FORTRAN)
-    # GPU SNOWPACK: pure Fortran, no C++ libraries needed
-    add_definitions(-DSNOWPACK -DSNOWPACK_FORTRAN)
-    message(STATUS "SNOWPACK GPU support enabled (pure Fortran OpenACC, no C++ SNOWPACK/MeteoIO needed)")
+if(NOT SNOWPACK_CPP)
+    # Native-Fortran SNOWPACK port (default): no C++ libraries needed and no
+    # compile define — the sources select the port path with #ifndef SNOWPACK_CPP.
+    message(STATUS "SNOWPACK support enabled (native-Fortran port, no C++ SNOWPACK/MeteoIO needed)")
 elseif(SNOWPACK_FOUND)
     # If SNOWPACK should be built from source, add dependency
     if(BUILD_SNOWPACK_FROM_SOURCE)
@@ -533,8 +551,10 @@ elseif(SNOWPACK_FOUND)
     endif()
     target_link_libraries(hicar_lib PUBLIC ${CXX_STDLIB})
     
-	add_definitions(-DSNOWPACK)
-    message(STATUS "SNOWPACK support enabled")
+	# C++ Alpine3D/SNOWPACK wrapper: -DSNOWPACK_CPP selects the C++ wrapper path
+	# in the sources (#ifdef SNOWPACK_CPP).
+	add_definitions(-DSNOWPACK_CPP)
+    message(STATUS "SNOWPACK support enabled (C++ Alpine3D/SNOWPACK wrapper)")
 endif()
 if (OpenACC_Fortran_FOUND AND OPENACC)
 	target_link_libraries(hicar_lib PUBLIC OpenACC::OpenACC_Fortran)
@@ -575,9 +595,6 @@ endif()
 target_link_libraries(hicar_lib PUBLIC MPI::MPI_Fortran)
 target_include_directories(hicar_lib PUBLIC ${MPI_INCLUDE_DIR})
 
-# add include directory for the model itself
-target_include_directories(hicar_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
-
 # Link Noah-MP(Required) to hicar_lib 
 if(NOT DEFINED NOAHMP_LIBRARY)
 	target_link_libraries(hicar_lib PUBLIC noahmp)
@@ -612,10 +629,10 @@ target_compile_options(HICAR PUBLIC ${HICAR_Fortran_FLAGS})
 
 
 # sm_* files (snow model drivers) need OpenMP but not OpenACC (for CPU snow models).
-# With SNOWPACK_FORTRAN, sm_driver.F90 calls GPU kernels and needs OpenACC.
+# With the native-Fortran SNOWPACK port, sm_driver.F90 calls GPU kernels and needs OpenACC.
 if(COMPILER STREQUAL "nvfortran" AND OPENACC)
-	if(NOT SNOWPACK_FORTRAN)
-		# CPU snow models: disable OpenACC on all sm_* files
+	if(SNOWPACK_CPP)
+		# CPU snow models (C++ SNOWPACK wrapper): disable OpenACC on all sm_* files
 		file(GLOB SM_SOURCES ${PROJECT_SOURCE_DIR}/src/physics/sm_*.F90)
 		foreach(source ${SM_SOURCES})
 			set_source_files_properties(${source} PROPERTIES COMPILE_OPTIONS "-mp")
@@ -660,8 +677,8 @@ file(COPY "${icar_supporting_files_SOURCE_DIR}/rrtmg_support" DESTINATION "${PRO
 
 # Clean up downloaded repo to save space
 file(REMOVE_RECURSE "${icar_supporting_files_SOURCE_DIR}")
-file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/icar_supporting_files-subbuild")
-file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/icar_supporting_files-build")
+file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/icar_supporting_files-subbuild")
+file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/icar_supporting_files-build")
 
 # if we are using RTE_RRTMGP, copy supporting files from the git repository: https://github.com/earth-system-radiation/rrtmgp-data
 if(OPENACC AND OpenACC_Fortran_FOUND)
@@ -675,8 +692,8 @@ if(OPENACC AND OpenACC_Fortran_FOUND)
 		
 	# Clean up downloaded repo to save space
 	file(REMOVE_RECURSE "${rrtmgp_data_SOURCE_DIR}")
-	file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/rrtmgp_data-subbuild")
-	file(REMOVE_RECURSE "${CMAKE_BINARY_DIR}/_deps/rrtmgp_data-build")
+	file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/rrtmgp_data-subbuild")
+	file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/rrtmgp_data-build")
 	
 	message(STATUS "RTE-RRTMGP data files copied to run/rrtmgp_support")
 endif()
@@ -721,10 +738,10 @@ if (FSM)
 else()
 	message(STATUS "  FSM:    Not Used")
 endif()
-if (SNOWPACK)
-	message(STATUS "  SNOWPACK:    ${SNOWPACK_DIR}")
+if (SNOWPACK_CPP)
+	message(STATUS "  SNOWPACK:    C++ wrapper (${SNOWPACK_DIR})")
 else()
-	message(STATUS "  SNOWPACK:    Not Used")
+	message(STATUS "  SNOWPACK:    native-Fortran port (${SNOWPACK_DIR})")
 endif()
 if (OPENACC AND OpenACC_Fortran_FOUND)
 	message(STATUS "  OpenACC: Enabled")
@@ -741,13 +758,6 @@ message(STATUS "")
 #This sets the location for library installation -- i.e., ${CMAKE_INSTALL_LIBDIR}=/usr/local/lib 
 # and also the header for library if it has, in this case we do not have. ${CMAKE_INSTALL_INCLUDEDIR}=/usr/local/include
 
-
-# Create a variable for the include directory
-#set(INCLUDE_DIR ${PROJECT_SOURCE_DIR}/include)
-
-# Add the include directory to the compiler flags
-#target_compile_options(HICAR PRIVATE -I${INCLUDE_DIR})
-
 # get_target_property(hicar_lib HICAR LINK_LIBRARIES)
 # message(STATUS "Libraries linked against HICAR target: ${HICAR_LIBS}")
 
@@ -763,8 +773,6 @@ set(CMAKE_Fortran_MODULE_DIRECTORY  ${CMAKE_BINARY_DIR})
 install(TARGETS HICAR  DESTINATION  ${CMAKE_INSTALL_EXEDIR})
 
 
-# this is to copy build folder including .mod files in $HOME/include directory
-# note that CMAKE_Fortran_MODULE_DIRECTORY is ouput path for modules or anything
 #install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/build DESTINATION ${CMAKE_Fortran_MODULE_DIRECTORY}) 
 #install(PROGRAMS ${modeFiles} DESTINATION ${CMAKE_Fortran_MODULE_DIRECTORY}/sec) # not working
     
@@ -850,8 +858,7 @@ else()
             -DFSM_DIR=${FSM_DIR}
             -DFSM=${FSM}
 			-DSNOWPACK_DIR=${SNOWPACK_DIR}
-			-DSNOWPACK=${SNOWPACK}
-			-DSNOWPACK_FORTRAN=${SNOWPACK_FORTRAN}
+			-DSNOWPACK_CPP=${SNOWPACK_CPP}
             -DASSERTIONS=${ASSERTIONS}
             -DOPENACC=${OPENACC}
         COMMAND ${CMAKE_COMMAND} --build ${_DEBUG_BUILD_DIR} --parallel

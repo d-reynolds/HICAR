@@ -329,8 +329,9 @@ contains
             call compute_threshold_ustar_snowpack(domain, options%sm%saltation_model)
         endif
 
-        ! saltation mass flux and concentration are computed by snowpack fortran driver
-#ifndef SNOWPACK_FORTRAN
+        ! saltation mass flux and concentration are computed by the native-Fortran
+        ! snowpack driver itself; only the C++ wrapper build needs this explicit call
+#ifdef SNOWPACK_CPP
         ! 3. Saltation concentration calculation
         call saltation_step(domain, dt, dx)
 #endif

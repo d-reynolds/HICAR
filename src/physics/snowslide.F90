@@ -291,7 +291,6 @@ contains
             !$acc exit data delete(SD_0, Sice_0)
 #endif
         else if (options%physics%snowmodel == kSM_SNOWPACK) then
-#ifdef SNOWPACK
             ! snowslide_reconcile_snowpack runs on GPU as a `!$acc parallel loop`.
             ! Push all per-layer + per-cell arrays it reads/writes to device first;
             ! the kernel leaves the updated state on device. SD_0/Sice_0 are local
@@ -322,7 +321,6 @@ contains
             !$acc   domain%vars_3d(domain%var_indx(kVARS%depositionDate)%v)%data_3d)
             call snowslide_reconcile_snowpack(domain, SD_0, Sice_0)
             !$acc exit data delete(SD_0, Sice_0)
-#endif
         end if
 
         ! ================================================================
@@ -1266,7 +1264,6 @@ contains
     !! philosophy: protect the top, coarsen the bottom) before the shift +
     !! insert runs. This guarantees the fresh deposit always lands at k=1.
     !!----------------------------------------------------------
-#ifdef SNOWPACK
     subroutine snowslide_reconcile_snowpack(domain, SD_0, Sice_0)
         implicit none
         type(domain_t), intent(inout) :: domain
@@ -1528,7 +1525,6 @@ contains
         end associate
 
     end subroutine snowslide_reconcile_snowpack
-#endif
 
 
     !>----------------------------------------------------------

@@ -2,8 +2,7 @@
 #
 # SECURITY POSTURE unchanged: the self-hosted runner NEVER runs untrusted PR code.
 # Triggers are only push to master/develop, nightly, and manual dispatch — no
-# pull_request trigger. (ci_pipeline is a TEMPORARY pre-merge shakeout trigger;
-# remove it before merging.)
+# pull_request trigger.
 #
 # FLOW:
 #   1. check-signed  — is this commit marked hicar-full-test=success (CPU gate)?
@@ -17,9 +16,9 @@ name: GPU test suite (NVFortran)
 
 on:
   push:
-    # TEMPORARY: ci_pipeline is here only to shake out the GPU lane pre-merge.
-    # REMOVE `ci_pipeline` before merging to master.
-    branches: [master, develop, ci_pipeline]
+    branches: [master]
+  pull_request:
+    branches: [master, develop]
   schedule:
     - cron: '0 4 * * *'   # 04:00 UTC — after the CPU full-test nightly (02:00)
   workflow_dispatch:
