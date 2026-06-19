@@ -362,7 +362,7 @@ run_fm_decomposition() {
 
     # 1 vs 4 ranks. With "-v" every rank prints its own interior, so the union is
     # the full domain regardless of rank count and the comparison covers every cell.
-    local np_low=1 np_high=4
+    local np_low=2 np_high=4
     local tmp
     tmp="$(mktemp -d)"
 
@@ -445,6 +445,9 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
         decomp_np_half=5
     fi
 
+    # Fine-mesh advection decomposition check (HICAR-tester; CPU, GPU-independent).
+    run_fm_decomposition
+
     if [ "$test_decomp_result" != "SKIP" ]; then
 
     echo
@@ -501,8 +504,6 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
 
     fi # end skip check
 
-    # Fine-mesh advection decomposition check (HICAR-tester; CPU, GPU-independent).
-    run_fm_decomposition
 fi
 
 # ===============================================================

@@ -153,9 +153,10 @@ program test_driver
         end do
     end if
 
-    if (stat > 0) then
-      write(error_unit, '(i0, 1x, a)') stat, "test(s) failed!"
-      error stop
+    call MPI_Allreduce(stat, global_stat, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD)
+    if (global_stat > 0) then
+    if (my_index == 1) write(error_unit, '(i0, 1x, a)') global_stat, "test(s) failed!"
+        call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
     end if
 
     call MPI_Finalize()

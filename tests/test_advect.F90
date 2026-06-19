@@ -125,12 +125,11 @@ module test_advect
         options%domain%lon_hi = 'lon'
         ! check that the init_conditions_file exists
         if (trim(options%domain%init_conditions_file) /= '') then
-            call check_file_exists(trim(options%domain%init_conditions_file), message='The test domain file does not exist. Ensure that the HICAR_test repo was installed to build/test when building HICAR.')
+            call check_file_exists(trim(options%domain%init_conditions_file), message='The test domain file does not exist. Ensure that the HICAR_test repo was installed and the domain file ../tests/Test_Cases/domains/flat_plane_250m.nc exists.')
         endif
 
         options%domain%dx = 250.0
         options%domain%nz = 20
-        options%domain%dz_levels = 50.0
         options%domain%sleve = .True.
 
         options%domain%lat_hi = 'lat'
@@ -261,7 +260,7 @@ module test_advect
         options%domain%lat_hi = 'lat'
         options%domain%lon_hi = 'lon'
         if (trim(options%domain%init_conditions_file) /= '') then
-            call check_file_exists(trim(options%domain%init_conditions_file), message='The test domain file does not exist. Ensure that the HICAR_test repo was installed to build/test when building HICAR.')
+            call check_file_exists(trim(options%domain%init_conditions_file), message='The test domain file does not exist. Ensure that the HICAR_test repo was installed and the domain file ../tests/Test_Cases/domains/flat_plane_250m.nc exists.')
         endif
 
         options%domain%dx = 250.0

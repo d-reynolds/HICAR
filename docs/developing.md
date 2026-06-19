@@ -6,7 +6,7 @@ This section is dated and needs to be updated for HICAR's changed compilation ro
 git config --local core.hooksPath .githooks/
 ```
 
-After cloning, so that any pushes to the master branch will be tested locally prior to being published
+After cloning, so that any pushes to the main branch will be tested locally prior to being published
 
 Users are encouraged to modify ICAR for their own specific purposes, and to make those changes available for others by submitting them back to the main repository.  The ICAR code base have been set up to make some additions (e.g. a new physics package) very easy to add, and the developers will do their best to work with anyone who wishes to add more sophisticated changes.
 

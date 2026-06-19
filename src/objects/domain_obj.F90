@@ -1252,6 +1252,9 @@ contains
         integer :: nlevp1, jk
         logical :: auto_level_warnings
 
+        if(allocated(options%domain%dz_levels)) deallocate(options%domain%dz_levels)
+        allocate(options%domain%dz_levels(options%domain%nz))
+
         associate(                                                    &
             auto_level    => options%domain%auto_level,               &
             nz            => options%domain%nz,                       &
@@ -1394,6 +1397,9 @@ contains
 
         real, allocatable :: dz(:)
 
+        ! Automatic level generation: computes dz_levels analytically when auto_level >= 1.
+        call auto_dz(options)
+
         associate(ims => this%ims,      ime => this%ime,                        &
             jms => this%jms,      jme => this%jme,                        &
             kms => this%kms,      kme => this%kme,                        &
@@ -1432,8 +1438,6 @@ contains
 
             allocate(dz(nz))
 
-            ! Automatic level generation: computes dz_levels analytically when auto_level >= 1.
-            call auto_dz(options)
             dz(1:nz) = dz_lev(1:nz)
 
 
@@ -3049,15 +3053,14 @@ contains
                 call MPI_Allreduce(MPI_IN_PLACE, max_z_d, 1, MPI_REAL, MPI_MAX, this%compute_comms, ierr)
                 call MPI_Allreduce(MPI_IN_PLACE, max_z_f, 1, MPI_REAL, MPI_MAX, this%compute_comms, ierr)
                 if (STD_OUT_PE) then
-                    write(*,*) "ERROR: This nest's model top is higher than its forcing/parent-nest top."
+                    write(*,*) "WARNING: This nest's model top is higher than its forcing/parent-nest top."
                     write(*,*) "       nest_indx               = ", this%nest_indx
                     write(*,*) "       max child   top z (m)   = ", max_z_d
                     write(*,*) "       max forcing top z (m)   = ", max_z_f
+                    write(*,*) "       Extrapolating..."
                     write(*,*) "       Reduce nz or trim dz_levels for this nest, or raise the parent's"
                     write(*,*) "       model top so the child fits within it."
                 endif
-                call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
-                stop
             endif
         end if
         
