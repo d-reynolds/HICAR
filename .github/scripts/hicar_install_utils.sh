@@ -228,6 +228,18 @@ function hicar_dependencies {
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
 
+    # Cache hit: $INSTALLDIR was restored from the dependency cache and already
+    # holds the full toolchain. netcdf-fortran is built last, so its presence
+    # proves zlib/hdf5/pnetcdf/netcdf-c all installed successfully — skip the
+    # (expensive) source builds. The apt packages above live outside $INSTALLDIR
+    # (so they are NOT cached) and are needed at build/run time on every runner,
+    # which is why they install unconditionally before this guard.
+    if ls "$INSTALLDIR"/lib/libnetcdff.* >/dev/null 2>&1; then
+        echo "Dependencies already present in $INSTALLDIR — skipping source builds."
+        export PATH=${INSTALLDIR}/bin:$PATH
+        return 0
+    fi
+
     install_zlib
     install_hdf5
     install_PnetCDF

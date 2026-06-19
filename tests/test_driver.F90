@@ -23,7 +23,7 @@ program test_driver
     use output_metadata, only: initialize_var_constants
     use string, only: to_lower
     implicit none
-    integer :: stat, is, ierr, my_index, null_unit
+    integer :: stat, global_stat, is, ierr, my_index, null_unit
     character(len=:), allocatable :: suite_name, test_name, first_arg
     type(testsuite_type), allocatable :: testsuites(:)
     character(len=*), parameter :: fmt = '("#", *(1x, a))'

@@ -40,8 +40,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # --- build-deps: compile the dependency toolchain once, then cache it -------
+  # zlib / HDF5 / PnetCDF / netcdf-c / netcdf-fortran are built into ~/installdir
+  # and cached under a key derived from the install script's contents. The test
+  # jobs `needs:` this so the (expensive) source build happens once per cold
+  # cache, instead of redundantly in cpu-debug and cpu-release in parallel. On a
+  # warm cache this job restores ~/installdir and hicar_dependencies short-
+  # circuits (see the sentinel check in hicar_install_utils.sh).
+  build-deps:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/cache@v4
+        with:
+          path: ~/installdir
+          # No restore-keys: a prefix fallback would restore an ~/installdir
+          # built by an OLDER install script, and the sentinel in
+          # hicar_dependencies would then skip rebuilding — silently using stale
+          # deps. Keying purely on the script hash means exact hit => skip,
+          # script changed => full miss => rebuild.
+          key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
+      - run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies
+
   # --- debug build: crash / instability / reproducibility ---------------------
   cpu-debug:
+    needs: build-deps
     runs-on: ubuntu-22.04
     env:
       HICAR_MODE: debug
@@ -51,8 +75,15 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/installdir
+          # No restore-keys: a prefix fallback would restore an ~/installdir
+          # built by an OLDER install script, and the sentinel in
+          # hicar_dependencies would then skip rebuilding — silently using stale
+          # deps. Keying purely on the script hash means exact hit => skip,
+          # script changed => full miss => rebuild.
           key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
-          restore-keys: hicar-deps-${{ runner.os }}-
+      # build-deps has already populated ~/installdir, so this short-circuits
+      # (apt packages + sentinel skip); it stays so LD_LIBRARY_PATH is persisted
+      # to $GITHUB_ENV for the later steps that run the HICAR executable.
       - run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies
       - run: bash .github/scripts/hicar_install_utils.sh hicar_install
       - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
@@ -77,6 +108,7 @@ jobs:
 
   # --- release build: full config matrix + regression ------------------------
   cpu-release:
+    needs: build-deps
     runs-on: ubuntu-22.04
     env:
       HICAR_MODE: release
@@ -86,8 +118,15 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/installdir
+          # No restore-keys: a prefix fallback would restore an ~/installdir
+          # built by an OLDER install script, and the sentinel in
+          # hicar_dependencies would then skip rebuilding — silently using stale
+          # deps. Keying purely on the script hash means exact hit => skip,
+          # script changed => full miss => rebuild.
           key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
-          restore-keys: hicar-deps-${{ runner.os }}-
+      # build-deps has already populated ~/installdir, so this short-circuits
+      # (apt packages + sentinel skip); it stays so LD_LIBRARY_PATH is persisted
+      # to $GITHUB_ENV for the later steps that run the HICAR executable.
       - run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies
       - run: bash .github/scripts/hicar_install_utils.sh hicar_install
       # Publish the freshly built release exe so the example-namelists job can
@@ -192,8 +231,12 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/installdir
+          # No restore-keys: a prefix fallback would restore an ~/installdir
+          # built by an OLDER install script, and the sentinel in
+          # hicar_dependencies would then skip rebuilding — silently using stale
+          # deps. Keying purely on the script hash means exact hit => skip,
+          # script changed => full miss => rebuild.
           key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
-          restore-keys: hicar-deps-${{ runner.os }}-
 
       - name: Download release executable
         id: dl
