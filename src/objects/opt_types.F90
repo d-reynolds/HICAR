@@ -301,9 +301,9 @@ module options_types
     ! ------------------------------------------------
     type restart_options_type
 
-        logical :: restart              ! this is a restart run, read model conditions from a restart file
+        logical :: restart = .false.    ! this is a restart run, read model conditions from a restart file
         integer :: restart_count        ! the frequency, in number of output timesteps, that we write out a restart file
-        logical :: override_check       ! flag to determine if we error out on a failed restart check
+        logical :: override_check = .false. ! flag to determine if we error out on a failed restart check
         
         ! file names
         character (len=kMAX_FILE_LENGTH) :: restart_folder !, restart_in_file

@@ -211,7 +211,11 @@ if(MODE STREQUAL "debug")
 	set(CMAKE_BUILD_TYPE Debug)
 
 	if (COMPILER STREQUAL "gnu")
-		set(HICAR_Fortran_FLAGS -O0 -g -fopenmp -fbounds-check -fcheck=all -Wall -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion)
+		# -finit-* poison uninitialised scalars so reads of them are deterministic
+		# (and usually fatal in tests) rather than passing by luck on one platform
+		# and failing on another. -finit-real=nan alone misses logicals/integers:
+		# an uninitialised `restart` logical caused a CI-only control_flow failure.
+		set(HICAR_Fortran_FLAGS -O0 -g -fopenmp -fbounds-check -fcheck=all -Wall -fbacktrace -finit-real=nan -finit-integer=-99999999 -finit-logical=true -finit-derived -ffree-line-length-none -Wconversion)
 	elseif (COMPILER STREQUAL "nvfortran")
 		if(OPENACC)
 			set(HICAR_Fortran_FLAGS -O0 -g -traceback -Mbounds -Minfo=accel -Mpreprocess -march=native -acc=gpu -gpu=mem:separate,ccnative)

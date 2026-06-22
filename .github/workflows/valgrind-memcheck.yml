@@ -1,0 +1,96 @@
+# Nightly valgrind memcheck of the HICAR unit-test suite (CPU debug build).
+#
+# WHY THIS EXISTS: the normal test run plus the debug build's -finit-* flags do
+# NOT catch every uninitialised-memory bug. gfortran's -finit-real/-integer/
+# -logical only poison LOCAL/stack variables — they do NOT initialise heap /
+# allocatable memory. An uninitialised `logical` component of an *allocatable*
+# options object therefore passed every local test (reading garbage-false) yet
+# failed deterministically on the CI amd64 runner (reading garbage-true). Only
+# valgrind --track-origins reliably detects that class in Fortran (gfortran has
+# no MemorySanitizer), which is why this lane is worth keeping.
+#
+# SCOPE / COST: CPU debug build, HICAR-tester only. Integration cases are far
+# too slow under valgrind, and the GPU/OpenACC build can't run under valgrind at
+# all. Nightly + manual only — never on the PR critical path (valgrind is
+# ~10-50x slower than native).
+name: Valgrind memcheck (nightly)
+
+on:
+  schedule:
+    - cron: '30 3 * * *'   # 03:30 UTC nightly (offset from full-test's 02:00)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: valgrind-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  memcheck:
+    runs-on: ubuntu-22.04
+    env:
+      HICAR_MODE: debug
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      # Same cache key as hicar-full-test's build-deps, so this restores the
+      # already-built ~/installdir toolchain instead of rebuilding netcdf/hdf5.
+      - uses: actions/cache@v4
+        with:
+          path: ~/installdir
+          key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
+          restore-keys: hicar-deps-${{ runner.os }}-
+
+      - run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies
+      - run: bash .github/scripts/hicar_install_utils.sh hicar_install
+      - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
+
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+
+      - name: Memcheck unit tests (mpiexec -np 4)
+        run: |
+          export LD_LIBRARY_PATH="$HOME/installdir/lib:$LD_LIBRARY_PATH"
+          cd build
+          # Disable the runner's default -e/-o pipefail so we can capture the
+          # tester's own exit code and post-process the valgrind log ourselves.
+          set +e -o pipefail
+          # -q prints only error blocks. We deliberately do NOT use
+          # --error-exitcode: mpich is not valgrind-clean, so its internal
+          # errors would flap the gate. Instead we gate on whether any error
+          # block cites a HICAR Fortran source (.F90) — the real signal, and
+          # robust to mpich/libc/ld noise. --track-origins reports where an
+          # uninitialised value was created (the bit that found the restart bug).
+          mpiexec -np 4 valgrind -q \
+              --track-origins=yes \
+              --leak-check=no --errors-for-leak-kinds=none \
+              --num-callers=30 \
+              tests/HICAR-tester 2>&1 | tee valgrind.log
+          rc=${PIPESTATUS[0]}
+          set -e
+
+          fail=0
+          echo "----- scanning valgrind output for errors in HICAR Fortran sources -----"
+          if grep -qE "[A-Za-z0-9_]+\.F90:[0-9]+" valgrind.log; then
+            echo "::error::valgrind reported memory errors citing HICAR Fortran sources (see below / artifact)"
+            grep -nE "depends on uninitialised|Use of uninitialised|Invalid (read|write)|Conditional jump|[A-Za-z0-9_]+\.F90:[0-9]+|was created by" valgrind.log || true
+            fail=1
+          else
+            echo "valgrind clean: no error blocks cite a HICAR .F90 source."
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::HICAR-tester exited non-zero ($rc) under valgrind (crash or failed unit test)"
+            fail=1
+          fi
+          exit $fail
+
+      - name: Upload valgrind log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: valgrind-log
+          path: build/valgrind.log
+          if-no-files-found: ignore

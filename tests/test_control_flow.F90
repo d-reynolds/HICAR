@@ -271,6 +271,10 @@ module test_control_flow
 
         do i = 1, n_nests
             options(i)%general%calendar = "gregorian"
+            ! Explicitly clear the restart gate: these in_options are stack
+            ! allocated and never namelist-parsed, so without this (and the
+            ! type default) `restart` is uninitialised and read as garbage.
+            options(i)%restart%restart = .false.
             call options(i)%general%start_time%init(options(i)%general%calendar)
             call options(i)%general%end_time%init(options(i)%general%calendar)
             call options(i)%restart%restart_time%init(options(i)%general%calendar)
