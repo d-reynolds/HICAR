@@ -135,15 +135,6 @@ jobs:
       # to $GITHUB_ENV for the later steps that run the HICAR executable.
       - run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies
       - run: bash .github/scripts/hicar_install_utils.sh hicar_install
-      # Publish the freshly built release exe so the example-namelists job can
-      # reuse it (no second HICAR build). Uploaded right after the build, so it
-      # is available even if a later test step in this job fails.
-      - name: Upload release executable (shared with example-namelists)
-        uses: actions/upload-artifact@v4
-        with:
-          name: hicar-release-exe
-          path: bin/HICAR
-          if-no-files-found: error
       - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
       # Regenerate the example namelists from the gen_example_nmls/ scripts BEFORE
       # the integration tests, so the cases validate the CURRENT gen scripts rather
@@ -151,6 +142,18 @@ jobs:
       # bin/HICAR.
       - name: Regenerate example namelists (integration uses current gen scripts)
         run: bash helpers/example_namelists/generate_examples.sh "$GITHUB_WORKSPACE/bin/HICAR"
+      # Publish the namelists regenerated HERE (on the build runner, where the
+      # -march=native release exe runs correctly) so the example-namelists job can
+      # commit them WITHOUT re-running the binary on a different runner — a
+      # native-tuned exe SIGILLs on a runner whose CPU lacks an instruction the
+      # builder emitted. Uploaded before the integration tests so it is available
+      # even if a later test step fails.
+      - name: Upload regenerated example namelists (shared with example-namelists)
+        uses: actions/upload-artifact@v4
+        with:
+          name: regenerated-namelists
+          path: helpers/example_namelists/*.nml
+          if-no-files-found: error
       - name: Integration (all config cases — run only)
         run: |
           cd tests/Test_Cases
@@ -215,11 +218,14 @@ jobs:
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo "Signed ${SIGN_SHA} as hicar-full-test=success"
 
-  # --- example namelists: regenerate + commit (push to develop only) ---------
-  # Reuses cpu-release's already-built executable (no second HICAR build).
-  # Runs regardless of whether the test jobs passed — it only needs the release
-  # build to have produced an exe — so it is independent of the correctness gate
-  # and never blocks or is blocked by `sign`. Skipped on PRs (it commits back).
+  # --- example namelists: commit the regenerated namelists (push to develop only) ---
+  # Reuses the example namelists cpu-release regenerated on ITS OWN runner (the
+  # `regenerated-namelists` artifact). It does NOT re-run the release exe here:
+  # that exe is built with -march=native and SIGILLs when run on a runner whose CPU
+  # differs from the builder's. Runs regardless of whether the test jobs passed —
+  # it only needs cpu-release to have produced the artifact — so it is independent
+  # of the correctness gate and never blocks or is blocked by `sign`. Skipped on
+  # PRs (it commits back).
   example-namelists:
     needs: cpu-release
     # push to develop ONLY, AND only in the direct full-test run. develop (not
@@ -237,46 +243,18 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
 
-      # The reused exe is dynamically linked against the dependency libs
-      # (HDF5/NetCDF/FFTW) in ~/installdir/lib — restore that cache so it can
-      # load. This is just the cache the build jobs already populated; no rebuild.
-      - uses: actions/cache@v4
-        with:
-          path: ~/installdir
-          # No restore-keys: a prefix fallback would restore an ~/installdir
-          # built by an OLDER install script, and the sentinel in
-          # hicar_dependencies would then skip rebuilding — silently using stale
-          # deps. Keying purely on the script hash means exact hit => skip,
-          # script changed => full miss => rebuild.
-          key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
-
-      - name: Download release executable
+      # Reuse the .nml files cpu-release already regenerated on its own runner.
+      # We deliberately do NOT download/run the release exe here: it is built with
+      # -march=native and SIGILLs on a runner whose CPU differs from the builder's.
+      # Downloading the generated text files needs no deps cache, runtime libs, or
+      # binary execution.
+      - name: Download regenerated example namelists
         id: dl
-        continue-on-error: true   # absent if the release build failed -> skip
+        continue-on-error: true   # absent if cpu-release failed before regen -> skip
         uses: actions/download-artifact@v4
         with:
-          name: hicar-release-exe
-          path: bin
-
-      # The reused exe is also dynamically linked against the apt-installed
-      # runtime libs (mpich's libmpi/libmpifort, libfftw3, libcurl). Unlike the
-      # HDF5/NetCDF stack in ~/installdir, these live in system paths and are NOT
-      # in the deps cache (see hicar_dependencies), so they must be installed
-      # here too — this job does not run hicar_dependencies. Without them the exe
-      # fails with "error while loading shared libraries" and produces no namelist.
-      - name: Install runtime libraries for the reused exe
-        if: steps.dl.outcome == 'success'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y mpich libfftw3-dev libcurl4-gnutls-dev
-
-      - name: Regenerate example namelists
-        if: steps.dl.outcome == 'success'
-        run: |
-          chmod +x bin/HICAR
-          # HDF5/NetCDF come from the restored deps cache; mpich/FFTW/curl from apt above
-          export LD_LIBRARY_PATH="$HOME/installdir/lib:$LD_LIBRARY_PATH"
-          bash helpers/example_namelists/generate_examples.sh "$GITHUB_WORKSPACE/bin/HICAR"
+          name: regenerated-namelists
+          path: helpers/example_namelists
 
       - name: Commit regenerated namelists (if changed)
         if: steps.dl.outcome == 'success'
