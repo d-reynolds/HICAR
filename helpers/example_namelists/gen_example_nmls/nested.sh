@@ -18,7 +18,7 @@ set_var start_date     "'2017-02-14 00:00:00'" general
 set_var end_date       "'2017-02-15 00:00:00'" general
 set_var outputinterval 3600 output
 set_var inputinterval  3600 forcing
-set_var output_vars    "'all'" output
+set_var output_vars   "'qv','temperature','precipitation','u','v','swtd','swtb','lwtr','hfls','hfss','w'" output
 
 # --- domain / forcing files ------------------------------------------------
 set_var init_conditions_file "'../domains/Gaudergrat_250m.nc','../domains/Gaudergrat_nested_250m.nc'" domain

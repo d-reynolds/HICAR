@@ -452,12 +452,11 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
         # with each of them
         # detect if this is running on mac OS
         if [[ "$OSTYPE" == "darwin"* ]]; then
-            export sys_np=$(sysctl -n hw.logicalcpu)
+            decomp_np_full=$(sysctl -n hw.logicalcpu)
         else
-            export sys_np=$(nproc --all)
+            decomp_np_full=$(nproc --all)
         fi
 
-        decomp_np_full=sys_np
         decomp_np_half=$(( decomp_np_full/2 ))
     fi
 
