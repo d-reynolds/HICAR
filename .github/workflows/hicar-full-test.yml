@@ -93,6 +93,12 @@ jobs:
         run: bash tests/test_cli_options.sh "$GITHUB_WORKSPACE"
       - name: Unit / invariant tests
         run: cd build && mpiexec -np 4 tests/HICAR-tester
+      # Regenerate the example namelists from the gen_example_nmls/ scripts BEFORE
+      # the integration tests, so the cases validate the CURRENT gen scripts rather
+      # than a possibly stale committed .nml (see cpu-debug). Release build installs
+      # bin/HICAR.
+      - name: Regenerate example namelists (integration uses current gen scripts)
+        run: bash helpers/example_namelists/generate_examples.sh "$GITHUB_WORKSPACE/bin/HICAR_debug"
       - name: Integration (Standard case)
         run: bash tests/Test_Cases/test_case_runner.sh "$GITHUB_WORKSPACE" Standard
       - name: Reproducibility (decomposition + restart)
@@ -139,6 +145,12 @@ jobs:
           path: bin/HICAR
           if-no-files-found: error
       - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
+      # Regenerate the example namelists from the gen_example_nmls/ scripts BEFORE
+      # the integration tests, so the cases validate the CURRENT gen scripts rather
+      # than a possibly stale committed .nml (see cpu-debug). Release build installs
+      # bin/HICAR.
+      - name: Regenerate example namelists (integration uses current gen scripts)
+        run: bash helpers/example_namelists/generate_examples.sh "$GITHUB_WORKSPACE/bin/HICAR"
       - name: Integration (all config cases — run only)
         run: |
           cd tests/Test_Cases

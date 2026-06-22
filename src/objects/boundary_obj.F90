@@ -75,6 +75,9 @@ contains
                                     domain_lon,        &
                                     lon_sys)
 
+            ! sanity-check the user's forcing options against the actual forcing data
+            ! (root/forcing path only -- nests get their state from the parent)
+            call check_forcing_options(this, options)
         endif
         ! endif
         ! call this%distribute_initial_conditions()
@@ -84,6 +87,435 @@ contains
 
     end subroutine init_boundary
 
+
+    !>------------------------------------------------------------
+    !! Sanity-check user-supplied forcing options against the actual forcing data.
+    !!
+    !! Emits warnings (never fatal) when a namelist option looks inconsistent with
+    !! the values found in the forcing file(s). These are heuristics meant to catch
+    !! common unit/configuration mistakes (geopotential vs geometric height, missing
+    !! temperature offset, pressure unit errors, static vs time-varying z).
+    !!
+    !! Only STD_OUT_PE reads the forcing for these checks and prints the warnings,
+    !! and it runs once at start-up, so the extra I/O is negligible.
+    !!------------------------------------------------------------
+    subroutine check_forcing_options(this, options)
+        implicit none
+        class(boundary_t), intent(in) :: this
+        type(options_t),   intent(in) :: options
+
+        real, allocatable :: z1(:,:,:), z2(:,:,:)
+        type(Time_type), allocatable :: times1(:), times2(:)
+        type(time_delta_t) :: dt
+        character(len=kMAX_FILE_LENGTH) :: second_file
+        real    :: hgt_min, hgt_max, z_min, z_max, z_lo_max, z_hi_max, z_first_max
+        real    :: t_min, t_max, p_min, p_max, pb_min, pb_max, q_min, q_max
+        real    :: model_top, eff_tmin, eff_pmax, zdiff, ztol, lev_lo, lev_hi
+        real    :: actual_dt, expected_dt
+        logical :: ok, okb, test1, test1_ok, test2, test2_ok, evaluable
+        logical :: looks_geopotential, looks_height, z_changes, have_second_z
+
+        real, parameter :: GEOP_HGT_RATIO   = 2.0      ! terrain vs near-surface z level
+        real, parameter :: GEOP_TOP_RATIO   = 3.0      ! model top vs max forcing z
+        real, parameter :: MIN_PLAUSIBLE_P  = 50000.0  ! [Pa] minimum believable max pressure
+        real, parameter :: MAX_PLAUSIBLE_QV = 0.05     ! [kg/kg] ceiling for mixing ratio / specific humidity
+
+        ! Only image 1 reads the forcing for these checks and prints warnings.
+        if (.not. STD_OUT_PE) return
+
+        ! -----------------------------------------------------------------
+        ! z_is_geopotential
+        ! Genuine geopotential height is ~g (9.8x) larger than geometric height,
+        ! so the forcing z is far larger than the terrain and the model top when it
+        ! is geopotential. Both ratio tests therefore FAIL when z is geopotential.
+        ! -----------------------------------------------------------------
+        if ( (.not. options%forcing%compute_z) .and. (trim(options%forcing%zvar) /= "") ) then
+            call read_atmos_extremes(this%firstfile, options%forcing%zvar, this%firststep, ok, &
+                                     z_min, z_max, z_lo_max, z_hi_max)
+            if (ok) then
+                ! the near-surface level has the smaller heights; pick it robustly
+                ! regardless of whether the forcing z axis is flipped top-to-bottom
+                z_first_max = min(z_lo_max, z_hi_max)
+
+                ! test1: terrain max within a factor of the near-surface z level max
+                test1    = .false.
+                test1_ok = .false.
+                if (trim(options%forcing%hgtvar) /= "") then
+                    call read_surface_extremes(this%firstfile, options%forcing%hgtvar, this%firststep, &
+                                               test1_ok, hgt_min, hgt_max)
+                    if (test1_ok) test1 = within_factor(hgt_max, z_first_max, GEOP_HGT_RATIO)
+                end if
+
+                ! test2 (only consulted if test1 did not already indicate geometric height):
+                ! model top within a factor of the max forcing z
+                model_top = forcing_model_top(options)
+                test2    = .false.
+                test2_ok = .false.
+                if ( (.not. test1) .and. (model_top > 0.0) .and. (z_max > 0.0) ) then
+                    test2_ok = .true.
+                    test2 = within_factor(model_top, z_max, GEOP_TOP_RATIO)
+                end if
+
+                evaluable          = test1_ok .or. test2_ok
+                looks_geopotential = evaluable .and. (.not. test1) .and. (.not. test2)
+                looks_height       = test1 .or. test2
+
+                if (looks_geopotential .and. (.not. options%forcing%z_is_geopotential)) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  Forcing height '"//trim(options%forcing%zvar)//"' looks like GEOPOTENTIAL height,"
+                    write(*,*) "  but z_is_geopotential = .False. in the namelist."
+                    write(*,*) "    max forcing z          : ", z_max
+                    write(*,*) "    near-surface z (max)   : ", z_first_max
+                    if (test1_ok) write(*,*) "    forcing terrain (max)  : ", hgt_max
+                    if (test2_ok) write(*,*) "    model top height [m]   : ", model_top
+                    write(*,*) "  These values are ~g (9.8x) larger than expected for geometric height."
+                    write(*,*) "  If '"//trim(options%forcing%zvar)//"' is geopotential height, set z_is_geopotential = .True."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                else if (looks_height .and. options%forcing%z_is_geopotential) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  z_is_geopotential = .True. but forcing height '"//trim(options%forcing%zvar)//"'"
+                    write(*,*) "  looks like geometric (m) height, not geopotential."
+                    write(*,*) "    max forcing z          : ", z_max
+                    write(*,*) "    near-surface z (max)   : ", z_first_max
+                    if (test1_ok) write(*,*) "    forcing terrain (max)  : ", hgt_max
+                    if (test2_ok) write(*,*) "    model top height [m]   : ", model_top
+                    write(*,*) "  If '"//trim(options%forcing%zvar)//"' is already in meters, set z_is_geopotential = .False."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                end if
+            end if
+        end if
+
+        ! -----------------------------------------------------------------
+        ! time_varying_z
+        ! Compare the forcing height field across two forcing steps (the next step in
+        ! the same file, else the first step of the next file). If it changes, z is
+        ! time-varying and time_varying_z should be .True. (and vice-versa).
+        ! -----------------------------------------------------------------
+        if ( (.not. options%forcing%compute_z) .and. (trim(options%forcing%zvar) /= "") ) then
+            call read_atmos_full(this%firstfile, options%forcing%zvar, this%firststep, z1, ok)
+            if (ok) then
+                have_second_z = .false.
+
+                ! prefer the next time step within the same file
+                if (this%firststep + 1 <= var_ntimes(this%firstfile, options%forcing%zvar)) then
+                    call read_atmos_full(this%firstfile, options%forcing%zvar, this%firststep + 1, z2, have_second_z)
+                end if
+
+                ! otherwise fall back to the first step of the next forcing file
+                if (.not. have_second_z .and. allocated(options%forcing%boundary_files)) then
+                    second_file = next_forcing_file(options%forcing%boundary_files, this%firstfile)
+                    if (trim(second_file) /= "") then
+                        call read_atmos_full(second_file, options%forcing%zvar, 1, z2, have_second_z)
+                    end if
+                end if
+
+                if (have_second_z) then
+                    if ( all(shape(z1) == shape(z2)) ) then
+                        zdiff     = maxval(abs(z2 - z1))
+                        ztol      = 1.0e-4 * max(1.0, maxval(abs(z1)))
+                        z_changes = (zdiff > ztol)
+
+                        if (z_changes .and. (.not. options%forcing%time_varying_z)) then
+                            write(*,*) "  "
+                            write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                            write(*,*) "  Forcing height '"//trim(options%forcing%zvar)//"' changes between forcing steps"
+                            write(*,*) "  but time_varying_z = .False. in the namelist."
+                            write(*,*) "    max |dz| between steps : ", zdiff
+                            write(*,*) "  If the forcing vertical coordinate varies in time, set time_varying_z = .True."
+                            write(*,*) "  ---------------------------------------------------------------------------"
+                        else if ((.not. z_changes) .and. options%forcing%time_varying_z) then
+                            write(*,*) "  "
+                            write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                            write(*,*) "  time_varying_z = .True. but forcing height '"//trim(options%forcing%zvar)//"'"
+                            write(*,*) "  is identical between the first two forcing steps."
+                            write(*,*) "  time_varying_z = .True. is likely unnecessary (and adds runtime cost)."
+                            write(*,*) "  ---------------------------------------------------------------------------"
+                        end if
+                    end if
+                end if
+            end if
+        end if
+
+        ! -----------------------------------------------------------------
+        ! t_offset
+        ! Temperature in HICAR is absolute (Kelvin, > 0). Negative values (after any
+        ! t_offset) imply the forcing T is in Celsius or relative to a base temperature.
+        ! -----------------------------------------------------------------
+        if (trim(options%forcing%tvar) /= "") then
+            call read_atmos_extremes(this%firstfile, options%forcing%tvar, this%firststep, ok, &
+                                     t_min, t_max, lev_lo, lev_hi)
+            if (ok) then
+                eff_tmin = t_min + options%forcing%t_offset
+                if (eff_tmin < 0.0) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  Forcing temperature '"//trim(options%forcing%tvar)//"' has negative values (interpreted as K)."
+                    write(*,*) "    min temperature        : ", t_min
+                    if (options%forcing%t_offset /= 0.0) &
+                        write(*,*) "    min after t_offset     : ", eff_tmin
+                    write(*,*) "  HICAR expects absolute temperature (Kelvin, > 0)."
+                    write(*,*) "  If your forcing T is in Celsius or relative to a base temperature, use t_offset"
+                    write(*,*) "  to convert it (e.g. t_offset = 273.15 for Celsius, or 300.0 for WRF perturbation T)."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                end if
+            end if
+        end if
+
+        ! -----------------------------------------------------------------
+        ! p_multiplier
+        ! A maximum forcing pressure well below ~1e5 Pa implies the pressure is in
+        ! units other than Pa (e.g. hPa); p_multiplier rescales it.
+        ! -----------------------------------------------------------------
+        if (trim(options%forcing%pvar) /= "") then
+            call read_atmos_extremes(this%firstfile, options%forcing%pvar, this%firststep, ok, &
+                                     p_min, p_max, lev_lo, lev_hi)
+            if (ok) then
+                ! include base pressure if the forcing splits pressure into perturbation + base
+                pb_max = 0.0
+                if (trim(options%forcing%pbvar) /= "") then
+                    call read_atmos_extremes(this%firstfile, options%forcing%pbvar, this%firststep, okb, &
+                                             pb_min, pb_max, lev_lo, lev_hi)
+                    if (.not. okb) pb_max = 0.0
+                end if
+
+                eff_pmax = (p_max + pb_max) * options%forcing%p_multiplier
+                if (eff_pmax < MIN_PLAUSIBLE_P) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  Forcing pressure '"//trim(options%forcing%pvar)//"' has an implausibly low maximum."
+                    write(*,*) "    max pressure [Pa]      : ", eff_pmax
+                    write(*,*) "  Expected near-surface pressure is ~1e5 Pa; your pressure may be in other units."
+                    write(*,*) "  e.g. for hPa set p_multiplier = 100.0 to convert to Pa."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                end if
+            end if
+        end if
+
+        ! -----------------------------------------------------------------
+        ! qv_is_relative_humidity / qv_is_spec_humidity
+        ! Water vapor mixing ratio and specific humidity are both small (< ~0.05 kg/kg)
+        ! and are numerically indistinguishable from each other (q = w/(1+w) differ by
+        ! < ~4% over the same range). Relative humidity is far larger -- O(1) as a
+        ! fraction or O(100) as a percent -- so only the RH-vs-(mixing ratio/specific
+        ! humidity) distinction is reliably detectable from the data.
+        ! -----------------------------------------------------------------
+        if (trim(options%forcing%qvvar) /= "") then
+            call read_atmos_extremes(this%firstfile, options%forcing%qvvar, this%firststep, ok, &
+                                     q_min, q_max, lev_lo, lev_hi)
+            if (ok) then
+                if ( (q_max > MAX_PLAUSIBLE_QV) .and. (.not. options%forcing%qv_is_relative_humidity) ) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  Forcing humidity '"//trim(options%forcing%qvvar)//"' looks like RELATIVE HUMIDITY"
+                    if (q_max > 2.0) then
+                        write(*,*) "  (in percent), but qv_is_relative_humidity = .False. in the namelist."
+                    else
+                        write(*,*) "  (as a fraction), but qv_is_relative_humidity = .False. in the namelist."
+                    end if
+                    write(*,*) "    max qv                 : ", q_max
+                    write(*,*) "  Mixing ratio / specific humidity are < ~0.05 kg/kg (or your qv may be in g/kg)."
+                    write(*,*) "  If this field is relative humidity, set qv_is_relative_humidity = .True."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                else if ( (q_max <= MAX_PLAUSIBLE_QV) .and. options%forcing%qv_is_relative_humidity ) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  qv_is_relative_humidity = .True. but forcing humidity '"//trim(options%forcing%qvvar)//"'"
+                    write(*,*) "  has a maximum of ", q_max, " -- far smaller than relative humidity (O(1) or O(100))."
+                    write(*,*) "  This looks like mixing ratio or specific humidity. If so, set"
+                    write(*,*) "  qv_is_relative_humidity = .False. (and qv_is_spec_humidity as appropriate)."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                end if
+                ! NOTE: specific humidity vs mixing ratio cannot be distinguished from the
+                ! data, so qv_is_spec_humidity is not validated beyond the RH check above.
+            end if
+        end if
+
+        ! -----------------------------------------------------------------
+        ! inputinterval
+        ! Compare the namelist forcing interval against the actual spacing of the
+        ! forcing time stamps (the next time in the same file, else the first time of
+        ! the next file).
+        ! -----------------------------------------------------------------
+        if (trim(options%forcing%time_var) /= "") then
+            actual_dt = -1.0
+            call read_times(this%firstfile, options%forcing%time_var, times1)
+            if (allocated(times1)) then
+                if (size(times1) >= this%firststep + 1) then
+                    ! two time stamps available within the first forcing file
+                    dt = times1(this%firststep+1) - times1(this%firststep)
+                    actual_dt = real( dt%seconds() )
+                else if (allocated(options%forcing%boundary_files)) then
+                    ! only one time in this file -- compare against the next forcing file
+                    second_file = next_forcing_file(options%forcing%boundary_files, this%firstfile)
+                    if (trim(second_file) /= "") then
+                        call read_times(second_file, options%forcing%time_var, times2)
+                        if (allocated(times2)) then
+                            if (size(times2) >= 1) then
+                                dt = times2(1) - times1(this%firststep)
+                                actual_dt = real( dt%seconds() )
+                            end if
+                        end if
+                    end if
+                end if
+            end if
+
+            expected_dt = options%forcing%inputinterval
+            if ( (actual_dt > 0.0) .and. &
+                 (abs(actual_dt - expected_dt) > max(1.0, 1.0e-3 * expected_dt)) ) then
+                write(*,*) "  "
+                write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                write(*,*) "  inputinterval does not match the forcing data time stamps."
+                write(*,*) "    inputinterval [s]      : ", expected_dt
+                write(*,*) "    forcing data dt [s]    : ", actual_dt
+                write(*,*) "  Set inputinterval to the actual spacing of the forcing time stamps."
+                write(*,*) "  ---------------------------------------------------------------------------"
+            end if
+        end if
+
+    end subroutine check_forcing_options
+
+
+    !>------------------------------------------------------------
+    !! Read a full 3D atmospheric forcing field. Handles 3D (x,y,z) and
+    !! 4D (x,y,z,t) variables (selecting time index 'step'). ok=.false. if the
+    !! variable is missing or has an unexpected rank.
+    !!------------------------------------------------------------
+    subroutine read_atmos_full(file, varname, step, a3, ok)
+        implicit none
+        character(len=*),  intent(in)  :: file, varname
+        integer,           intent(in)  :: step
+        real, allocatable, intent(out) :: a3(:,:,:)
+        logical,           intent(out) :: ok
+        integer, allocatable :: dims(:)
+
+        ok = .false.
+        if (.not. io_variable_is_present(file, varname)) return
+        call io_getdims(file, varname, dims)
+        if (size(dims) == 3) then
+            call io_read(file, varname, a3)
+            ok = .true.
+        else if (size(dims) == 4) then
+            call io_read(file, varname, a3, extradim_start=step)
+            ok = .true.
+        end if
+    end subroutine read_atmos_full
+
+
+    !>------------------------------------------------------------
+    !! Read a 3D atmospheric forcing field and return its extremes plus the per-level
+    !! max of the first and last vertical level. Vertical is dim 3 in the file layout.
+    !!------------------------------------------------------------
+    subroutine read_atmos_extremes(file, varname, step, ok, fmin, fmax, lo_lev_max, hi_lev_max)
+        implicit none
+        character(len=*), intent(in)  :: file, varname
+        integer,          intent(in)  :: step
+        logical,          intent(out) :: ok
+        real,             intent(out) :: fmin, fmax, lo_lev_max, hi_lev_max
+        real, allocatable :: a3(:,:,:)
+
+        call read_atmos_full(file, varname, step, a3, ok)
+        if (.not. ok) return
+        fmin       = minval(a3)
+        fmax       = maxval(a3)
+        lo_lev_max = maxval(a3(:,:,1))
+        hi_lev_max = maxval(a3(:,:,size(a3,3)))
+    end subroutine read_atmos_extremes
+
+
+    !>------------------------------------------------------------
+    !! Read a 2D surface forcing field, returning its min/max. Handles 2D (x,y)
+    !! and 3D (x,y,t) variables (selecting time index 'step').
+    !!------------------------------------------------------------
+    subroutine read_surface_extremes(file, varname, step, ok, fmin, fmax)
+        implicit none
+        character(len=*), intent(in)  :: file, varname
+        integer,          intent(in)  :: step
+        logical,          intent(out) :: ok
+        real,             intent(out) :: fmin, fmax
+        real, allocatable :: a2(:,:)
+        integer, allocatable :: dims(:)
+
+        ok = .false.
+        if (.not. io_variable_is_present(file, varname)) return
+        call io_getdims(file, varname, dims)
+        if (size(dims) == 2) then
+            call io_read(file, varname, a2)
+            ok = .true.
+        else if (size(dims) == 3) then
+            call io_read(file, varname, a2, extradim_start=step)
+            ok = .true.
+        end if
+        if (ok) then
+            fmin = minval(a2)
+            fmax = maxval(a2)
+        end if
+    end subroutine read_surface_extremes
+
+
+    !>------------------------------------------------------------
+    !! Number of time records for a variable (1 if it has no trailing time dimension).
+    !!------------------------------------------------------------
+    integer function var_ntimes(file, varname)
+        implicit none
+        character(len=*), intent(in) :: file, varname
+        integer, allocatable :: dims(:)
+
+        var_ntimes = 1
+        if (.not. io_variable_is_present(file, varname)) return
+        call io_getdims(file, varname, dims)
+        if (size(dims) == 4) var_ntimes = dims(4)
+    end function var_ntimes
+
+
+    !>------------------------------------------------------------
+    !! Return the forcing file that follows 'current' in file_list, or "" if 'current'
+    !! is absent or is the last file in the list.
+    !!------------------------------------------------------------
+    function next_forcing_file(file_list, current) result(nextfile)
+        implicit none
+        character(len=*), intent(in) :: file_list(:)
+        character(len=*), intent(in) :: current
+        character(len=kMAX_FILE_LENGTH) :: nextfile
+        integer :: i
+
+        nextfile = ""
+        do i = 1, size(file_list) - 1
+            if (trim(file_list(i)) == trim(current)) then
+                nextfile = file_list(i+1)
+                return
+            end if
+        end do
+    end function next_forcing_file
+
+
+    !>------------------------------------------------------------
+    !! Height above ground of the model top [m], or -1 if it cannot be determined.
+    !!------------------------------------------------------------
+    real function forcing_model_top(options)
+        implicit none
+        type(options_t), intent(in) :: options
+
+        forcing_model_top = -1.0
+        if (options%domain%auto_level > 0) then
+            forcing_model_top = options%domain%model_top_height
+        else if (allocated(options%domain%dz_levels)) then
+            if (size(options%domain%dz_levels) > 0) forcing_model_top = sum(options%domain%dz_levels)
+        end if
+    end function forcing_model_top
+
+
+    !>------------------------------------------------------------
+    !! .true. if a and b are within a factor 'f' of each other (both strictly > 0).
+    !!------------------------------------------------------------
+    logical function within_factor(a, b, f)
+        implicit none
+        real, intent(in) :: a, b, f
+
+        within_factor = .false.
+        if (a > 0.0 .and. b > 0.0) within_factor = (max(a,b) <= f * min(a,b))
+    end function within_factor
 
 
     subroutine read_latlon(file,latvar,lonvar,lat_out,lon_out,longitude_system,modified)

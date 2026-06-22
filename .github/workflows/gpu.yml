@@ -88,7 +88,7 @@ jobs:
       - name: Build CPU reference exe (NVHPC, OPENACC=OFF)
         run: |
           rm -rf build_cpu
-          cmake -S . -B build_cpu -DFSM=OFF -DMODE=release -DOPENACC=OFF
+          cmake -S . -B build_cpu -DMODE=release -DOPENACC=OFF
           cmake --build build_cpu --target HICAR -j"$(nproc)"
           cmake --install build_cpu
 
@@ -96,7 +96,7 @@ jobs:
       - name: Build GPU exe (NVHPC, OPENACC=ON) + test data
         run: |
           rm -rf build_gpu
-          cmake -S . -B build_gpu -DFSM=OFF -DMODE=release -DOPENACC=ON
+          cmake -S . -B build_gpu -DMODE=release -DOPENACC=ON
           cmake --build build_gpu --target HICAR -j"$(nproc)"
           cmake --install build_gpu
           cmake --build build_gpu --target download_test_data

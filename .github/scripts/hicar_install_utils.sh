@@ -265,7 +265,7 @@ function hicar_install {
     export FFTW_DIR=/usr
     export PATH=${INSTALLDIR}/bin:$PATH
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
-    cmake ../ -DFSM=OFF -DMODE=${HICAR_MODE:-debug} ${HICAR_CMAKE_EXTRA:-}
+    cmake ../ -DMODE=${HICAR_MODE:-debug} ${HICAR_CMAKE_EXTRA:-}
     make ${JN}
     make install
     

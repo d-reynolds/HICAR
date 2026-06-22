@@ -1754,14 +1754,14 @@ contains
                     "for calculation of the SLEVE coordinate."
                 min = 0
                 max = 100
-                default = "3"
+                default = "5"
                 group = "Domain"
             case ("terrain_smooth_cycles")
                 description = "Number of smoothing cycles used to split large and small scale terrain variations"//achar(10)//BLNK_CHR_N// &
                     "for calculation of the SLEVE coordinate."
                 min = 0
                 max = 200
-                default = "5"
+                default = "100"
                 group = "Domain"
             case ("decay_rate_L_topo")
                 description = "Decay rate for the large scale topography in the SLEVE coordinate"
@@ -1779,7 +1779,7 @@ contains
                 description = "Exponent 'n' in SLEVE coordinate equation (see Schär et al. 2002)"
                 min = 0
                 max = 10
-                default = "1.2"
+                default = "1.35"
                 group = "Domain"
             case("auto_level")
                 description = "Integer that determines whether to create levels automatically (As used in ICON & WRF):"//achar(10)//BLNK_CHR_N// &
@@ -2596,7 +2596,7 @@ contains
                                                        "'fluxes' = Surface fluxes from forcing data"//achar(10)//BLNK_CHR_N// &
                                                        "'simple' = cloud fraction based radiation + radiative cooling (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
                                                        "'RRTMG'  = RRTMG"//achar(10)//BLNK_CHR_N// &
-                                                       "'RRTMGP' = RRTMGP"
+                                                       "'RRTMGP' = RRTMGP (GPU accelerated)"
 
                 default = "none"
                 if (present(val_keys)) then
@@ -3729,6 +3729,7 @@ contains
                 group = "SM_Parameters"
             case("snowpack_variant")
                 description = "which SnowPack model variant to use"//achar(10)//BLNK_CHR_N// &
+                    "'default' = SnowPack model suited for general simulations"//achar(10)//BLNK_CHR_N// &
                     "'antarctica' = SnowPack model suited for Antarctica simulations"//achar(10)//BLNK_CHR_N// &
                     "'alps' = SnowPack model suited for Alps simulations"
                 if (present(val_keys)) then
@@ -3882,7 +3883,7 @@ contains
                               "smaller values allow for less adjustment of vertical winds (more stable)"
                 min = 0.2
                 max = 2.0
-                default = "-1.0"
+                default = "1.0"
                 group = "Wind"
             case ("TPI_dmax")
                 description = "Maximum lateral distance over which to calculate the TPI parameter"
