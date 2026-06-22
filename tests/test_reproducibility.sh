@@ -169,7 +169,7 @@ generate_standard_nml() {
 
     # Override wind, Sx, and output_vars for reproducibility testing. wind is at
     # its default in the example (so absent from the namelist) — insert it.
-    "${PYTHON:-python3}" "${hicar_repo}/helpers/example_namelists/set_nml_var.py" "$out_nml" wind "'none'" --group wind
+    "${PYTHON:-python3}" "${hicar_repo}/helpers/example_namelists/set_nml_var.py" "$out_nml" wind "'none'" --group physics --insert
     sed -i'.bak' 's/Sx = .True./Sx = .False./g' "$out_nml"
     sed -i'.bak' "s/output_vars = .*$/output_vars = 'all'/g" "$out_nml"
 
@@ -208,7 +208,7 @@ generate_restart_nml() {
 
     # Override wind, Sx, and output_vars for reproducibility testing. wind is at
     # its default in the example (so absent from the namelist) — insert it.
-    "${PYTHON:-python3}" "${hicar_repo}/helpers/example_namelists/set_nml_var.py" "$out_nml" wind "'none'" --group wind
+    "${PYTHON:-python3}" "${hicar_repo}/helpers/example_namelists/set_nml_var.py" "$out_nml" wind "'none'" --group physics --insert
     sed -i'.bak' 's/Sx = .True./Sx = .False./g' "$out_nml"
     sed -i'.bak' "s/output_vars = .*$/output_vars = 'all'/g" "$out_nml"
 
@@ -443,8 +443,17 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
             decomp_np_half=$(( (num_gpus / 2) + 1 ))
         fi
     else
-        decomp_np_full=10
-        decomp_np_half=5
+        # Once all of the .nml files have been created, run the HICAR executable
+        # with each of them
+        # detect if this is running on mac OS
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            export sys_np=$(sysctl -n hw.logicalcpu)
+        else
+            export sys_np=$(nproc --all)
+        fi
+
+        decomp_np_full=sys_np
+        decomp_np_half=$(( decomp_np_full/2 ))
     fi
 
     # Fine-mesh advection decomposition check (HICAR-tester; CPU, GPU-independent).

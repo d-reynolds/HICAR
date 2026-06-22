@@ -56,7 +56,7 @@ jobs:
     needs: check-signed
     if: needs.check-signed.outputs.signed != 'true'
     permissions:
-      contents: read
+      contents: write
       statuses: write
     uses: ./.github/workflows/hicar-full-test.yml
 

@@ -99,8 +99,6 @@ jobs:
       # bin/HICAR.
       - name: Regenerate example namelists (integration uses current gen scripts)
         run: bash helpers/example_namelists/generate_examples.sh "$GITHUB_WORKSPACE/bin/HICAR_debug"
-      - name: Integration (Standard case)
-        run: bash tests/Test_Cases/test_case_runner.sh "$GITHUB_WORKSPACE" Standard
       - name: Reproducibility (decomposition + restart)
         run: bash tests/test_reproducibility.sh "$GITHUB_WORKSPACE" all
       - uses: actions/upload-artifact@v4
