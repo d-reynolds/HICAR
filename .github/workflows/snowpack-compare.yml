@@ -172,6 +172,32 @@ jobs:
             tests/Test_Cases/input/SNOWPACK_*.err
           if-no-files-found: ignore
 
+  # --- Sign the commit as having passed snow-model parity ---------------------
+  # Posts the `snow-parity` commit status that main's ruleset requires before a
+  # PR can merge. Runs whenever the comparison succeeds: automatically on PRs that
+  # touch the snow drivers (paths filter above), or via a manual dispatch on the
+  # PR head branch for changes that don't. For a pull_request event the status
+  # must land on the PR HEAD commit (not the ephemeral merge commit), hence the
+  # head.sha fallback; a manual dispatch resolves to github.sha (the head branch).
+  sign-snow:
+    needs: snowpack-compare
+    if: needs.snowpack-compare.result == 'success'
+    runs-on: ubuntu-22.04
+    permissions:
+      statuses: write
+    steps:
+      - name: Sign commit (snow-parity = success)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          gh api -X POST "/repos/${{ github.repository }}/statuses/${SIGN_SHA}" \
+            -f state=success \
+            -f context=snow-parity \
+            -f description="Passed SNOWPACK C++ vs native-Fortran parity" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "Signed ${SIGN_SHA} as snow-parity=success"
+
   # --- Parity bless: separate job behind the `parity-bless` Environment ------
   # Runs only on manual dispatch with bless=true AND only if the comparison job
   # succeeded (`needs`). The Environment must be configured in Settings >

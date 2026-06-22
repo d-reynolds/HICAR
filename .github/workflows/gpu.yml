@@ -17,6 +17,8 @@
 #                      exe (NVHPC, OPENACC=ON) from this commit, run both on the
 #                      Standard case, and compare GPU-vs-CPU by tolerance. Same
 #                      compiler for both isolates the GPU port. Then validation.
+#   4. sign-gpu      — on gpu-tests success, post the gpu-check=success commit
+#                      status that main's ruleset requires before a PR can merge.
 name: GPU test suite (NVFortran)
 
 on:
@@ -164,3 +166,32 @@ jobs:
             tests/gpu_cpu_report.json
             tests/figures/**
           if-no-files-found: ignore
+
+  # --- 4. Sign the commit as having passed the GPU check ----------------------
+  # Posts the `gpu-check` commit status that main's ruleset requires before a PR
+  # can merge. Per the chosen policy, the GPU-vs-CPU comparison stays advisory
+  # (continue-on-error above), so this signs on a successful NVHPC BUILD + RUN of
+  # both exes. To gate a PR, manually dispatch this workflow on the PR head branch
+  # (develop): github.sha is then the PR head commit, so the status lands where
+  # main's ruleset evaluates it. Runs on a GitHub-hosted runner (not the GPU box),
+  # which just calls the status API.
+  sign-gpu:
+    needs: gpu-tests
+    if: needs.gpu-tests.result == 'success'
+    runs-on: ubuntu-22.04
+    permissions:
+      statuses: write
+    steps:
+      - name: Sign commit (gpu-check = success)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # No pull_request trigger on this workflow, so this resolves to
+          # github.sha — the branch HEAD the run was dispatched on (= PR head).
+          SIGN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          gh api -X POST "/repos/${{ github.repository }}/statuses/${SIGN_SHA}" \
+            -f state=success \
+            -f context=gpu-check \
+            -f description="Passed GPU test suite (NVHPC build + GPU-vs-CPU run)" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "Signed ${SIGN_SHA} as gpu-check=success"

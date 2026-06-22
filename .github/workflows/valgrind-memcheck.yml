@@ -11,21 +11,32 @@
 #
 # SCOPE / COST: CPU debug build, HICAR-tester only. Integration cases are far
 # too slow under valgrind, and the GPU/OpenACC build can't run under valgrind at
-# all. Nightly + manual only — never on the PR critical path (valgrind is
-# ~10-50x slower than native).
+# all. Runs nightly, on manual dispatch, and automatically after the CPU
+# full-test passes on a commit that has an open PR to main. That last lane posts
+# the `valgrind` commit status that main's ruleset REQUIRES before a PR can merge
+# (sign-valgrind below). valgrind is ~10-50x slower than native, so it sits
+# behind the full-test gate rather than running on every push.
 name: Valgrind memcheck (nightly)
 
 on:
+  # Auto-run after the CPU full-test completes; the `changed` gate below filters
+  # to a successful full-test on a commit that has an open PR to main.
+  workflow_run:
+    workflows: ["HICAR full-test (CPU)"]
+    types: [completed]
   schedule:
     - cron: '30 3 * * *'   # 03:30 UTC nightly
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read   # query previous runs of this workflow (the "changed" gate)
+  actions: read         # query previous runs of this workflow (the "changed" gate)
+  pull-requests: read   # detect an open PR to main (workflow_run lane)
 
 concurrency:
-  group: valgrind-${{ github.ref }}
+  # Per-commit for the workflow_run lane (don't let a newer develop push cancel an
+  # in-flight valgrind for a different commit); per-ref otherwise.
+  group: valgrind-${{ github.event.workflow_run.head_sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -38,13 +49,42 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
+      head_sha: ${{ steps.check.outputs.head_sha }}
     steps:
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "Event '${{ github.event_name }}' is a manual/explicit trigger — running."
+          event="${{ github.event_name }}"
+
+          # SHA the memcheck job should check out: the commit the full-test ran on
+          # for the workflow_run lane, otherwise this run's branch HEAD.
+          echo "head_sha=${{ github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
+
+          # --- workflow_run lane: only a PASSED full-test on an open main PR ---
+          if [ "$event" = "workflow_run" ]; then
+            concl="${{ github.event.workflow_run.conclusion }}"
+            head_branch="${{ github.event.workflow_run.head_branch }}"
+            echo "full-test conclusion=$concl head=$head_branch"
+            if [ "$concl" != "success" ]; then
+              echo "full-test did not pass — skipping valgrind."
+              echo "should_run=false" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            n=$(gh pr list --repo "${{ github.repository }}" \
+                  --base main --head "$head_branch" --state open \
+                  --json number --jq 'length' 2>/dev/null || echo 0)
+            if [ "${n:-0}" -ge 1 ]; then
+              echo "open PR to main for '$head_branch' — running valgrind."
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "no open PR to main for '$head_branch' — skipping."
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          if [ "$event" != "schedule" ]; then
+            echo "Event '$event' is a manual/explicit trigger — running."
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -74,7 +114,11 @@ jobs:
       HICAR_MODE: debug
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          # workflow_run defaults to main's HEAD; check out the commit the
+          # full-test actually ran on (a no-op for schedule/manual runs).
+          ref: ${{ needs.changed.outputs.head_sha }}
 
       # Same cache key as hicar-full-test's build-deps, so this restores the
       # already-built ~/installdir toolchain instead of rebuilding netcdf/hdf5.
@@ -134,3 +178,31 @@ jobs:
           name: valgrind-log
           path: build/valgrind.log
           if-no-files-found: ignore
+
+  # --- Sign the commit with the required `valgrind` status --------------------
+  # Posts the `valgrind` commit status that main's ruleset requires before a PR
+  # can merge. Posts success/failure on the SHA that was actually checked out
+  # (changed.outputs.head_sha = the full-test commit for the workflow_run lane, or
+  # the dispatched branch HEAD = PR head). Only runs when the gate decided to run
+  # memcheck (should_run), so a skipped nightly / no-open-PR run posts nothing.
+  # always() so a memcheck FAILURE posts a red `valgrind=failure` (clear PR block)
+  # instead of leaving the required check perpetually "Expected".
+  sign-valgrind:
+    needs: [changed, memcheck]
+    if: always() && needs.changed.outputs.should_run == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      statuses: write
+    steps:
+      - name: Sign commit (valgrind status)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGN_SHA: ${{ needs.changed.outputs.head_sha }}
+          STATE: ${{ needs.memcheck.result == 'success' && 'success' || 'failure' }}
+        run: |
+          gh api -X POST "/repos/${{ github.repository }}/statuses/${SIGN_SHA}" \
+            -f state="$STATE" \
+            -f context=valgrind \
+            -f description="valgrind memcheck: ${STATE}" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "Signed ${SIGN_SHA} as valgrind=${STATE}"
