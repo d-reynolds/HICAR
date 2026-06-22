@@ -710,7 +710,6 @@ contains
                    time_varying_z, t_is_potential, qv_is_spec_humidity, &
                    qv_is_relative_humidity, relax_filters
         real, dimension(kMAX_NESTS)    :: t_offset, p_multiplier, inputinterval
-        integer, dimension(kMAX_NESTS) :: forcing_longitude_system
         character(len=kMAX_FILE_LENGTH) :: forcing_file_list
         character(len=kMAX_FILE_LENGTH), allocatable :: boundary_files(:)
 
@@ -722,7 +721,7 @@ contains
                                         psvar, pslvar, swdown_var, lwdown_var, sst_var, time_var
 
         namelist /forcing/ forcing_file_list, inputinterval, t_offset, p_multiplier, limit_rh, z_is_geopotential, time_varying_z, &
-                            t_is_potential, forcing_longitude_system, qv_is_relative_humidity, qv_is_spec_humidity, relax_filters, &
+                            t_is_potential, qv_is_relative_humidity, qv_is_spec_humidity, relax_filters, &
                             pvar,pbvar,phbvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,qncvar,qnivar,qnrvar,qngvar,qnsvar,&
                             i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
                             qs_fmvar, ns_fmvar, &
@@ -751,7 +750,6 @@ contains
         call set_nml_var_default(z_is_geopotential, 'z_is_geopotential', print_info, gennml)
         call set_nml_var_default(time_varying_z, 'time_varying_z', print_info, gennml)
         call set_nml_var_default(t_is_potential, 't_is_potential', print_info, gennml)
-        call set_nml_var_default(forcing_longitude_system, 'forcing_longitude_system', print_info, gennml)
         call set_nml_var_default(qv_is_relative_humidity, 'qv_is_relative_humidity', print_info, gennml)
         call set_nml_var_default(qv_is_spec_humidity, 'qv_is_spec_humidity', print_info, gennml)
         call set_nml_var_default(relax_filters, 'relax_filters', print_info, gennml)
@@ -830,7 +828,6 @@ contains
         call set_nml_var(options%forcing%qv_is_spec_humidity, qv_is_spec_humidity(n_indx), 'qv_is_spec_humidity', qv_is_spec_humidity(1))
         call set_nml_var(options%forcing%relax_filters, relax_filters(n_indx), 'relax_filters', relax_filters(1))
         call set_nml_var(options%forcing%inputinterval, inputinterval(n_indx), 'inputinterval', inputinterval(1))
-        call set_nml_var(options%forcing%forcing_longitude_system, forcing_longitude_system(n_indx), 'forcing_longitude_system', forcing_longitude_system(1))
 
         call options%forcing%input_dt%set(seconds=options%forcing%inputinterval)
 
@@ -3243,7 +3240,6 @@ contains
         call append_kv_real   (config_str, pos, 'forcing', 'p_multiplier',             this%forcing%p_multiplier)
         call append_kv_logical(config_str, pos, 'forcing', 'limit_rh',                 this%forcing%limit_rh)
         call append_kv_real   (config_str, pos, 'forcing', 'inputinterval',            this%forcing%inputinterval)
-        call append_kv_int    (config_str, pos, 'forcing', 'forcing_longitude_system', this%forcing%forcing_longitude_system)
 
         ! --- general group (behavior-affecting fields only) ---
         call append_kv_str    (config_str, pos, 'general', 'calendar',         trim(this%general%calendar))

@@ -523,10 +523,15 @@ module icar_constants
 !! ------------------------------------------------
     real,   parameter :: kSMALL_VALUE = 1e-6
 
-    integer, parameter :: kMAINTAIN_LON      = 0
-    integer, parameter :: kPRIME_CENTERED    = 1
-    integer, parameter :: kDATELINE_CENTERED = 2
-    integer, parameter :: kGUESS_LON         = 3
+    ! Longitude convention used to reconcile the domain and forcing coordinates so the
+    ! geographic interpolation matches points correctly (see geo:standardize_latlon).
+    ! kAUTO_LON is the default: the convention is chosen from the (global) domain extent
+    ! and applied to BOTH the domain and the forcing, so the user never has to keep two
+    ! independent settings consistent.
+    integer, parameter :: kAUTO_LON          = 0   ! pick a seam-free convention from the domain extent
+    integer, parameter :: kMAINTAIN_LON      = 1   ! leave longitudes unchanged
+    integer, parameter :: kPRIME_CENTERED    = 2   ! prime-meridian centered (-180 - 180)
+    integer, parameter :: kDATELINE_CENTERED = 3   ! dateline centered        (0 - 360)
 
 ! ------------------------------------------------
 ! Physics scheme selection definitions

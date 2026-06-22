@@ -14,7 +14,8 @@ submodule(domain_interface) domain_implementation
     use string,               only : str
     use meta_data_interface,  only : meta_data_t
     use io_routines,          only : io_write, io_read
-    use geo,                  only : geo_lut, geo_interp, geo_interp2d, standardize_geo
+    use geo,                  only : geo_lut, geo_interp, geo_interp2d, standardize_geo, standardize_latlon, &
+                                     decide_longitude_system, longitude_system_name
     use array_utilities,      only : array_offset_x, array_offset_y, smooth_array, smooth_array_2d, make_2d_x, make_2d_y
     use vertical_interpolation,only : vinterp, vLUT
     use output_metadata,            only : get_varname, get_varmeta, get_varindx
@@ -1171,6 +1172,93 @@ contains
 
 
     !> -------------------------------
+    !! Reconcile the longitude convention used by the domain (and, downstream, its forcing).
+    !!
+    !! The domain and forcing must share one seam-free longitude convention for the
+    !! geographic interpolation to match points correctly. When longitude_system is Auto
+    !! (the default) or the deprecated Guess, the convention is chosen here from the GLOBAL
+    !! domain longitude extent (reduced with MPI_MIN/MAX so the choice is identical on every
+    !! rank), cached back into options so the forcing reuses it, and applied in place to the
+    !! domain longitudes. The forcing is put onto the same convention later in boundary_obj.
+    !! An explicit setting (Maintain / Prime / Dateline) is honoured as-is for both grids.
+    !! -------------------------------
+    subroutine reconcile_longitude_system(this, options)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        type(options_t), intent(inout) :: options
+
+        real, allocatable :: f180(:,:), f360(:,:)
+        real    :: lmin(3), lmax(3), gmin(3), gmax(3)  ! (1) = -180..180, (2) = 0..360, (3) = raw
+        real    :: span180, span360
+        integer :: lon_sys, ierr
+        logical :: modified
+
+        lon_sys = options%domain%longitude_system
+
+        associate(lon => this%vars_2d(this%var_indx(kVARS%longitude)%v)%data_2d)
+
+            ! Express the interior longitudes in BOTH standard conventions so the choice does
+            ! not depend on whichever convention the input file happened to use.
+            f180 = modulo(lon(this%its:this%ite, this%jts:this%jte) + 180.0, 360.0) - 180.0
+            f360 = modulo(lon(this%its:this%ite, this%jts:this%jte),         360.0)
+
+            lmin = [ minval(f180), minval(f360), minval(lon(this%its:this%ite, this%jts:this%jte)) ]
+            lmax = [ maxval(f180), maxval(f360), maxval(lon(this%its:this%ite, this%jts:this%jte)) ]
+        end associate
+
+        ! Reduce to a single global extent so every rank decides identically (MIN/MAX are
+        ! bit-reproducible across decompositions, unlike SUM/MEAN).
+        if (this%compute_comms /= MPI_COMM_NULL) then
+            call MPI_Allreduce(lmin, gmin, 3, MPI_REAL, MPI_MIN, this%compute_comms, ierr)
+            call MPI_Allreduce(lmax, gmax, 3, MPI_REAL, MPI_MAX, this%compute_comms, ierr)
+        else
+            gmin = lmin
+            gmax = lmax
+        endif
+
+        span180 = gmax(1) - gmin(1)
+        span360 = gmax(2) - gmin(2)
+
+        ! Auto resolves to a concrete convention: pick the convention in which the domain spans
+        ! the smaller longitude range (i.e. the one whose seam is not inside the domain).
+        if (lon_sys == kAUTO_LON) then
+            lon_sys = decide_longitude_system(span180, span360, gmin(3), gmax(3))
+            options%domain%longitude_system = lon_sys   ! cache so the forcing reuses the same choice
+
+            ! If the domain wraps past BOTH seams, no single convention is seam-free; warn so the
+            ! user can verify the result or pin longitude_system explicitly.
+            if (STD_OUT_PE .and. span180 > 350.0 .and. span360 > 350.0) then
+                write(*,*) "  WARNING: domain spans nearly all longitudes; no convention is seam-free. "// &
+                           "Verify the longitudes or set longitude_system explicitly."
+                flush(output_unit)
+            endif
+        endif
+
+        ! Will this convention actually move any domain longitudes? (gmin(3)/gmax(3) are raw.)
+        modified = (lon_sys == kDATELINE_CENTERED .and. gmin(3) <   0.0) .or. &
+                   (lon_sys == kPRIME_CENTERED    .and. gmax(3) > 180.0)
+
+        if (modified) then
+            ! Apply in place (full memory window incl. halos) so the output longitudes, the
+            ! interpolation grids, and the bounds passed to the forcing reader all agree.
+            call standardize_latlon(this%vars_2d(this%var_indx(kVARS%latitude)%v)%data_2d,   &
+                                    this%vars_2d(this%var_indx(kVARS%longitude)%v)%data_2d,  lon_sys)
+            call standardize_latlon(this%vars_2d(this%var_indx(kVARS%u_latitude)%v)%data_2d, &
+                                    this%vars_2d(this%var_indx(kVARS%u_longitude)%v)%data_2d, lon_sys)
+            call standardize_latlon(this%vars_2d(this%var_indx(kVARS%v_latitude)%v)%data_2d, &
+                                    this%vars_2d(this%var_indx(kVARS%v_longitude)%v)%data_2d, lon_sys)
+
+            if (STD_OUT_PE) then
+                write(*,*) "  NOTE: domain longitudes converted to "//longitude_system_name(lon_sys)// &
+                           " so the domain and forcing share a seam-free coordinate (longitude_system)"
+                flush(output_unit)
+            endif
+        endif
+
+    end subroutine reconcile_longitude_system
+
+
+    !> -------------------------------
     !! Setup a single Geographic structure given a latitude, longitude, and z array
     !!
     !! -------------------------------
@@ -1191,10 +1279,10 @@ contains
             if (allocated(geo%z)) deallocate(geo%z)
             allocate( geo%z, source=z)
         endif
-        ! This makes 2D variables out of lat/lon if they come in as 1D variables
-        ! This also puts the longitudes onto a 0-360 if they are -180-180 (important for Alaska)
-        ! Though if working in Europe the -180-180 grid is better ideally the optimal value should be checked.
-        ! and good luck if you want to work over the poles...
+        ! This makes 2D variables out of lat/lon if they come in as 1D variables.
+        ! The longitude convention was already resolved (and the domain longitudes already
+        ! reconciled) in reconcile_longitude_system, so re-applying it here only standardises
+        ! this geo copy
         call standardize_geo(geo, longitude_system)
 
     end subroutine
@@ -1811,6 +1899,10 @@ contains
         integer :: i, j
 
         call read_core_variables(this, options)
+
+        ! Reconcile the longitude convention so the domain and its forcing share one
+        ! seam-free coordinate system before any of the geo grids are built.
+        call reconcile_longitude_system(this, options)
 
         !setup geo_u/v here, because their z arrays will be calculated in the setup methods below
         call setup_geo(this%geo_u,   this%vars_2d(this%var_indx(kVARS%u_latitude)%v)%data_2d,   this%vars_2d(this%var_indx(kVARS%u_longitude)%v)%data_2d, options%domain%longitude_system)

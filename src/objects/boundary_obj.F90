@@ -11,7 +11,7 @@ submodule(boundary_interface) boundary_implementation
     use time_io,                only : read_times, find_timestep_in_filelist
     use string,                 only : str, as_string
     use mod_atm_utilities,      only : rh_to_mr, relative_humidity, compute_3d_p, compute_3d_z, exner_function
-    use geo,                    only : standardize_geo, standardize_latlon, geo_interp, geo_lut
+    use geo,                    only : standardize_latlon, geo_interp, geo_lut, longitude_system_name
     use vertical_interpolation, only : vLUT, vinterp
     use timer_interface,    only : timer_t
     use debug_module,           only : check_ncdf
@@ -42,6 +42,11 @@ contains
         character(len=kMAX_NAME_LENGTH), allocatable :: vars_to_read(:)
         integer,                         allocatable :: var_indx(:)
         type(dim_arrays_type),           allocatable :: var_dimensions(:)
+        integer :: lon_sys
+
+        ! The longitude convention was resolved to a concrete value (Maintain/Prime/Dateline)
+        ! while the domain was initialised; reuse it so the forcing is put on the same system.
+        lon_sys = options%domain%longitude_system
 
 
         ! the parameters option type can't contain allocatable arrays because it is a coarray
@@ -60,13 +65,16 @@ contains
             call this%init_local_asnest(vars_to_read, var_dimensions, var_indx,   &
                                     domain_lat,        &
                                     domain_lon,       &
-                                    parent_options)
+                                    parent_options,    &
+                                    lon_sys)
         else
             call this%init_local(options%forcing,                           &
                                     vars_to_read, var_dimensions, var_indx,  &
                                     strt_time,                      &
                                     domain_lat,        &
-                                    domain_lon)
+                                    domain_lon,        &
+                                    lon_sys)
+
         endif
         ! endif
         ! call this%distribute_initial_conditions()
@@ -76,11 +84,14 @@ contains
 
     end subroutine init_boundary
 
-    subroutine read_latlon(file,latvar,lonvar,lat_out,lon_out,longitude_system)
+
+
+    subroutine read_latlon(file,latvar,lonvar,lat_out,lon_out,longitude_system,modified)
         implicit none
         character(len=*), intent(in) :: file, latvar, lonvar
         real, allocatable, intent(out) :: lat_out(:,:), lon_out(:,:)
         integer, optional, intent(in) :: longitude_system
+        logical, optional, intent(out) :: modified
         real, allocatable :: lat_1d(:), lon_1d(:), temp_3d(:,:,:)
         integer, allocatable :: lat_dims(:), lon_dims(:)
 
@@ -143,7 +154,8 @@ contains
             lon_out = lon_out(:,size(lon_out,2):1:-1)
         endif
 
-        if (present(longitude_system)) call standardize_latlon(lat_out, lon_out, longitude_system)
+        if (present(modified)) modified = .false.
+        if (present(longitude_system)) call standardize_latlon(lat_out, lon_out, longitude_system, modified=modified)
 
     end subroutine read_latlon
 
@@ -152,7 +164,7 @@ contains
     !! Reads initial conditions from the forcing file
     !!
     !!------------------------------------------------------------
-    module subroutine init_local(this, options, var_list, dim_list, var_indx, start_time, domain_lat, domain_lon)
+    module subroutine init_local(this, options, var_list, dim_list, var_indx, start_time, domain_lat, domain_lon, longitude_system)
         implicit none
         class(boundary_t),               intent(inout)  :: this
         type(forcing_options_type),      intent(inout)  :: options
@@ -162,20 +174,25 @@ contains
         type(Time_type),                 intent(in)     :: start_time
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
+        integer,                         intent(in)     :: longitude_system
 
         type(variable_t)  :: zvar
         real, allocatable :: temp_3d(:,:,:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:), temp_1d(:)
         integer, allocatable :: qv_dims(:)
         real :: neg_z
         integer :: i, nx, ny, nz
-        logical :: z_staggered, data_flipped
+        logical :: z_staggered, data_flipped, lon_modified
         integer, allocatable :: z_dims(:), start_3d(:), count_3d(:)
         integer :: full_nz
 
         ! figure out while file and timestep contains the requested start_time
         call set_firstfile_firststep(this, start_time, options%boundary_files, options%time_var)
 
-        call read_latlon(this%firstfile, options%latvar, options%lonvar, temp_lat, temp_lon, options%forcing_longitude_system)
+        call read_latlon(this%firstfile, options%latvar, options%lonvar, temp_lat, temp_lon, longitude_system, modified=lon_modified)
+        if (lon_modified .and. STD_OUT_PE) then
+            write(*,*) "  NOTE: forcing longitudes converted to "//longitude_system_name(longitude_system)// &
+                       " to match the domain (longitude_system)"
+        endif
 
         if (minval(domain_lat) < minval(temp_lat) .or. maxval(domain_lat) > maxval(temp_lat)) then
             write(*,*) 'ERROR: First domain not contained within forcing data'
@@ -187,6 +204,7 @@ contains
             write(*,*) 'ERROR: First domain not contained within forcing data'
             write(*,*) 'Lon min/max of domain on process: ',minval(domain_lon),' ',maxval(domain_lon)
             write(*,*) 'Lon min/max of forcing data:         ',minval(temp_lon),' ',maxval(temp_lon)
+            write(*,*) 'If the domain and forcing use different longitude conventions, set longitude_system (Domain).'
             stop
         endif
 
@@ -218,7 +236,7 @@ contains
 
             allocate(this%ulat((this%ite-this%its+2),(this%jte-this%jts+1)))
             allocate(this%ulon((this%ite-this%its+2),(this%jte-this%jts+1)))
-            call read_latlon(this%firstfile, options%ulat, options%ulon, temp_lat, temp_lon, options%forcing_longitude_system)
+            call read_latlon(this%firstfile, options%ulat, options%ulon, temp_lat, temp_lon, longitude_system)
 
             this%ulat = temp_lat(this%its:this%ite+1,this%jts:this%jte)
             this%ulon = temp_lon(this%its:this%ite+1,this%jts:this%jte)
@@ -251,7 +269,7 @@ contains
             allocate(this%vlat((this%ite-this%its+1),(this%jte-this%jts+2)))
             allocate(this%vlon((this%ite-this%its+1),(this%jte-this%jts+2)))
 
-            call read_latlon(this%firstfile, options%vlat, options%vlon, temp_lat, temp_lon, options%forcing_longitude_system)
+            call read_latlon(this%firstfile, options%vlat, options%vlon, temp_lat, temp_lon, longitude_system)
 
             this%vlat = temp_lat(this%its:this%ite,this%jts:this%jte+1)
             this%vlon = temp_lon(this%its:this%ite,this%jts:this%jte+1)
@@ -370,7 +388,7 @@ contains
     !! Reads initial conditions from the forcing file
     !!
     !!------------------------------------------------------------
-    module subroutine init_local_asnest(this, var_list, dim_list, var_indx, domain_lat, domain_lon, parent_options)
+    module subroutine init_local_asnest(this, var_list, dim_list, var_indx, domain_lat, domain_lon, parent_options, longitude_system)
         class(boundary_t),               intent(inout)  :: this
         character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list(:)
         integer,                         intent(in)     :: var_indx(:)
@@ -378,8 +396,10 @@ contains
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
         type(options_t),                 intent(in)     :: parent_options
-        
+        integer,                         intent(in)     :: longitude_system
+
         integer :: i
+        logical :: lon_modified
         real, allocatable, dimension(:,:) :: parent_nest_lat, parent_nest_lon
 
         !Here we should begin the sub-setting:
@@ -387,8 +407,12 @@ contains
         !The lat/lon bounds of the domain object are used to find the appropriate indexes of the forcing data
         !These bounds are then extended by 1 in each direction to accomodate bilinear interpolation
 
-        !  read in latitude and longitude coordinate data        
-        call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%lat_hi, parent_options%domain%lon_hi, parent_nest_lat, parent_nest_lon, parent_options%forcing%forcing_longitude_system)
+        !  read in latitude and longitude coordinate data
+        call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%lat_hi, parent_options%domain%lon_hi, parent_nest_lat, parent_nest_lon, longitude_system, modified=lon_modified)
+        if (lon_modified .and. STD_OUT_PE) then
+            write(*,*) "  NOTE: parent-nest forcing longitudes converted to "//longitude_system_name(longitude_system)// &
+                       " to match the nested domain (longitude_system)"
+        endif
 
         if (minval(domain_lat) < minval(parent_nest_lat) .or. maxval(domain_lat) > maxval(parent_nest_lat)) then
             write(*,*) 'ERROR: Nested domain not contained within parent domain: ',trim(parent_options%domain%init_conditions_file)
@@ -417,7 +441,7 @@ contains
 
         !see if ulat and ulon were given to parent domain
         if (parent_options%domain%ulon_hi /= "" .and. parent_options%domain%ulat_hi /= "") then
-            call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%ulat_hi, parent_options%domain%ulon_hi, parent_nest_lat, parent_nest_lon, parent_options%forcing%forcing_longitude_system)
+            call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%ulat_hi, parent_options%domain%ulon_hi, parent_nest_lat, parent_nest_lon, longitude_system)
 
             this%ulat = parent_nest_lat(this%its:this%ite+1,this%jts:this%jte)
             this%ulon = parent_nest_lon(this%its:this%ite+1,this%jts:this%jte)
@@ -431,7 +455,7 @@ contains
 
         !see if vlat and vlon were given to parent domain
         if (parent_options%domain%vlon_hi /= "" .and. parent_options%domain%vlat_hi /= "") then
-            call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%vlat_hi, parent_options%domain%vlon_hi, parent_nest_lat, parent_nest_lon, parent_options%forcing%forcing_longitude_system)
+            call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%vlat_hi, parent_options%domain%vlon_hi, parent_nest_lat, parent_nest_lon, longitude_system)
 
             this%vlat = parent_nest_lat(this%its:this%ite,this%jts:this%jte+1)
             this%vlon = parent_nest_lon(this%its:this%ite,this%jts:this%jte+1)

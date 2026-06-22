@@ -368,10 +368,6 @@ module options_types
 
         real :: inputinterval           ! time between forcing steps [s]
 
-        integer :: forcing_longitude_system     ! specify center for longitude system
-                                        ! 0 = kPRIME_CENTERED    (-180 - 180)
-                                        ! 1 = kDATELINE_CENTERED (0 - 360)        
-
         ! variable names from init/BC/wind/... files
         character (len=kMAX_NAME_LENGTH) :: latvar="",lonvar="",uvar="",ulat="",ulon="",vvar="",vlat="",vlon="",wvar="", &
                         pvar="",pbvar="",phbvar="",tvar="",qvvar="",qcvar="",qivar="",qrvar="",qsvar="",qgvar="",i2mvar="",i3mvar="",&
@@ -406,9 +402,12 @@ module options_types
         ! various real parameters/options
         real :: dx                      ! grid cell width [m]
 
-        integer :: longitude_system     ! specify center for longitude system
-                                        ! 0 = kPRIME_CENTERED    (-180 - 180)
-                                        ! 1 = kDATELINE_CENTERED (0 - 360)        
+        integer :: longitude_system     ! Longitude convention reconciliation (see icar_constants k*_LON):
+                                        ! 0 = kAUTO_LON (default): pick a seam-free convention from the
+                                        !     domain extent and apply it to BOTH domain and forcing
+                                        ! 1 = kMAINTAIN_LON      (leave longitudes unchanged)
+                                        ! 2 = kPRIME_CENTERED    (-180 - 180)
+                                        ! 3 = kDATELINE_CENTERED (0 - 360)
 
         integer :: nz                   ! number of model vertical levels
 

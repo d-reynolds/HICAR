@@ -1729,7 +1729,9 @@ contains
                 default = "0.0"
                 group = "Domain"
             case("longitude_system")
-                description = "Longitude system, values: (0=Maintain Longitude, 1=Prime Centered, 2=Dateline Centered, 3=Guess Lon)"
+                description = "Longitude convention reconciliation for the domain AND its forcing, values: "//achar(10)//BLNK_CHR_N// &
+                              "(0=Auto [default, pick a seam-free convention from the domain extent], 1=Maintain,"//achar(10)//BLNK_CHR_N// &
+                              "2=Prime Centered [-180..180], 3=Dateline Centered [0..360], "
                 allocate(values(4))
                 values = (/0, 1, 2, 3/)
                 default = "0"
@@ -2164,13 +2166,6 @@ contains
             case ("time_varying_z")
                 description = "Forcing Z variable is time varying (T/F)"
                 default = ".False."
-                group = "Forcing"
-                type = 1
-            case("forcing_longitude_system")
-                description = "Longitude system, values: (0=Maintain Logitude, 1=Prime Centered, 2=Dateline Centered, 3=Guess Lon)"
-                allocate(values(4))
-                values = (/0, 1, 2, 3/)
-                default = "0"
                 group = "Forcing"
                 type = 1
             case ("hgtvar")

@@ -29,6 +29,7 @@ module geo
     public::geo_interp   ! apply geoLUT to interpolate in 2d for a 3d grid
     public::geo_interp2d ! apply geoLUT to interpolate in 2d for a 2d grid
     public::standardize_geo, standardize_latlon
+    public::decide_longitude_system, longitude_system_name
 
 contains
     !>------------------------------------------------------------
@@ -1193,10 +1194,17 @@ contains
     !!  @param[inout]   long_data  2D array of longitudes (either -180 - 180 or 0 - 360)
     !!
     !! ----------------------------------------------------------------------------
-    subroutine standardize_latlon(lat, lon, longitude_system)
+    subroutine standardize_latlon(lat, lon, longitude_system, modified)
         implicit none
         real, dimension(:,:), intent(inout) :: lat, lon
         integer,                 intent(in) :: longitude_system
+        logical, optional,      intent(out) :: modified
+
+        real, dimension(:,:), allocatable :: lon_pre
+
+        ! Capture the incoming longitudes so the caller can be told whether the data
+        ! actually changed (used to alert the user that the domain/forcing was reconciled).
+        if (present(modified)) lon_pre = lon
 
         if (longitude_system == kMAINTAIN_LON) then
             ! break
@@ -1204,21 +1212,85 @@ contains
             where(lon<0) lon = 360+lon
         elseif (longitude_system == kPRIME_CENTERED) then
             where(lon>180) lon = lon - 360
-        elseif (longitude_system == kGUESS_LON) then
-            ! try to guess which coordinate system to use
-            ! first convert all domains into -180 to +180 coordinates
-            where(lon>180) lon = lon - 360
-            ! also convert from a -180 to 180 coordinate system into a 0-360 coordinate system if closer to the dateline
-            if ((minval(lon) < -150) .or. (maxval(lon) > 150)) then
-                where(lon<0) lon = 360+lon
-            endif
+        elseif (longitude_system == kAUTO_LON) then
+            ! Auto must be resolved to a concrete convention BEFORE reaching this routine
+            ! (see domain_obj:reconcile_longitude_system, which decides from the global domain
+            ! extent and caches the result in options%domain%longitude_system). Reaching here
+            ! with Auto still set means that resolution step was skipped -- a programming bug,
+            ! not a user error -- so fail loudly rather than guessing per-array (which would be
+            ! decomposition-unsafe and hide the bug).
+            write(*,*) "INTERNAL ERROR: standardize_latlon reached with longitude_system still set to Auto."
+            write(*,*) " Auto must be resolved to a concrete convention (Prime/Dateline) upstream"
+            write(*,*) " via reconcile_longitude_system before any lat/lon is standardized."
+            error stop "standardize_latlon: unresolved Auto longitude_system (programming bug)"
         else
             write(*,*) "Unknown longitude system of coordinates:", longitude_system
             write(*,*) " Set longitude_system to either:"
-            write(*,*) " Prime meridian centered (0 to 360): ", kPRIME_CENTERED
-            write(*,*) " Dateline meridian centered (-180 to 180): ", kDATELINE_CENTERED
+            write(*,*) " Prime meridian centered (-180 to 180): ", kPRIME_CENTERED
+            write(*,*) " Dateline meridian centered (0 to 360): ", kDATELINE_CENTERED
             error stop
         endif
 
+        if (present(modified)) modified = any(lon /= lon_pre)
+
     end subroutine standardize_latlon
+
+    !> ----------------------------------------------------------------------------
+    !!  Choose a seam-free longitude convention for a domain from its GLOBAL extent.
+    !!
+    !!  We cannot (and need not) recover the "intended" convention from the values alone:
+    !!  the choice is only observable when a coordinate seam (0 deg or +/-180 deg) falls
+    !!  INSIDE the domain. A seam interior to the domain inflates that convention's min..max
+    !!  span toward 360 deg, so we simply pick the convention with the SMALLER span:
+    !!
+    !!    - domain crosses +/-180 (dateline)  -> 0..360 span is small    -> kDATELINE_CENTERED
+    !!    - domain crosses 0 (prime meridian) -> -180..180 span is small  -> kPRIME_CENTERED
+    !!    - domain crosses neither            -> the spans are equal (a tie)
+    !!
+    !!  On a tie the two conventions describe the SAME domain (e.g. a 20..40 E domain is
+    !!  identical either way), so we keep whichever the raw data already satisfies and leave
+    !!  the longitudes untouched. span180 / span360 are the global min..max spans in the
+    !!  -180..180 and 0..360 representations; raw_min / raw_max are the unmodified global
+    !!  extent, used only for the tie-break.
+    !! ----------------------------------------------------------------------------
+    function decide_longitude_system(span180, span360, raw_min, raw_max) result(longitude_system)
+        implicit none
+        real, intent(in) :: span180, span360, raw_min, raw_max
+        integer :: longitude_system
+
+        real, parameter :: tol = 1.0e-2   ! degrees; only a genuine seam crossing shifts the span
+
+        if (span360 < span180 - tol) then
+            longitude_system = kDATELINE_CENTERED       ! 0..360 is contiguous (domain crosses +/-180)
+        elseif (span180 < span360 - tol) then
+            longitude_system = kPRIME_CENTERED          ! -180..180 is contiguous (domain crosses 0)
+        else
+            ! Tie: neither seam is interior, so both conventions are equivalent for this domain.
+            ! Pick the one that leaves the data unchanged rather than reshuffling it needlessly.
+            if (raw_min >= -180.0 .and. raw_max <= 180.0) then
+                longitude_system = kPRIME_CENTERED
+            else
+                longitude_system = kDATELINE_CENTERED
+            endif
+        endif
+
+    end function decide_longitude_system
+
+    !> ----------------------------------------------------------------------------
+    !!  Human-readable name for a longitude convention, used in user-facing messages.
+    !! ----------------------------------------------------------------------------
+    function longitude_system_name(longitude_system) result(name)
+        implicit none
+        integer, intent(in) :: longitude_system
+        character(len=:), allocatable :: name
+
+        select case (longitude_system)
+        case (kMAINTAIN_LON);      name = "unchanged"
+        case (kPRIME_CENTERED);    name = "prime-meridian centered (-180 to 180)"
+        case (kDATELINE_CENTERED); name = "dateline centered (0 to 360)"
+        case (kAUTO_LON);          name = "auto"
+        case default;              name = "unknown"
+        end select
+
+    end function longitude_system_name
 end module geo
