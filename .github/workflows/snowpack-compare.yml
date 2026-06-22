@@ -131,32 +131,42 @@ jobs:
         run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies
 
       # --- Build A: C++ SNOWPACK (reference) ---------------------------------
+      # Built into its OWN tree (build_cpp) so its C++ SNOWPACK + MeteoIO shared libs
+      # (libsnowpack.so.*, libmeteoio.so.*) survive Build B. The exe's RPATH points
+      # into build_cpp/external/{SNOWPACK,meteoio}/lib, which is never wiped, so it
+      # loads its libs at run time with no LD_LIBRARY_PATH juggling.
       - name: Build HICAR with C++ SNOWPACK
         env:
           HICAR_CMAKE_EXTRA: "-DSNOWPACK_CPP=ON"
+          HICAR_BUILD_DIR: build_cpp
         run: |
           bash .github/scripts/hicar_install_utils.sh hicar_install
           cp bin/HICAR "$GITHUB_WORKSPACE/HICAR_snowpack_cpp"
 
       # --- Build B: native-Fortran SNOWPACK (candidate) ----------------------
-      # hicar_install wipes build/* and rebuilds; the C++ exe is already saved.
-      # The native-Fortran port is the default snow model, so no SNOWPACK flag is
-      # needed here — this is the default build (with OpenACC off for the GNU CPU
-      # comparison).
+      # Separate tree (build_fortran) so it does not wipe build_cpp. The native-Fortran
+      # port is the default snow model, so no SNOWPACK flag is needed — this is the
+      # default build (OpenACC off for the GNU CPU comparison). The port links no C++
+      # SNOWPACK shared lib, so this exe is self-contained.
       - name: Build HICAR with native-Fortran SNOWPACK
         env:
           HICAR_CMAKE_EXTRA: "-DOPENACC=OFF"
+          HICAR_BUILD_DIR: build_fortran
         run: |
           bash .github/scripts/hicar_install_utils.sh hicar_install
           cp bin/HICAR "$GITHUB_WORKSPACE/HICAR_snowpack_fortran"
 
-      # --- Forcing/test data (build/ is configured from Build B) -------------
+      # --- Forcing/test data (download_test_data clones into tests/Test_Cases) ---
       - name: Download test forcing data
-        run: cd build && make download_test_data
+        run: cd build_fortran && make download_test_data
 
       # --- Run the comparison ------------------------------------------------
       - name: Compare C++ vs Fortran SNOWPACK
         run: |
+          # Each exe lives in its own build tree, so the cpp exe resolves its C++
+          # SNOWPACK/MeteoIO libs via the RPATH baked in at link time — no lib stashing
+          # or LD_LIBRARY_PATH needed (netcdf/hdf5 deps are already on LD_LIBRARY_PATH
+          # from hicar_dependencies).
           # No rank count passed: the harness picks min(10, available cores), so
           # it scales to the runner instead of oversubscribing a small one.
           bash tests/snowpack/test_snowpack_compare.sh "$GITHUB_WORKSPACE" \
