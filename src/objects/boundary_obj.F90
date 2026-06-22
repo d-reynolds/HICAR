@@ -112,13 +112,15 @@ contains
         real    :: t_min, t_max, p_min, p_max, pb_min, pb_max, q_min, q_max
         real    :: model_top, eff_tmin, eff_pmax, zdiff, ztol, lev_lo, lev_hi
         real    :: actual_dt, expected_dt
-        logical :: ok, okb, test1, test1_ok, test2, test2_ok, evaluable
+        real    :: t_lev1, t_levN, p_lev1, p_levN, pb_lev1, pb_levN, t_bottom, t_top, dT_lapse
+        logical :: ok, okb, okp, bottom_is_lev1, test1, test1_ok, test2, test2_ok, evaluable
         logical :: looks_geopotential, looks_height, z_changes, have_second_z
 
         real, parameter :: GEOP_HGT_RATIO   = 2.0      ! terrain vs near-surface z level
         real, parameter :: GEOP_TOP_RATIO   = 3.0      ! model top vs max forcing z
         real, parameter :: MIN_PLAUSIBLE_P  = 50000.0  ! [Pa] minimum believable max pressure
         real, parameter :: MAX_PLAUSIBLE_QV = 0.05     ! [kg/kg] ceiling for mixing ratio / specific humidity
+        real, parameter :: POT_T_MARGIN     = 2.0      ! [K] min top-vs-bottom T diff to classify the profile
 
         ! Only image 1 reads the forcing for these checks and prints warnings.
         if (.not. STD_OUT_PE) return
@@ -258,6 +260,70 @@ contains
                     write(*,*) "  HICAR expects absolute temperature (Kelvin, > 0)."
                     write(*,*) "  If your forcing T is in Celsius or relative to a base temperature, use t_offset"
                     write(*,*) "  to convert it (e.g. t_offset = 273.15 for Celsius, or 300.0 for WRF perturbation T)."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                end if
+            end if
+        end if
+
+        ! -----------------------------------------------------------------
+        ! t_is_potential
+        ! Air temperature decreases with height (column top colder than bottom);
+        ! potential temperature increases with height (top warmer). The bottom of the
+        ! column is the level with the highest TOTAL pressure, so pressure anchors
+        ! "top vs bottom" robustly -- independent of the forcing's vertical storage
+        ! order. A constant t_offset / p_multiplier does not change the gradient sign.
+        ! -----------------------------------------------------------------
+        if ( (trim(options%forcing%tvar) /= "") .and. (trim(options%forcing%pvar) /= "") ) then
+            call read_level_means(this%firstfile, options%forcing%tvar, this%firststep, ok,  t_lev1, t_levN)
+            call read_level_means(this%firstfile, options%forcing%pvar, this%firststep, okb, p_lev1, p_levN)
+            ! add base pressure if the forcing splits pressure into perturbation + base,
+            ! so the orientation anchor uses TOTAL (monotonic) pressure
+            if (okb .and. (trim(options%forcing%pbvar) /= "")) then
+                call read_level_means(this%firstfile, options%forcing%pbvar, this%firststep, okp, pb_lev1, pb_levN)
+                if (okp) then
+                    p_lev1 = p_lev1 + pb_lev1
+                    p_levN = p_levN + pb_levN
+                end if
+            end if
+
+            ! Guard with magnitude bounds (not x==x NaN idioms, which -ffast-math may
+            ! drop): real temperatures are < 1000 in any units (K/Celsius/perturbation),
+            ! so a fill-contaminated mean is rejected. Require a pressure field that
+            ! looks like total pressure -- both end levels positive, plausibly bounded,
+            ! and differing by >30% (true for a real column, false for perturbation-only
+            ! pressure, whose top/bottom ordering is meaningless).
+            if ( ok .and. okb .and. &
+                 (abs(t_lev1) < 1000.0) .and. (abs(t_levN) < 1000.0) .and. &
+                 (p_lev1 > 0.0) .and. (p_levN > 0.0) .and. &
+                 (p_lev1 < 1.0e7) .and. (p_levN < 1.0e7) .and. &
+                 (max(p_lev1, p_levN) > 1.3 * min(p_lev1, p_levN)) ) then
+
+                ! the higher-pressure end level is the bottom of the column
+                bottom_is_lev1 = (p_lev1 > p_levN)
+                if (bottom_is_lev1) then
+                    t_bottom = t_lev1;  t_top = t_levN
+                else
+                    t_bottom = t_levN;  t_top = t_lev1
+                end if
+                dT_lapse = t_top - t_bottom
+
+                if ( (dT_lapse < -POT_T_MARGIN) .and. options%forcing%t_is_potential ) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  Forcing temperature '"//trim(options%forcing%tvar)//"' COOLS with height (column top"
+                    write(*,*) "  colder than bottom) -- this looks like AIR temperature, but t_is_potential = .True."
+                    write(*,*) "    bottom-level mean T    : ", t_bottom
+                    write(*,*) "    top-level mean T       : ", t_top
+                    write(*,*) "  If this field is air temperature, set t_is_potential = .False."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                else if ( (dT_lapse > POT_T_MARGIN) .and. (.not. options%forcing%t_is_potential) ) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  Forcing temperature '"//trim(options%forcing%tvar)//"' WARMS with height (column top"
+                    write(*,*) "  warmer than bottom) -- this looks like POTENTIAL temperature, but t_is_potential = .False."
+                    write(*,*) "    bottom-level mean T    : ", t_bottom
+                    write(*,*) "    top-level mean T       : ", t_top
+                    write(*,*) "  If this field is potential temperature, set t_is_potential = .True."
                     write(*,*) "  ---------------------------------------------------------------------------"
                 end if
             end if
@@ -422,6 +488,30 @@ contains
         lo_lev_max = maxval(a3(:,:,1))
         hi_lev_max = maxval(a3(:,:,size(a3,3)))
     end subroutine read_atmos_extremes
+
+
+    !>------------------------------------------------------------
+    !! Read a 3D atmospheric forcing field and return the horizontal MEAN of its
+    !! first and last vertical levels (vertical is dim 3). NaN/fill values propagate
+    !! into the mean so callers can reject them. ok=.false. if the var is missing.
+    !!------------------------------------------------------------
+    subroutine read_level_means(file, varname, step, ok, lev1_mean, levN_mean)
+        implicit none
+        character(len=*), intent(in)  :: file, varname
+        integer,          intent(in)  :: step
+        logical,          intent(out) :: ok
+        real,             intent(out) :: lev1_mean, levN_mean
+        real, allocatable :: a3(:,:,:)
+        real    :: npts
+        integer :: nz
+
+        call read_atmos_full(file, varname, step, a3, ok)
+        if (.not. ok) return
+        nz        = size(a3,3)
+        npts      = real(size(a3,1) * size(a3,2))
+        lev1_mean = sum(a3(:,:,1))  / npts
+        levN_mean = sum(a3(:,:,nz)) / npts
+    end subroutine read_level_means
 
 
     !>------------------------------------------------------------
