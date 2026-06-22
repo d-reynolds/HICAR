@@ -246,11 +246,23 @@ jobs:
           name: hicar-release-exe
           path: bin
 
+      # The reused exe is also dynamically linked against the apt-installed
+      # runtime libs (mpich's libmpi/libmpifort, libfftw3, libcurl). Unlike the
+      # HDF5/NetCDF stack in ~/installdir, these live in system paths and are NOT
+      # in the deps cache (see hicar_dependencies), so they must be installed
+      # here too — this job does not run hicar_dependencies. Without them the exe
+      # fails with "error while loading shared libraries" and produces no namelist.
+      - name: Install runtime libraries for the reused exe
+        if: steps.dl.outcome == 'success'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mpich libfftw3-dev libcurl4-gnutls-dev
+
       - name: Regenerate example namelists
         if: steps.dl.outcome == 'success'
         run: |
           chmod +x bin/HICAR
-          # exe links HDF5/NetCDF/FFTW from the restored deps cache
+          # HDF5/NetCDF come from the restored deps cache; mpich/FFTW/curl from apt above
           export LD_LIBRARY_PATH="$HOME/installdir/lib:$LD_LIBRARY_PATH"
           bash helpers/example_namelists/generate_examples.sh "$GITHUB_WORKSPACE/bin/HICAR"
 

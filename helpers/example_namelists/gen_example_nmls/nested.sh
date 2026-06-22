@@ -1,18 +1,17 @@
 #!/bin/bash
-# Example: full-physics, real-data alpine downscaling run (COSMO-style forcing
-# over the Gaudergrat 250 m domain). Mirrors the physics + dynamics suite used
-# for hectometric HICAR simulations.
+# Example: full-physics, real-data alpine downscaling run with a nested domain
+# (COSMO-style forcing over the Gaudergrat 250 m domain, plus a 150 m child).
+# Mirrors the physics + dynamics suite used for hectometric HICAR simulations.
 #
-# Each line sets ONE namelist variable to the value this example wants, BY NAME
-# — independent of the model defaults. generate_examples.sh then strips every
-# entry still at its default. `set_var <name> <value> <group>` rewrites the
-# variable's line wherever it is and whatever its current default; <group> is
-# the namelist group it belongs to. It fails the build if the variable no longer
-# exists, so a stale script is caught instead of silently producing a wrong
-# example. Values are passed verbatim (no sed escaping): quote string values,
-# and escape nothing in paths.
+# Each line sets ONE namelist variable BY NAME in its group, independent of the
+# model defaults; generate_examples.sh strips everything left at its default.
+# See alpine_realdata.sh for notes on set_var. Per-nest values are comma lists.
 out_file=$1
 set_var() { "${PYTHON:-python3}" "$(dirname "$0")/../set_nml_var.py" "$out_file" "$1" "$2" --group "$3" || exit 1; }
+
+# --- general run settings --------------------------------------------------
+set_var nests 2 general
+set_var parent_nest "0, 1" general
 
 # --- run window / IO -------------------------------------------------------
 set_var start_date     "'2017-02-14 00:00:00'" general
@@ -22,9 +21,9 @@ set_var inputinterval  3600 forcing
 set_var output_vars    "'all'" output
 
 # --- domain / forcing files ------------------------------------------------
-set_var init_conditions_file "'../domains/Gaudergrat_250m.nc'" domain
+set_var init_conditions_file "'../domains/Gaudergrat_250m.nc','../domains/Gaudergrat_nested_250m.nc'" domain
 set_var forcing_file_list    "'file_list_TestCase.txt'" forcing
-set_var dx 250.0 domain
+set_var dx "250.0, 150.0" domain
 set_var nz 40 domain
 
 # --- physics suite ---------------------------------------------------------
@@ -38,7 +37,7 @@ set_var rad   "'rrtmg'" physics
 # --- dynamics --------------------------------------------------------------
 set_var RK3 .True. time_parameters
 set_var flux_corr 1 adv_parameters
-set_var h_order 3 adv_parameters
+set_var h_order "5, 3" adv_parameters
 set_var v_order 3 adv_parameters
 set_var cfl_reduction_factor 1.6 time_parameters
 set_var terrain_shading .True. rad_parameters

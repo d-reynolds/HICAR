@@ -167,8 +167,9 @@ generate_standard_nml() {
     ${hicar_repo}/tests/Test_Cases/input/nml_gen_scripts/Standard.sh "$(basename "$out_nml")"
     cd ..
 
-    # Override wind, Sx, and output_vars for reproducibility testing
-    sed -i'.bak' "s/ wind = 'variational solver'/ wind = 'none'/g" "$out_nml"
+    # Override wind, Sx, and output_vars for reproducibility testing. wind is at
+    # its default in the example (so absent from the namelist) — insert it.
+    "${PYTHON:-python3}" "${hicar_repo}/helpers/example_namelists/set_nml_var.py" "$out_nml" wind "'none'" --group wind
     sed -i'.bak' 's/Sx = .True./Sx = .False./g' "$out_nml"
     sed -i'.bak' "s/output_vars = .*$/output_vars = 'all'/g" "$out_nml"
 
@@ -205,8 +206,9 @@ generate_restart_nml() {
     ${hicar_repo}/tests/Test_Cases/input/nml_gen_scripts/Standard_restart.sh "$(basename "$out_nml")"
     cd ..
 
-    # Override wind, Sx, and output_vars for reproducibility testing
-    sed -i'.bak' "s/ wind = 'variational solver'/ wind = 'none'/g" "$out_nml"
+    # Override wind, Sx, and output_vars for reproducibility testing. wind is at
+    # its default in the example (so absent from the namelist) — insert it.
+    "${PYTHON:-python3}" "${hicar_repo}/helpers/example_namelists/set_nml_var.py" "$out_nml" wind "'none'" --group wind
     sed -i'.bak' 's/Sx = .True./Sx = .False./g' "$out_nml"
     sed -i'.bak' "s/output_vars = .*$/output_vars = 'all'/g" "$out_nml"
 

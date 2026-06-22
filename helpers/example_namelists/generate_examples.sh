@@ -33,6 +33,8 @@ fi
 
 python_exe="$(command -v python3 || command -v python || true)"
 [ -n "$python_exe" ] || { echo "ERROR: python3 not found" >&2; exit 1; }
+# Example scripts call set_nml_var.py via `set_var`; let them reuse this exe.
+export PYTHON="$python_exe"
 
 shopt -s nullglob
 scripts=("$gen_dir"/*.sh)
@@ -46,9 +48,22 @@ fi
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 default_nml="$tmpdir/default.nml"
-"$hicar_exe" --gen-nml "$default_nml" >/dev/null 2>&1
+# Capture the exe's own output so a load/runtime failure (e.g. a missing shared
+# library like libmpi/libfftw3) is reported, instead of being hidden behind a
+# bare "did not produce a namelist".
+gen_log="$tmpdir/gen.log"
+"$hicar_exe" --gen-nml "$default_nml" >"$gen_log" 2>&1
+gen_rc=$?
 if [ ! -s "$default_nml" ]; then
-    echo "ERROR: '$hicar_exe --gen-nml' did not produce a namelist" >&2; exit 1
+    echo "ERROR: '$hicar_exe --gen-nml' did not produce a namelist (exit $gen_rc)." >&2
+    if [ -s "$gen_log" ]; then
+        echo "--- HICAR output: -------------------------------------------------" >&2
+        cat "$gen_log" >&2
+        echo "-------------------------------------------------------------------" >&2
+    fi
+    echo "If this is 'error while loading shared libraries', the runtime deps" >&2
+    echo "(mpich / libfftw3 / netcdf in \$LD_LIBRARY_PATH) are missing on this host." >&2
+    exit 1
 fi
 
 status=0
@@ -57,8 +72,9 @@ for script in "${scripts[@]}"; do
     full="$tmpdir/$name.full.nml"
     cp "$default_nml" "$full"
 
-    # Apply the example's find/replace. The scripts call `sed -i'.bak' ... $1`,
-    # mirroring tests/Test_Cases/input/nml_gen_scripts; clean up the .bak after.
+    # Apply the example's customizations. The scripts call `set_var <name>
+    # <value>` (set_nml_var.py), which rewrites each variable by name; a script
+    # exits non-zero if it references a variable that no longer exists.
     if ! bash "$script" "$full"; then
         echo "ERROR: example script failed: $script" >&2
         status=1

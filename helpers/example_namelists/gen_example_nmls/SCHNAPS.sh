@@ -1,16 +1,11 @@
 #!/bin/bash
-# Example: full-physics, real-data alpine downscaling run (COSMO-style forcing
-# over the Gaudergrat 250 m domain). Mirrors the physics + dynamics suite used
-# for hectometric HICAR simulations.
+# Example: full-physics run with SNOWPACK + snow redistribution (COSMO-style
+# forcing over the Gaudergrat 250 m domain). Mirrors the physics + dynamics
+# suite used for hectometric HICAR simulations.
 #
-# Each line sets ONE namelist variable to the value this example wants, BY NAME
-# — independent of the model defaults. generate_examples.sh then strips every
-# entry still at its default. `set_var <name> <value> <group>` rewrites the
-# variable's line wherever it is and whatever its current default; <group> is
-# the namelist group it belongs to. It fails the build if the variable no longer
-# exists, so a stale script is caught instead of silently producing a wrong
-# example. Values are passed verbatim (no sed escaping): quote string values,
-# and escape nothing in paths.
+# Each line sets ONE namelist variable BY NAME in its group, independent of the
+# model defaults; generate_examples.sh strips everything left at its default.
+# See alpine_realdata.sh for notes on set_var.
 out_file=$1
 set_var() { "${PYTHON:-python3}" "$(dirname "$0")/../set_nml_var.py" "$out_file" "$1" "$2" --group "$3" || exit 1; }
 
@@ -31,6 +26,7 @@ set_var nz 40 domain
 set_var mp    "'morrison'" physics
 set_var pbl   "'ysu'" physics
 set_var lsm   "'noahmp'" physics
+set_var sm    "'snowpack'" physics    # SNOWPACK snow model (the `sm` option, not `lsm`)
 set_var sfc   "'revmm5'" physics
 set_var water "'simple'" physics
 set_var rad   "'rrtmg'" physics
@@ -68,3 +64,8 @@ set_var vegtype_var "'landuse'" domain
 set_var svf_var "'svf'" domain
 set_var hlm_var "'hlm'" domain
 set_var LU_Categories "'USGS'" lsm_parameters
+
+# --- snow redistribution ---------------------------------------------------
+set_var sm_nsnow_max 100 sm_parameters
+set_var snowslide 1 sm_parameters
+set_var suspension_layer 1 sm_parameters
