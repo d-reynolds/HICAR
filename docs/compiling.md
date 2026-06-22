@@ -3,11 +3,14 @@
 
 Before compiling HICAR, a few dependencies must first be installed on your system. **If you are using an HPC which supports modules, first check to see if the relevant dependencies are available on your system as modules (See section "Example (HPC systems)" below for details).** If certain dependencies are not available as modules, then proceed by installing the relevant libraries as described below.
 
-HICAR relies upon four external libraries:
+HICAR relies upon three external libraries:
 
 - MPI
 - FFTW
 - Parallel NetCDF
+
+GPU builds additionally use **NCCL** (for halo exchange) and **cuFFT**, which
+ship with the NVHPC toolkit; neither needs to be installed separately.
 
 The easiest way to install all dependencies on a Linux system is to call:
 
@@ -74,7 +77,10 @@ The cmake file will attempt to find any fortran comiplers already set in your en
 cmake ../ -DFC=gfortran
 ```
 
-Currently, HICAR has been succesfully compiled and tested using the Cray and GNU fortran compilers. **Intel compiler support is still included as legacy, but its function is not insured.**
+HICAR is compiled and tested with the **GNU Fortran** (CPU) and **NVFortran /
+NVHPC** (CPU host and GPU) compilers. NVFortran/NVHPC is required for GPU builds
+(`-DOPENACC=ON`). **Intel and Cray compiler support is deprecated and no longer
+tested.**
 
 The generated makefile can then be run with the standard
 
@@ -120,8 +126,8 @@ cd build
 # exact module names will vary, these are relevant for the CSCS HPC Daint
 module load daint-mc                     
 module load CMake
-module load cray-fftw                    # Load FFTW
-module load cray-netcdf-hdf5parallel     # Load Parallel NetCDF
+module load fftw                    # Load FFTW
+module load netcdf-hdf5parallel     # Load Parallel NetCDF
 
 cmake ../                                # Generate the makefile
 make -j 4                                
@@ -129,6 +135,30 @@ make install
 ```
 
 This will then install the executable HICAR in the directory HICAR/bin/
+
+## Example (GPU build)
+
+To build HICAR with GPU acceleration, use the NVHPC / NVFortran compiler and pass
+`-DOPENACC=ON`. NCCL and cuFFT (shipped with NVHPC) are picked up automatically
+when available.
+
+```bash
+mkdir build
+cd build
+
+# Load the NVHPC toolchain and an NVFortran-built NetCDF/HDF5/PnetCDF stack.
+# Exact module names vary by system.
+module load nvhpc
+module load netcdf
+
+cmake ../ -DFC=nvfortran -DOPENACC=ON
+make -j 4
+make install
+```
+
+The GPU build maps one GPU to each compute MPI rank at run time (see
+[Running](running.md)). The relocatable device-code link is the dominant cost of
+a GPU build and takes several minutes regardless of optimization level.
 
 ## Options
 
@@ -149,6 +179,14 @@ Full list of user options, not including standard cmake options, are:
 
     FC=                # Set the fortran compiler to use (can be auto-detected for most cases)
 
+    OPENACC=           # Enable OpenACC GPU acceleration (requires the NVHPC/NVFortran compiler)
+        OFF            # (DEFAULT) CPU build
+        ON             # GPU build
+
+    NCCL=              # Link to NCCL for GPU halo exchange, if available
+        ON             # (DEFAULT) used only when OPENACC=ON and NCCL is found
+        OFF            #
+
     FSM=               # Option to link HICAR to optional FSM code libraries compiled separately
         OFF            # (DEFAULT)
         ON             # If no libraries are found, HICAR is not linked to FSM
@@ -162,7 +200,13 @@ Full list of user options, not including standard cmake options, are:
     ASSERTIONS=        # Check for logical assertions at runtime. Used sparingly, little effect.
         ON             # (DEFAULT)
         OFF            #
+
+    SRUN_FLAGS=        # srun flags for running the automated test cases on SLURM systems.
+                       # See the Testing page for details.
 ```
+
+> The `SRUN_FLAGS` option only affects how the bundled test cases are launched on
+> SLURM systems; see [Testing](testing.md#test-cases-on-slurm).
 
 > Note: SNOWPACK (native-Fortran port) is now always compiled into HICAR; there
 > is no flag to build without it. `-DSNOWPACK_CPP=ON` selects the C++ wrapper

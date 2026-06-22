@@ -159,6 +159,11 @@ generate_standard_nml() {
     local out_nml="$1"
     local output_dir="$2"
     local restart_dir="$3"
+    # Optional 4th arg: end_date. Defaults to the 10-min window the restart test
+    # needs (its checkpoints land at 00:05 and 00:10). The decomposition test only
+    # runs-and-compares (no restart), so it passes a shorter window to keep the
+    # slow debug build fast.
+    local end_date="${4:-2017-02-14 00:10:00}"
 
     cd ${hicar_repo}/tests/Test_Cases/input
     cp "$default_file" "$out_nml"
@@ -177,8 +182,8 @@ generate_standard_nml() {
         # GPU mode: use all available GPUs and half for decomposition test, so set end time to 10 min for both runs
         sed -i'.bak' "s/rad = 'rrtmg'/rad = 'rrtmgp'/g" "$out_nml"
     fi
-    # Shorten run: 10 min instead of 20, output every 5 min for restart checkpoints
-    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '2017-02-14 00:10:00'/g" "$out_nml"
+    # Shorten run (default 10 min, or the override), output every 5 min for restart checkpoints
+    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '${end_date}'/g" "$out_nml"
     sed -i'.bak' 's/outputinterval = 600/outputinterval = 300/g' "$out_nml"
 
     # Override output and restart folders
@@ -475,8 +480,8 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
         mkdir -p "${hicar_repo}/tests/Test_Cases/output/${suffix}" "${hicar_repo}/tests/Test_Cases/restart/${suffix}"
     done
 
-    # Generate and run with half ranks
-    generate_standard_nml "${hicar_repo}/tests/Test_Cases/input/Repro_MPI_${decomp_np_half}.nml" "${hicar_repo}/tests/Test_Cases/output/Repro_MPI_${decomp_np_half}/" "${hicar_repo}/tests/Test_Cases/restart/Repro_MPI_${decomp_np_half}/"
+    # Generate and run with half ranks (5-min window — decomposition test does not restart)
+    generate_standard_nml "${hicar_repo}/tests/Test_Cases/input/Repro_MPI_${decomp_np_half}.nml" "${hicar_repo}/tests/Test_Cases/output/Repro_MPI_${decomp_np_half}/" "${hicar_repo}/tests/Test_Cases/restart/Repro_MPI_${decomp_np_half}/" "2017-02-14 00:05:00"
 
     run_hicar "Repro_MPI_${decomp_np_half}.nml" "$decomp_np_half" "MPI_${decomp_np_half}ranks"
     mpi_half_status=$?
@@ -486,8 +491,8 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
         echo -e "${RED}Domain Decomposition: FAILED (${decomp_np_half}-rank run failed)${NC}"
         test_decomp_result="FAIL"
     else
-        # Generate and run with full ranks
-        generate_standard_nml "${hicar_repo}/tests/Test_Cases/input/Repro_MPI_${decomp_np_full}.nml" "${hicar_repo}/tests/Test_Cases/output/Repro_MPI_${decomp_np_full}/" "${hicar_repo}/tests/Test_Cases/restart/Repro_MPI_${decomp_np_full}/"
+        # Generate and run with full ranks (5-min window — decomposition test does not restart)
+        generate_standard_nml "${hicar_repo}/tests/Test_Cases/input/Repro_MPI_${decomp_np_full}.nml" "${hicar_repo}/tests/Test_Cases/output/Repro_MPI_${decomp_np_full}/" "${hicar_repo}/tests/Test_Cases/restart/Repro_MPI_${decomp_np_full}/" "2017-02-14 00:05:00"
 
         run_hicar "Repro_MPI_${decomp_np_full}.nml" "$decomp_np_full" "MPI_${decomp_np_full}ranks"
         mpi_full_status=$?

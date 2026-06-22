@@ -120,6 +120,32 @@ contains
         NUM_SERVERS = ceiling(num_PE*NUM_IO_PER_NODE*1.0/NUM_PROC_PER_NODE)
         NUM_COMPUTE = num_PE-NUM_SERVERS
 
+        ! HICAR reserves at least one rank per node for asynchronous I/O, so a run
+        ! needs more ranks than I/O servers. If NUM_COMPUTE is zero (e.g. launched
+        ! with a single MPI rank, or with only one rank per node) there are no
+        ! compute tasks and the model cannot run. Fail here with a clear, explicit
+        ! message and MPI_Abort the whole job, rather than deadlocking or dying with
+        ! a cryptic error deeper in initialization.
+        if (NUM_COMPUTE < 1) then
+            if (STD_OUT_PE) then
+                write(*,*) "-------------------------------------------------------"
+                write(*,*) "ERROR: HICAR has no compute processes to run on."
+                write(*,*) "  Total MPI ranks (num_PE):  ", num_PE
+                write(*,*) "  Ranks reserved for I/O:    ", NUM_SERVERS
+                write(*,*) "  Remaining compute ranks:   ", NUM_COMPUTE
+                write(*,*) " "
+                write(*,*) "HICAR reserves at least one rank per node for asynchronous I/O,"
+                write(*,*) "so it must be launched with more ranks than I/O servers (i.e. at"
+                write(*,*) "least one compute rank). On a single node this means at least 2"
+                write(*,*) "MPI ranks, e.g.:  mpiexec -np 2 ./bin/HICAR your_namelist.nml"
+                write(*,*) "The number of I/O processes per node can be controlled with"
+                write(*,*) "the environment variable HICAR_IO_PER_NODE."
+                write(*,*) "-------------------------------------------------------"
+                flush(output_unit)
+            endif
+            call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+        endif
+
         STD_OUT_PE_IO = (PE_RANK_GLOBAL == ((NUM_PROC_PER_NODE/NUM_IO_PER_NODE)-1) ) .and. (options%general%debug .or. STD_OUT_PE_IO)
         
         if ((mod(NUM_COMPUTE,2) /= 0) .and. STD_OUT_PE) then

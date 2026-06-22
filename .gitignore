@@ -33,3 +33,4 @@ tests/figures/
 lib/*
 helpers/domains/HORAYZON/
 __pycache__/
+site/

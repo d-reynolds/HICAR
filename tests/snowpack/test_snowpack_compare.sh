@@ -280,9 +280,9 @@ echo -e "Seeding domain with a 14-layer / 1 m snowpack on all land cells..."
 "$python_exe" "$seeder" "${domains_dir}/Gaudergrat_250m.nc" "$seeded_domain" \
     --n-layers 14 --depth 1.0 || { echo -e "${RED}domain seeding failed${NC}"; exit 1; }
 
-# --- generate the base namelist + apply the SNOWPACK_Compare overrides -------
-default_nml="${input_dir}/default_hicar_options.nml"
-"$cpp_exe" --gen-nml "$default_nml" >/dev/null 2>&1
+# The comparison namelist is generated from the committed alpine_realdata
+# example by nml_gen_scripts/SNOWPACK_Compare.sh (same pattern as the other test
+# cases), so there is no separate base-namelist step here.
 
 # run_one <exe> <label>  -> sets RUN_OUT to the produced output .nc, returns status
 run_one() {
@@ -292,7 +292,6 @@ run_one() {
     rm -rf "$out_dir" "$rst_dir"; mkdir -p "$out_dir" "$rst_dir"
 
     local nml="${input_dir}/SNOWPACK_${label}.nml"
-    cp "$default_nml" "$nml"
     ( cd "$input_dir" && bash "${nmlgen_dir}/SNOWPACK_Compare.sh" "$(basename "$nml")" )
     # per-build output/restart folders
     sed -i'.bak' "s|output_folder = '../output/Standard/'|output_folder = '../output/SNOWPACK_${label}/'|g" "$nml"

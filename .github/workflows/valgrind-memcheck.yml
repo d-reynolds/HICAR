@@ -17,18 +17,58 @@ name: Valgrind memcheck (nightly)
 
 on:
   schedule:
-    - cron: '30 3 * * *'   # 03:30 UTC nightly (offset from full-test's 02:00)
+    - cron: '30 3 * * *'   # 03:30 UTC nightly
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read   # query previous runs of this workflow (the "changed" gate)
 
 concurrency:
   group: valgrind-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # --- Skip the nightly when main hasn't moved since the last run -------------
+  # The schedule fires daily even if nothing merged. Compare the commit under
+  # test against the head SHA of the most recent completed run of this workflow
+  # on main; identical => main was already checked at that SHA, so skip. Manual
+  # dispatch always runs.
+  changed:
+    runs-on: ubuntu-22.04
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "Event '${{ github.event_name }}' is a manual/explicit trigger — running."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # On any API error, fall back to empty so we run rather than skip.
+          last_sha=$(gh api \
+            "/repos/${{ github.repository }}/actions/workflows/valgrind-memcheck.yml/runs?branch=main&status=completed&per_page=1&exclude_pull_requests=true" \
+            --jq '.workflow_runs[0].head_sha // ""') || last_sha=""
+          cur_sha="${{ github.sha }}"
+          echo "current main SHA:  $cur_sha"
+          echo "last run main SHA: ${last_sha:-<none>}"
+          if [ -z "$last_sha" ]; then
+            echo "No previous run found — running."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$last_sha" = "$cur_sha" ]; then
+            echo "main unchanged since the last run — skipping."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "main advanced since the last run — running."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   memcheck:
+    needs: changed
+    if: needs.changed.outputs.should_run == 'true'
     runs-on: ubuntu-22.04
     env:
       HICAR_MODE: debug

@@ -1,28 +1,53 @@
 # FAQ
-* [Are you planning on add the Cumulus, PBL or/and land surface schemes to the ICAR?](#Has-ICAR-include-Cumulus,-PBL-and-land-surface-schemes)
-* [Can I say that ICAR is an Hydrostatic model or a quasi-geostrophic approximated model?](#Is-ICAR-an-Hydrostatic-model-or-a-quasi-geostrophic-approximated-model)
-* [What are the limitations on using the 1st order approximation to solve the advection term?](#What-are-the-limitations-on-using-the-1st-order-approximation-to-solve-the-advection-term?)
-* [Is the LUT (Look Up Table) for the dry N^2 or both dry and moist N^2?](#Is-the-LUT-(Look-Up-Table)-for-the-dry-N^2-or-both-dry-and-moist-N^2)
-* [How do you include the soundings as an input?](#How-do-you-include-the-soundings-as-an-input?)
 
-## Has ICAR include Cumulus, PBL and land surface schemes?
+## Does HICAR run on GPUs?
 
-There is already a cumulus (Tiedtke), PBL (greatly simplified form of YSU), and LSM (Noah) in ICAR. 
+Yes. HICAR is GPU-accelerated with **OpenACC**. Build it with `-DOPENACC=ON`
+using the NVHPC / NVFortran compiler (see [Compiling](compiling.md)); the same
+source also builds and runs on CPUs with GNU Fortran. On GPU systems each compute
+MPI rank drives one GPU, and halo exchanges can use NCCL when it is available.
 
-## Is ICAR an Hydrostatic model or a quasi-geostrophic approximated model?
+## Which compilers are supported?
 
-Not really. It isn’t a hydrostatic model, or a non-hydrostatic model.  
-That assumption doesn’t really come into the modeling framework. (ditto quasi-geostrophic).  
-To some extend it inherits those features from whatever model you use to force it though.  
+**GNU Fortran** (CPU) and **NVFortran / NVHPC** (CPU host and GPU). Intel and
+Cray support is deprecated and no longer tested.
 
-## What are the limitations on using the 1st order approximation to solve the advection term?
+## Which snow model should I use?
 
-Mostly that it ends up creating far too much diffusion, so fields such as water vapor get blurred out a little.
-If you look up the “upwind” scheme, or read one of the MP-DATA papers they will describe this effect.  
-Actually most papers that deal with advection will probably talk about this effect.  
+HICAR always builds with **SNOWPACK**. By default it uses the native-Fortran port
+(`snowpack_driver.F90`); passing `-DSNOWPACK_CPP=ON` selects the C++
+Alpine3D/SNOWPACK wrapper instead. **FSM2** is available as an optional model that
+must be compiled separately and linked with `-DFSM=ON` (see
+[Compiling](compiling.md)).
 
-## Is the LUT (Look Up Table) for the dry N^2 or both dry and moist N^2?
-Both (and neither).  The atmosphere behaves (sort of) the same for a given N^2 whether it is dry or moist. So the LUT itself knows nothing about dry or moist; however, when ICAR runs it calculates the dry or moist N^2 depending on the atmospheric conditions, and uses that to get the correct perturbation from the LUT.
+## Does HICAR support nested domains?
 
-## How do you include the soundings as an input?
-You just have to set up a 3D model grid that is initialized with that sounding profile.  It is not something that ICAR handles directly, it has to be done as a pre-processing step.  However, ICAR has an option to run an “ideal” simulation, in which it assumes that you want the boundary conditions to stay constant over time (e.g. to run a sounding to the steady state solution).
+Yes — **one-way nesting**. Each domain has exactly one parent, and the forcing
+data must encompass all domains. Nesting is configured with the `nests` and
+`parent_nest` options, and per-domain settings are given as ordered lists. See
+[Namelist options](namelist_options.md#nested-runs) for the details.
+
+## What forcing data does HICAR need?
+
+At a minimum: **U and V winds, pressure, temperature, and humidity**, all in a
+single netCDF file. Supplying **W winds** improves the iterative variational wind
+solver. When forcing HICAR from the output of a coarser HICAR run, it is
+recommended to also provide the hydrometeor fields. See
+[Forcing data](forcing_data.md).
+
+## Does HICAR include cumulus, PBL, land-surface, and radiation schemes?
+
+Yes. HICAR carries the same WRF-derived physics as ICAR, generally in their
+**full** form (the *dynamics* are what is simplified, not the physics). Available
+options include cumulus (Tiedtke, Kain-Fritsch, BMJ, NSAS), the full YSU PBL
+scheme, the Noah-MP land-surface model, RRTMG/RRTMGP radiation, and a range of
+microphysics schemes (Thompson, Morrison, WSM, ISHMAEL, simple). The active
+schemes are selected in the `&physics` namelist.
+
+## When linear winds are used, is the look-up table for dry or moist N²?
+
+This only applies when running the optional linear-theory wind solver (the
+iterative variational solver is the main solver). The look-up table itself knows
+nothing about dry vs. moist: the atmosphere responds in roughly the same way for a
+given N² either way. At run time the model computes the dry or moist N² from the
+current atmospheric conditions and uses that to look up the correct perturbation.

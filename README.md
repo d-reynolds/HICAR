@@ -64,9 +64,9 @@ If you plan to make any major additions to HICAR or ICAR, please get in touch, f
 
 If your code changes are core to the model and would benefit both HICAR and ICAR, please make them over at the ICAR model repo: https://github.com/NCAR/icar.
 
-For an outline of the basic code structure see the [ICAR code overview](docs/icar_code_overview.md)
+For an outline of the basic code structure see the [code overview](docs/code_overview.md).
 
-For reference working with the model code and git, see the [ICAR and Git workflow](docs/howto/icar_and_git_howto.md).
+For the contribution workflow and how to add to the model, see [Developing HICAR](docs/developing.md).
 
 
 #### Generating Static Data

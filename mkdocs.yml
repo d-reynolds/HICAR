@@ -1,9 +1,20 @@
-site_name: ICAR
-pages:
-- Home: index.md
-- Compiling: compiling.md
-- Running: running.md
-- Developing: developing.md
-- Errors: errors.md
+site_name: HICAR
+site_description: The High-resolution Intermediate Complexity Atmospheric Research model
+repo_url: https://github.com/HICAR-Model/HICAR
+repo_name: HICAR-Model/HICAR
 theme: readthedocs
-google_analytics: ['UA-108421993-4', 'icar.readthedocs.org']
+
+nav:
+  - Home: index.md
+  - Tutorial: tutorial.md
+  - Compiling: compiling.md
+  - Running: running.md
+  - Namelist options: namelist_options.md
+  - Forcing data: forcing_data.md
+  - Domain generation: domain_generation.md
+  - Testing: testing.md
+  - CI/CD pipeline: ci_cd_pipeline.md
+  - Code overview: code_overview.md
+  - Developing: developing.md
+  - FAQ: FAQ.md
+  - Errors: errors.md

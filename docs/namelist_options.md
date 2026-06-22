@@ -70,7 +70,7 @@ For example, to run with 3 nests, the following options could be set:
     !                 ⌄
     ! parent domain id = 2 -- Use nest #2 to provide boundary conditions
     !                    ⌄
-    parernt_nest = 0, 1, 2
+    parent_nest = 0, 1, 2
 
     ! All other general options...
 /

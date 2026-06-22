@@ -1,34 +1,86 @@
-## Developing
+# Developing HICAR
 
-This section is dated and needs to be updated for HICAR's changed compilation routine and code structure. For now, to all developers, please run:
+Contributions are welcome. HICAR is structured so that common additions — a new
+output variable, a new physics option — are straightforward, and the maintainers
+are happy to help with larger changes. For a map of the source tree, start with
+the [Code overview](code_overview.md).
+
+
+## Contribution workflow
+
+- Make changes and open pull requests against the **`develop`** branch.
+- Every PR is gated by the automated CI suite (build, unit/invariant tests,
+  smoke runs, decomposition/restart reproducibility, and bit-for-bit
+  regression). See the [CI/CD pipeline](ci_cd_pipeline.md) for what each gate
+  checks and [Testing](testing.md) for how to reproduce a lane locally before
+  pushing.
+- For substantial additions, please get in touch first so we can help fit the
+  change into the model's structure.
+
+## Adding a new output variable
+
+HICAR's variable handling is **metadata-driven**: once a variable is registered
+and described, allocation and output happen automatically — there is no
+per-variable code to add in the domain or output objects. To add a new variable, three things are needed:
+
+1. **Give it an index.** Add an entry for the variable in the `kVARS` structure
+   in `src/constants/icar_constants.F90`. Every model variable is referred to
+   throughout the code by its `kVARS%name` index.
+
+2. **Describe it.** Add a branch for the new `kVARS` index to the `get_varmeta`
+   function in `src/io/default_output_metadata.F90`. This is where you set the
+   output `name`, the `dimensions` (e.g. `three_d_t_dimensions`), the `units`
+   and other netCDF `attributes`, and the valid `minval`/`maxval` range. The
+   dimensions you set here are what drives allocation, so this step is required —
+   a `kVARS` entry with no metadata branch returns an empty name and is silently
+   skipped.
+
+3. **Request it.** Have the relevant physics module ask for the variable in its
+   `*_var_request` routine (e.g. `adv_std_var_request` in
+   `src/physics/advect.F90`, `lsm_var_request` in `lsm_driver.F90`). Use
+   `options%alloc_vars([...])` to have it allocated and `options%restart_vars([...])`
+   to have it carried through restarts and written to output:
+
+   ```fortran
+   call options%alloc_vars(   [kVARS%my_new_var, ...] )
+   call options%restart_vars( [kVARS%my_new_var, ...] )
+   ```
+
+That's all. The domain object's `create_variables` loops over the requested
+variables, reads each one's metadata, and allocates the correctly-shaped array;
+the output path writes whatever is in the output set. (`vars_to_allocate`
+controls which `kVARS` are allocated; `vars_for_output` controls which are
+written.)
+
+If the variable you want is *already* registered, simply request it (step 3) in
+the module that needs it — or, for output, it is exposed through the namelist's
+output-variable selection.
+
+## Domain decomposition conventions
+
+When writing physics or I/O code, note the index conventions:
+
+- `ims:ime` — memory bounds (include halos)
+- `its:ite` — tile/interior bounds (this rank's computed cells)
+- `ids:ide` — global domain bounds
+
+Halo (ghost-cell) data is exchanged via the domain's halo methods. Operations
+that need up-to-date neighbor data must run *after* the relevant halo exchange.
+Be especially careful with anything whose result depends on the local subdomain
+extent (local reductions used as global parameters, search windows sized from
+local bounds) — these break bit-for-bit reproducibility across different MPI rank
+counts.
+
+## Building the documentation
+
+These docs are built with [MkDocs](https://www.mkdocs.org/). To preview them
+locally:
 
 ```bash
-git config --local core.hooksPath .githooks/
+pip3 install mkdocs
+mkdocs serve          # or: python3 -m mkdocs serve
 ```
 
-After cloning, so that any pushes to the main branch will be tested locally prior to being published
-
-Users are encouraged to modify ICAR for their own specific purposes, and to make those changes available for others by submitting them back to the main repository.  The ICAR code base have been set up to make some additions (e.g. a new physics package) very easy to add, and the developers will do their best to work with anyone who wishes to add more sophisticated changes.
-
-It is worth reading a discussion of the [git workflow](howto/icar_git_workflow.md) used with ICAR.
-
-Then there is a description of [how to work with git and ICAR](howto/icar_and_git_howto.md).
-
-For an outline of the basic code structure see the [ICAR code overview](icar_code_overview.md)
-
-For a more complete documentation of ICAR, see the [detailed ICAR code description](http://ncar.github.io/icar/).  This full description is being updated as the doxygen markup is added to the code.  It also has detailed interactive diagrams of the inter-relationship between all functions.  For the overview, start by looking at the [documentation for the main program](http://ncar.github.io/icar/driver_8f90.html).
-
-ICAR main is now a significant change to the internal workings of ICAR, and has made some components vastly more dynamic and easier to implement / modify.  However, to support that, some elements became more complicated.  For example, adding a new variable to the output file is incredibly easy if that variable already exists.  Just add it to a call (almost anywhere) to output%add_variables()... however, if that variables has not been added before there are several steps that need to occur.  Below is a quick outline of the process:
-
-1) The variable has to be a a “variable_t” type, not just an array (and preferably part of the domain object though not technically required, but other steps below would be different if it is not.)
-2) That variable needs to have an entry in the kVARS structure in the `constants/icar_constants.f90` file.
-3) That variable needs to have an entry in the default metadata array `io/default_output_metadata.f90`.
-4) That variable needs to be initialized somewhere appropriate (for example in `objects/domain_obj.f90` `create_variables`.)
-5) Somewhere you need to tell it to write that variable too.  The easiest place to do this is in the domain_obj routine `var_request`, add it to the list of variables to be allocated, **and** to the list of “restart” variables (i.e. output variables for now).
-6) The one change that needs to be made in `io/output_obj.f90` is to add a single line for that variable to the `add_variables` routine.
-
-I know that ended up being more complicated than it could be.  Once a variable is in that format, it is really easy to add and remove variables (and for that matter create multiple output files with different variable lists in each, it is almost magical), but the initial setup is non-trivial to get there.
-
-A few of the steps above should be simplified drastically eventually… it is just complicated by the use of co-arrays, because of that the compiler doesn’t permit a more dynamic specification of these variables (at least the exchangeable variables).  I have a few ways around that, so it is on my list of things to do… it is just much lower priority than, say, making the model work better at the moment. In particular, the add_variables and create_variables steps should be more dynamic and not require this step. The intention of that whole complicated process was to make it easier… but it hasn’t quite had that effect yet.
-
-
+Then open <http://127.0.0.1:8000> in a browser. The site layout (page order and
+titles) is defined in `mkdocs.yml`. Use `mkdocs build --strict` to catch broken
+intra-doc links before committing.

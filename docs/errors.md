@@ -1,90 +1,97 @@
-## Common errors
+# Common errors
 
-1) **Segmentation fault**:
-    Possibly due to your shell's stacksize limit (particularly with ifort).
+This page collects the failure modes users hit most often, with their fixes.
 
-To *fix* it try the following:
+## 1. Segmentation fault on startup
+
+Often this is the shell's stack-size limit, especially for larger domains. Raise
+it before running:
+
 ```text
-in bash:
-    ulimit -s unlimited
-in csh:
-    unlimit stacksize
-
-**NB**: Some systems have a hard limit of 64MB (ulimit -s 65532), this *may*
-        be enough depending on domain size.
-Reference: https://software.intel.com/en-us/articles/determining-root-cause-of-sigsegv-or-sigbus-errors
+bash:  ulimit -s unlimited
+csh:   unlimit stacksize
 ```
 
-2) **Common output file errors**
-    If there are existing outputfiles with a different grid (e.g. number of levels, number of latitudes), ICAR will try to write to the existing file and will stop because the dimensions don't match. If you get an error such as :
+Some systems cap the stack at 64 MB (`ulimit -s 65532`); that may or may not be
+enough depending on the domain size. If raising the stack does not help, rebuild
+HICAR in debug mode (`-DMODE=debug`, which adds bounds checking and
+`-finit-real=nan`) to localize the fault.
+
+## 2. "Too few MPI ranks" / no compute tasks
+
+HICAR reserves **one rank per node for asynchronous I/O**, so it must be run with
+**at least two MPI ranks** (`-np 2`). Running with `-np 1` leaves zero compute
+ranks and the model cannot run. See [Running](running.md) for how the I/O and
+compute ranks are divided.
+
+## 3. Output file already exists with a different grid
+
+If output files from a previous run are present but were written on a different
+grid (different number of levels, latitudes, etc.) or with a different variable
+set, HICAR tries to write into the existing file and stops because the dimensions
+or variables don't match. Typical messages:
 
 ```text
 NetCDF: Variable not found
-setup_varids: Searching for variable in existing file:nsq
+setup_varids: Searching for variable in existing file: nsq
 ```
-
-Then ICAR is trying to write a variable (in this case nsq, the Brunt-Vaisala frequency) to the output file, but this variable does not exist is pre-existing output files.  If you get an error such as :
 
 ```text
 NetCDF: Start+count exceeds dimension bound
-output/icar_1990_01_01_00-00.nc:qv
+output/hicar_1990_01_01_00-00.nc: qv
 ```
 
-Then the dimensions of the model domain have changed since the last run, and it is not possible to write the output to the existing files.
+The fix is to delete or move the existing output files, or change your options so
+the output is consistent with the existing files.
 
-In both cases, the solution is to delete (or move) the existing output files, or to modify your options file so that the output will be consistent with existing files.
+## 4. netCDF file-type vs. parallel-I/O backend mismatch
 
+HICAR reads and writes netCDF in parallel, and the file *format* must match the
+backend the netCDF library was built against:
 
-3) **dz_levels namelist error**
-    "Fortran runtime error: Bad data for namelist object dz_levels"
+- **PnetCDF** handles only **classic** netCDF formats.
+- **Parallel HDF5** handles only the **netCDF-4** format.
+
+If your forcing/domain files are netCDF-4 but the library was built only with
+PnetCDF (or vice versa), reads or writes will fail. Make sure the netCDF library
+HICAR was compiled with supports the file type you are using (`nc-config
+--has-nc4` should report `yes` for netCDF-4 support). A symptom of building
+without netCDF-4 support is a compile-time error like:
 
 ```text
-If compiled with gfortran, the namelist format for arrays has to be slightly
-different than is supplied in the run directory. An easy fix is to put the
-dz_levels array all onto one line.
+Error: Symbol 'nf90_netcdf4' at (1) has no IMPLICIT type
 ```
 
-4) **other namelist error**
-    If a newer namelist is used with an older version of code, you may get errors telling you that a given variable is not supported.  You can probably remove that line from the namelist and it will run correctly, though you should think about the variable that is being removed to decide what it means.
+Recompile the netCDF stack with HDF5 (and PnetCDF) support — the
+`hicar_install_utils.sh` helper does this; see [Compiling](compiling.md).
 
-5) **Floating Point errors**
-    Check your input data.  For example, if you are supplying Shortwave or longwave down at the surface, but those terms are 0, the LSM can cool off and the surface layer becomes too stable. This causes the surface fluxes to become numerically unstable, and eventually the system breaks.
+## 5. Slow parallel I/O with OpenMPI
 
-6) **Memory Errors**
-    For large domains, the linear wind Look up Table can take a lot of memory.  While this problem is alleviated slightly by running in distributed memory, it is still easy to run out of memory.
-    Even with enough memory, ICAR often seems to crash (related to a memory problem) after it creates the LUT, when it is initializing the Thompson microphysics.  Sometimes this is solved by
-    simply letting ICAR write the LUT to disk, then restarting ICAR and reading the LUT.  The problem may be an issue in the opencoarrays library (tested w/ v1.9.1).
+When using **OpenMPI**, its default OMPIO component is slow for parallel HDF5
+writes. Force the older ROMIO component instead:
 
-7) **LSM errors**
-    When running with the Noah LSM turned on (LSM=3 in physics) the vegetation type specified in the initial conditions file must either use the WRF "MODIFIED_IGBP_MODIS_NOAH" Land Use classification, or the correct value must be specified in the VEGPARM.TBL and LU_Categories variable in the lsm_parameters namelist (see run/complete_icar_options.nml)
-
-8) **Changing namelist option does not change model simulation**
-    Note that many namelists are not read by ICAR by default. In particular, the adv, lt, mp, lsm, bias, and block namelists are not read by default to permit them to be absent in the namelist file and allow for shorter files.  To tell ICAR to read these files, set the use_X_options value to true in the primary parameters namelist.  See run/complete_icar_options.nml for example.
-
-9) **NetCDF related build error**
-    If the NetCDF library supplied does not support the full NetCDF4 file format (based on HDF5) you will get the following error.  Note that using version 4 of the netcdf library does not imply full support for version 4 of the netcdf file format...
-
-```text
-Error: Symbol ‘nf90_netcdf4’ at (1) has no IMPLICIT type
+```bash
+export OMPI_MCA_io=romio321
 ```
 
-There are two options :
+This can dramatically speed up output on OpenMPI systems. (It is not needed with
+MPICH/Cray MPI.)
 
-1. The better option is to recompile the netcdf library, being sure that
-   you first compile HDF5 and link the netcdf library to it.  You should
-   be able to run `nc-config --has-nc4` and have it output `yes`.k
-2. You can edit the ICAR source code to not require netCDF4 support.  This
-   might be easier, but it will mean that ICAR cannot save very large files
-   (which is useful for the linear wind look up table).  To do this, simply
-   change `or(NF90_CLOBBER,NF90_NETCDF4)` to `NF90_CLOBBER` in
-  `io/lt_lut_io.f90`
+## 6. Changing a namelist option has no effect
 
+Two common causes:
 
-10) **Coarrays Seemingly Running Slow**
-    One possibility, if the coarray implementation is built with MPI, is
-that the MPI implementation has not been configured correctly. A good way to
-test if performance is meeting expectations is to download and run MVAPICH's
-[micro-benchmark](https://mvapich.cse.ohio-state.edu/benchmarks/).
-After configuring and building the benchmark, running the tests
-`mpi/one-sided/osu_put_latency` and `mpi/pt2pt/osu_latency` should give an
-indication of performance.
+- **Namelist group not read.** The `lt`, `mp`, `adv`,
+  `sm`, `lsm`, `cu`, `rad`, `pbl`, `sfc`, and `wind` groups are only read when the
+  corresponding `use_<x>_options` flag in the `&general` group is set to `.true.` (the default behavior).
+  This lets those groups be omitted for shorter namelists. Set the relevant
+  `use_*_options = .true.` to have the group read.
+- **The option was rejected as invalid.** Run `./HICAR --check-nml your.nml`
+  first to validate the namelist; HICAR will report unknown or mis-set options
+  without running. See [Namelist options](namelist_options.md).
+
+## 7. Floating-point errors / NaNs
+
+Everyone's nightmare. Check your forcing data and static data
+first. Then, try running the `make test_cases` check locally from your build directory to confirm that the executable works properly. A debug build (`-DMODE=debug`) may detect the first NaN
+or error and help with debugging. If none of these checks turns up a solution, please contact the developers.

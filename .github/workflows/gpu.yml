@@ -1,10 +1,15 @@
 # GPU test suite (NVFortran, self-hosted).
 #
-# SECURITY POSTURE unchanged: the self-hosted runner NEVER runs untrusted PR code.
-# Triggers are only push to main/develop, nightly, and manual dispatch — no
-# pull_request trigger.
+# SECURITY POSTURE: the self-hosted runner NEVER runs untrusted PR code. Triggers
+# are only the nightly schedule (which GitHub runs on the default branch, main)
+# and manual dispatch — no push and no pull_request trigger (so a fork PR can
+# never execute on the GPU box). develop is GPU-tested by the nightly after it
+# merges to main, not on the open develop -> main PR.
 #
 # FLOW:
+#   0. changed       — nightly only: skip the whole run if main has not advanced
+#                      since the last GPU workflow run (manual dispatch always
+#                      runs). Avoids re-testing an unchanged main every night.
 #   1. check-signed  — is this commit marked hicar-full-test=success (CPU gate)?
 #   2. full-test     — if NOT signed, run the CPU full-test suite (reusable
 #                      workflow). If it fails, the GPU job does not run.
@@ -15,16 +20,13 @@
 name: GPU test suite (NVFortran)
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main, develop]
   schedule:
-    - cron: '0 4 * * *'   # 04:00 UTC — after the CPU full-test nightly (02:00)
+    - cron: '0 4 * * *'   # 04:00 UTC
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read     # query previous runs of this workflow (the "changed" gate)
   statuses: write   # read to check the gate; write so a reused full-test can sign
 
 concurrency:
@@ -32,8 +34,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # --- 0. Skip the nightly when main hasn't moved since the last GPU run -------
+  # The nightly schedule fires every day even if nothing merged. Compare the
+  # commit under test against the head SHA of the most recent *completed* run of
+  # this same workflow on main; if they're identical, main was already
+  # GPU-tested at that SHA, so we skip. Manual dispatch always runs.
+  changed:
+    runs-on: ubuntu-22.04
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "Event '${{ github.event_name }}' is a manual/explicit trigger — running."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Most recent completed run of this workflow on main (this in-progress
+          # run is not 'completed', so it is naturally excluded). On any API
+          # error, fall back to an empty value so we run rather than silently
+          # skip the nightly.
+          last_sha=$(gh api \
+            "/repos/${{ github.repository }}/actions/workflows/gpu.yml/runs?branch=main&status=completed&per_page=1&exclude_pull_requests=true" \
+            --jq '.workflow_runs[0].head_sha // ""') || last_sha=""
+          cur_sha="${{ github.sha }}"
+          echo "current main SHA:      $cur_sha"
+          echo "last GPU-run main SHA: ${last_sha:-<none>}"
+          if [ -z "$last_sha" ]; then
+            echo "No previous GPU run found — running."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$last_sha" = "$cur_sha" ]; then
+            echo "main unchanged since the last GPU run — skipping."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "main advanced since the last GPU run — running."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   # --- 1. Has this commit passed the CPU full-test gate? ----------------------
   check-signed:
+    needs: changed
+    if: needs.changed.outputs.should_run == 'true'
     runs-on: ubuntu-22.04
     outputs:
       signed: ${{ steps.check.outputs.signed }}

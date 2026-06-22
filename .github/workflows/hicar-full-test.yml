@@ -25,8 +25,6 @@ on:
     branches: [main, develop]
   push:
     branches: [main, develop]
-  schedule:
-    - cron: '0 2 * * *'   # 02:00 UTC nightly
   workflow_dispatch:
   workflow_call:
 
@@ -48,6 +46,18 @@ jobs:
   # warm cache this job restores ~/installdir and hicar_dependencies short-
   # circuits (see the sentinel check in hicar_install_utils.sh).
   build-deps:
+    # De-duplicate push + pull_request runs. A push to main/develop already runs
+    # this suite, and the `sign` job posts the `hicar-full-test` commit status that
+    # main's ruleset requires on the head commit — so the pull_request event for a
+    # same-repo develop->main (or main) PR would only re-test the identical, already
+    # signed commit. Skip that case. cpu-debug / cpu-release / sign all `needs:`
+    # build-deps, so they skip with it. Fork PRs (head in another repo) and PRs from
+    # any other branch (e.g. a feature branch -> develop, which a push never tested)
+    # still run normally.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      !contains(fromJSON('["main", "develop"]'), github.head_ref)
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
