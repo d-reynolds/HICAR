@@ -1119,11 +1119,12 @@ contains
 
         associate(u_q => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
                   v_q => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
-                  w_q => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+                  w_q => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+                  kms => domain%kms, kme => domain%kme)
         !$acc parallel default(present)
         !$acc loop gang vector collapse(3)
         do j = jms, jme
-            do k = domain%kms, domain%kme
+            do k = kms, kme
                 do i = ims, ime+1
                     u_q(i,k,j) = 0.0
                 enddo
@@ -1131,7 +1132,7 @@ contains
         enddo
         !$acc loop gang vector collapse(3)
         do j = jms, jme+1
-            do k = domain%kms, domain%kme
+            do k = kms, kme
                 do i = ims, ime
                     v_q(i,k,j) = 0.0
                 enddo
@@ -1139,7 +1140,7 @@ contains
         enddo
         !$acc loop gang vector collapse(3)
         do j = jms, jme
-            do k = domain%kms, domain%kme
+            do k = kms, kme
                 do i = ims, ime
                     w_q(i,k,j) = 0.0
                 enddo
