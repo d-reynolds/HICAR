@@ -321,21 +321,14 @@ contains
     !!------------------------------------------------------------
     subroutine smooth_array_3d(wind,windowsize,ydim)
         implicit none
-        real, intent(inout), dimension(:,:,:):: wind    !> 3 dimensional wind field to be smoothed
-        integer,intent(in)::windowsize                  !> halfwidth-1/2 of window to smooth over
-                                                        ! Specified in grid cells, (+/- windowsize)
-        integer,intent(in)::ydim                        !> the dimension to use for the y coordinate
-                                                        ! It can be 2, or 3 (but not 1)
-        real,allocatable,dimension(:,:,:)::inputwind    !> temporary array to store the input data in
-        integer::i,j,k,nx,ny,nz,startx,endx,starty,endy,ii,jj ! various array indices/bounds
-        integer::di,dk,kk ! stencil loop indices for GPU direct-computation path
-
-        ! Intermediate sums to speed up the computation
-        ! Because these are accumulating values over the domain, use double precision
-        ! in practice this doesn't seem to matter.
-        double precision,allocatable,dimension(:) :: rowsums,rowmeans
+        real, intent(inout), dimension(:,:,:):: wind    !> 3 dimensional field to be smoothed
+        integer,intent(in)::windowsize                  !> halfwidth of the window to smooth over (+/- windowsize)
+        integer,intent(in)::ydim                        !> the dimension to use for the y coordinate (2 or 3, not 1)
+        real,allocatable,dimension(:,:,:)::inputwind    !> temporary copy of the input data
+        integer::i,j,k,nx,ny,nz,startx,endx,starty,endy,ii,jj ! array indices / window bounds
+        integer::di,dk,kk                               ! stencil loop indices
         double precision :: cursum
-        integer :: cur_n, curcol, ncols, nrows
+        integer :: ncols
 
         ncols = windowsize * 2 + 1
         nx = size(wind, 1)
@@ -344,15 +337,14 @@ contains
 
         allocate(inputwind(nx,ny,nz)) ! Can't be module level because nx,ny,nz could change between calls,
 
-        ! GPU path: O(w^2) direct computation — embarrassingly parallel, full GPU occupancy
-        ! CPU path: O(1) sliding window — efficient for large windowsize (e.g. linear_winds)
-#ifdef _OPENACC
+        ! Direct (per-window) summation
         !$acc data present_or_copy(wind) create(inputwind)
         !$acc kernels
         inputwind = wind
         !$acc end kernels
 
         if (ydim==3) then
+            !$omp parallel do collapse(2) private(i,j,k,di,dk,ii,kk,cursum) schedule(static)
             !$acc parallel loop gang collapse(2) private(cursum, dk, di, kk, ii)
             do k = 1, nz
                 do j = 1, ny
@@ -372,7 +364,9 @@ contains
                     enddo
                 enddo
             enddo
+            !$omp end parallel do
         else ! ydim==2
+            !$omp parallel do collapse(2) private(i,j,k,startx,endx,starty,endy,ii,jj,cursum) schedule(static)
             !$acc parallel loop gang collapse(2)
             do j = 1, ny
                 do k = 1, nz
@@ -394,87 +388,10 @@ contains
                     enddo
                 enddo
             enddo
+            !$omp end parallel do
         endif
         !$acc end data
-#else
-        inputwind = wind
 
-        !$omp parallel firstprivate(windowsize,nx,ny,nz,ydim), &
-        !$omp private(i,j,k,ii,jj,startx,endx,starty,endy, rowsums,rowmeans,nrows,ncols,cursum), &
-        !$omp shared(wind,inputwind)
-
-        allocate(rowsums(nx))
-        allocate(rowmeans(nx))
-        nrows = windowsize * 2 + 1
-        ncols = windowsize * 2 + 1
-
-        !$omp do schedule(static)
-        do j=1,ny
-
-            if (ydim==3) then
-                do i=1,nx
-                    rowsums(i) = inputwind(i,j,1) * (windowsize+2)
-                enddo
-                do ii=2, min(windowsize,nz)
-                    do i=1,nx
-                        rowsums(i) = rowsums(i) + inputwind(i, j, ii)
-                    enddo
-                enddo
-                if (windowsize > nz) then
-                    do i=1,nx
-                        rowsums(i) = rowsums(i) + inputwind(i,j,nz) * (windowsize-nz)
-                    enddo
-                endif
-            endif
-
-            do k=1,nz
-                if (ydim==3) then
-                    starty  = max(2, k - windowsize)
-                    endy    = min(nz, k + windowsize)
-                    do i=1,nx
-                        rowsums(i) = rowsums(i) - inputwind(i, j, starty-1) + inputwind(i, j, endy)
-                    enddo
-
-                    do i=1,nx
-                        rowmeans(i) = rowsums(i) / nrows
-                    enddo
-                    cursum = rowmeans(1) * (windowsize+2)
-                    do i=2,windowsize
-                        cursum = cursum + rowmeans(i)
-                    enddo
-                endif
-
-                if (ydim==3) then
-                    do i=1,nx
-                        startx = max(2, i - windowsize)
-                        endx   = min(nx, i + windowsize)
-                        cursum = cursum - rowmeans(startx-1) + rowmeans(endx)
-
-                        wind(i,j,k) = cursum / ncols
-                    enddo
-
-                else ! ydim==2
-                    do i=1,nx
-                        startx=max(1, i - windowsize)
-                        endx  =min(nx,i + windowsize)
-                        starty=max(1, j - windowsize)
-                        endy  =min(ny,j + windowsize)
-                        cursum = 0.0d0
-                        do jj=starty,endy
-                            do ii=startx,endx
-                                cursum = cursum + inputwind(ii,jj,k)
-                            enddo
-                        enddo
-                        wind(i,j,k) = cursum / ((endx-startx+1)*(endy-starty+1))
-                    enddo
-                endif
-            enddo
-        enddo
-        !$omp end do
-        deallocate(rowsums)
-        deallocate(rowmeans)
-        !$omp end parallel
-#endif
         deallocate(inputwind)
 
     end subroutine smooth_array_3d
@@ -731,7 +648,14 @@ contains
         ! via interpolation, so halo values may not exactly match the
         ! neighbor's interior.  Exchanging up front guarantees the first
         ! smooth pass reads correct neighbor data.
-        if (present(halo)) call halo%exch_var(var, do_dqdt=dqdt)
+        !
+        ! corners=.true. is REQUIRED: smooth_array_3d/2d smooth over BOTH
+        ! horizontal dimensions at once, so each cell's window includes the
+        ! diagonal (corner) neighbors. Without the corner exchange those
+        ! diagonal halo cells are stale, and cells near a tile corner smooth to
+        ! a decomposition-dependent value, breaking bit-for-bit MPI
+        ! reproducibility (e.g. with smooth_wind_distance > 0).
+        if (present(halo)) call halo%exch_var(var, do_dqdt=dqdt, corners=.true.)
 
         do n = 1, iters
             if (var%three_d) then
@@ -747,7 +671,7 @@ contains
                     call smooth_array_2d(var%data_2d, windowsize_use)
                 endif
             endif
-            if (present(halo)) call halo%exch_var(var, do_dqdt=dqdt)
+            if (present(halo)) call halo%exch_var(var, do_dqdt=dqdt, corners=.true.)
         enddo
     end subroutine smooth_array_var
 

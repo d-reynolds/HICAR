@@ -344,34 +344,57 @@ if(OPENACC)
 		set(OPENACC OFF CACHE BOOL "Enable OpenACC support for GPU acceleration" FORCE)
 	else()
 		message(STATUS "OpenACC support enabled")
-		
-		# Fetch and build rte-rrtmgp when OpenACC is enabled
-		message(STATUS "Fetching rte-rrtmgp library for OpenACC support...")
-
-		# Configure build options for rte-rrtmgp
-		set(BUILD_TESTING OFF)
-		set(BUILD_C_HEADERS OFF)
-		set(KERNEL_MODE "accel" CACHE STRING "Select the kernel mode for rte-rrtmgp" FORCE)
-		set(BUILD_SHARED_LIBS OFF)
-
-		FetchContent_MakeAvailable(rte-rrtmgp)
-			
-		# Use the predefined HICAR compiler flags			
-		message(STATUS "Using compiler flags for rte-rrtmgp: ${CMAKE_Fortran_FLAGS}")
-
-		if(NOT TARGET rte-rrtmgp::rte AND NOT TARGET rte-rrtmgp::rrtmgp)
-			# Add the rte-rrtmgp subdirectory with configured options
-			add_subdirectory(${rte-rrtmgp_SOURCE_DIR} ${rte-rrtmgp_BINARY_DIR} EXCLUDE_FROM_ALL)
-		endif()
-		
-		# Add preprocessor definition to indicate rte-rrtmgp is available
-		add_definitions(-DUSE_RTE_RRTMGP)
-		list(APPEND SOURCE_FILES ${ra_mo_files})
-
-		message(STATUS "rte-rrtmgp library configured successfully")
-		
 	endif()
 endif()
+
+# Fetch and build rte-rrtmgp (used for both CPU and GPU radiation)
+message(STATUS "Fetching rte-rrtmgp library...")
+
+# Configure build options for rte-rrtmgp
+set(BUILD_TESTING OFF)
+set(BUILD_C_HEADERS OFF)
+# Select the rte-rrtmgp kernel implementation:
+#   accel   -> OpenACC/OpenMP-offload kernels for GPU builds
+#   default -> portable Fortran kernels for CPU (multiprocessor) builds
+if(OPENACC)
+	set(KERNEL_MODE "accel" CACHE STRING "Select the kernel mode for rte-rrtmgp" FORCE)
+else()
+	set(KERNEL_MODE "default" CACHE STRING "Select the kernel mode for rte-rrtmgp" FORCE)
+endif()
+message(STATUS "rte-rrtmgp KERNEL_MODE: ${KERNEL_MODE}")
+set(BUILD_SHARED_LIBS OFF)
+
+# rte-rrtmgp's frontend carries OpenMP *target-offload* (`!$omp target ... map`)
+# directives next to its OpenACC ones. The CPU (default) kernels are plain
+# Fortran and need no OpenMP, but HICAR's gfortran flags include -fopenmp (for the
+# host-threaded snow models). Inheriting -fopenmp makes gfortran try to compile
+# those offload directives and fail ("Unclassifiable OpenMP directive"). Build
+# rte-rrtmgp with -fopenmp stripped; HICAR and the other deps keep it. (No-op for
+# the nvfortran GPU build, which drives OpenACC with -acc and has no -fopenmp, so
+# the accel kernels are unaffected.) The add_subdirectory that creates the
+# rte-rrtmgp targets runs inside FetchContent_MakeAvailable, so strip around it.
+set(_hicar_saved_fortran_flags "${CMAKE_Fortran_FLAGS}")
+string(REPLACE "-fopenmp" "" CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS}")
+
+FetchContent_MakeAvailable(rte-rrtmgp)
+	
+# Use the predefined HICAR compiler flags, with openmp stripped out			
+message(STATUS "Using compiler flags for rte-rrtmgp: ${CMAKE_Fortran_FLAGS}")
+
+if(NOT TARGET rte-rrtmgp::rte AND NOT TARGET rte-rrtmgp::rrtmgp)
+	# Add the rte-rrtmgp subdirectory with configured options
+	add_subdirectory(${rte-rrtmgp_SOURCE_DIR} ${rte-rrtmgp_BINARY_DIR} EXCLUDE_FROM_ALL)
+endif()
+
+# Restore HICAR's full flags (incl. -fopenmp) for HICAR and the remaining deps.
+set(CMAKE_Fortran_FLAGS "${_hicar_saved_fortran_flags}")
+
+# Add preprocessor definition to indicate rte-rrtmgp is available
+add_definitions(-DUSE_RTE_RRTMGP)
+list(APPEND SOURCE_FILES ${ra_mo_files})
+
+message(STATUS "rte-rrtmgp library configured successfully")
+		
 
 if (NOT DEFINED NOAHMP_LIBRARY)
 	# Now fetch Noah-MP repo
@@ -562,12 +585,6 @@ elseif(SNOWPACK_FOUND)
 endif()
 if (OpenACC_Fortran_FOUND AND OPENACC)
 	target_link_libraries(hicar_lib PUBLIC OpenACC::OpenACC_Fortran)
-	
-	# Link rte-rrtmgp libraries when OpenACC is enabled
-	if(TARGET rte-rrtmgp::rte AND TARGET rte-rrtmgp::rrtmgp)
-		target_link_libraries(hicar_lib PUBLIC rte-rrtmgp::rte rte-rrtmgp::rrtmgp)
-		message(STATUS "Linked rte-rrtmgp libraries to HICAR")
-	endif()
 
 	# Search for NCCL for GPU halo exchange acceleration
 	find_path(NCCL_INCLUDE_DIR nccl.h
@@ -594,6 +611,12 @@ if (OpenACC_Fortran_FOUND AND OPENACC)
 	else()
 		message(STATUS "NCCL not found -- using GPU-aware MPI for halo exchange")
 	endif()
+endif()
+
+# Link rte-rrtmgp libraries
+if(TARGET rte-rrtmgp::rte AND TARGET rte-rrtmgp::rrtmgp)
+	target_link_libraries(hicar_lib PUBLIC rte-rrtmgp::rte rte-rrtmgp::rrtmgp)
+	message(STATUS "Linked rte-rrtmgp libraries to HICAR")
 endif()
 
 target_link_libraries(hicar_lib PUBLIC MPI::MPI_Fortran)
@@ -685,22 +708,20 @@ file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/icar_supporting_files-subbuild")
 file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/icar_supporting_files-build")
 
 # if we are using RTE_RRTMGP, copy supporting files from the git repository: https://github.com/earth-system-radiation/rrtmgp-data
-if(OPENACC AND OpenACC_Fortran_FOUND)
-	message(STATUS "Fetching rte-rrtmgp data files...")
+message(STATUS "Fetching rte-rrtmgp data files...")
+
+# Download the repo but don't build it
+FetchContent_MakeAvailable(rrtmgp_data)
+
+# Copy rrtmgp data files to the run directory
+file(COPY "${rrtmgp_data_SOURCE_DIR}/" DESTINATION "${PROJECT_SOURCE_DIR}/run/rrtmgp_support")
 	
-	# Download the repo but don't build it
-	FetchContent_MakeAvailable(rrtmgp_data)
-	
-	# Copy rrtmgp data files to the run directory
-	file(COPY "${rrtmgp_data_SOURCE_DIR}/" DESTINATION "${PROJECT_SOURCE_DIR}/run/rrtmgp_support")
-		
-	# Clean up downloaded repo to save space
-	file(REMOVE_RECURSE "${rrtmgp_data_SOURCE_DIR}")
-	file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/rrtmgp_data-subbuild")
-	file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/rrtmgp_data-build")
-	
-	message(STATUS "RTE-RRTMGP data files copied to run/rrtmgp_support")
-endif()
+# Clean up downloaded repo to save space
+file(REMOVE_RECURSE "${rrtmgp_data_SOURCE_DIR}")
+file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/rrtmgp_data-subbuild")
+file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/rrtmgp_data-build")
+
+message(STATUS "RTE-RRTMGP data files copied to run/rrtmgp_support")
 
 
 list(POP_BACK CMAKE_MESSAGE_INDENT)
@@ -749,12 +770,8 @@ else()
 endif()
 if (OPENACC AND OpenACC_Fortran_FOUND)
 	message(STATUS "  OpenACC: Enabled")
-	if(TARGET rte-rrtmgp::rte AND TARGET rte-rrtmgp::rrtmgp)
-		message(STATUS "  RTE-RRTMGP: Enabled (linked for OpenACC support)")
-	endif()
 else()
 	message(STATUS "  OpenACC: Not Used")
-	message(STATUS "  RTE-RRTMGP: Not Used")
 endif()
 message(STATUS "")
 #######################################################

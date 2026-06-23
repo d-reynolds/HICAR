@@ -254,11 +254,17 @@ function hicar_install {
     echo hicar_install
     pwd
     cd ${GITHUB_WORKSPACE}
-    if [ ! -d "$GITHUB_WORKSPACE/build" ]; then
-        mkdir build
-        cd build
+    # Build directory is overridable via HICAR_BUILD_DIR (default: build). A job that
+    # builds HICAR more than once (e.g. snowpack-compare's C++ vs native-Fortran
+    # builds) can give each build its OWN tree, so the second build's `rm -rf *`
+    # below doesn't delete the first exe's RPATH'd shared libs (libsnowpack.so.*,
+    # libmeteoio.so.*). Single-build callers keep using `build` unchanged.
+    local build_dir="${HICAR_BUILD_DIR:-build}"
+    if [ ! -d "$GITHUB_WORKSPACE/$build_dir" ]; then
+        mkdir "$build_dir"
+        cd "$build_dir"
     else
-        cd build
+        cd "$build_dir"
         rm -rf *
     fi
     export NETCDF_DIR=${INSTALLDIR}
@@ -268,8 +274,8 @@ function hicar_install {
     cmake ../ -DMODE=${HICAR_MODE:-debug} ${HICAR_CMAKE_EXTRA:-}
     make ${JN}
     make install
-    
-    echo "hicar install succeeded"
+
+    echo "hicar install succeeded (build dir: ${build_dir})"
 
 }
 

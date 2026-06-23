@@ -32,6 +32,11 @@ done
 COMPARE="$hicar_repo/tests/compare_outputs.py"
 STANDARD_GEN="$hicar_repo/tests/Test_Cases/input/nml_gen_scripts/Standard.sh"
 OUTPUT_FILENAME="Gaudergrat_250m_2017-02-14_00-00-00.nc"
+
+# set_var <nml_file> <name> <value> <group>: set a namelist variable by name,
+# inserting it into &<group> if absent (replaces the old `sed -i` edits). See
+# helpers/example_namelists/set_nml_var.py.
+set_var() { "${PYTHON:-python3}" "$hicar_repo/helpers/example_namelists/set_nml_var.py" "$1" "$2" "$3" --group "$4" --insert || exit 1; }
 # Radiation scheme used for BOTH runs so physics is identical. rrtmgp is the
 # portable RTE+RRTMGP scheme (runs on host with OPENACC=OFF and on the GPU). If a
 # clean run needs the legacy rrtmg instead, set RAD=rrtmg — but keep it the SAME
@@ -71,11 +76,10 @@ run_one() {  # $1=exe  $2=tag
     local nml="cmp_${tag}.nml"
     "$exe" --gen-nml "$nml"
     bash "$STANDARD_GEN" "$nml"
-    sed -i'.bak' "s|output_vars = .*|output_vars = 'all'|" "$nml"
-    sed -i'.bak' "s|output_folder = '../output/Standard/'|output_folder = '${out_dir}/'|" "$nml"
-    sed -i'.bak' "s|restart_folder = '../restart/Standard/'|restart_folder = '${rst_dir}/'|" "$nml"
-    sed -i'.bak' "s|rad = 'rrtmg'|rad = '${RAD}'|g" "$nml"
-    rm -f "${nml}.bak"
+    set_var "$nml" output_vars    "'all'"          output
+    set_var "$nml" output_folder  "'${out_dir}/'"  output
+    set_var "$nml" restart_folder "'${rst_dir}/'"  restart
+    set_var "$nml" rad            "'${RAD}'"       physics
     echo -e "Running ${BLUE}${tag}${NC} (${exe##*/}) with ${np} ranks, rad=${RAD}..."
     "$mpiexec_path" -np "$np" "$exe" "$nml" 1>"cmp_${tag}.out" 2>"cmp_${tag}.err" || {
         echo -e "${RED}${tag} run failed; last stderr:${NC}"; tail -n 20 "cmp_${tag}.err"; exit 1; }

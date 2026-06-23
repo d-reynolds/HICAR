@@ -49,6 +49,11 @@ fi
 
 hicar_repo="$(cd "$1" && pwd)"
 
+# set_var <nml_file> <name> <value> <group>: set a namelist variable by name,
+# inserting it into &<group> if absent (replaces the old `sed -i` edits). See
+# helpers/example_namelists/set_nml_var.py.
+set_var() { "${PYTHON:-python3}" "$hicar_repo/helpers/example_namelists/set_nml_var.py" "$1" "$2" "$3" --group "$4" --insert || exit 1; }
+
 # --- bless mode: post the parity-blessed status (with the SNOWPACK SHA) -----
 if [ "$2" = "--bless" ]; then
     shift 2
@@ -294,9 +299,8 @@ run_one() {
     local nml="${input_dir}/SNOWPACK_${label}.nml"
     ( cd "$input_dir" && bash "${nmlgen_dir}/SNOWPACK_Compare.sh" "$(basename "$nml")" )
     # per-build output/restart folders
-    sed -i'.bak' "s|output_folder = '../output/Standard/'|output_folder = '../output/SNOWPACK_${label}/'|g" "$nml"
-    sed -i'.bak' "s|restart_folder = '../restart/Standard/'|restart_folder = '../restart/SNOWPACK_${label}/'|g" "$nml"
-    rm -f "${nml}.bak"
+    set_var "$nml" output_folder  "'../output/SNOWPACK_${label}/'"  output
+    set_var "$nml" restart_folder "'../restart/SNOWPACK_${label}/'" restart
 
     echo
     echo -e "Running ${BLUE}${label}${NC} ($exe) with ${np} ranks ..."
