@@ -89,6 +89,11 @@ if [ "$use_gpu" = true ]; then
         cp -r "${hicar_repo}/run/rrtmgp_support" "${hicar_repo}/tests/Test_Cases/input"
     fi
 fi
+# set_var <nml_file> <name> <value> <group>: set a namelist variable by name,
+# inserting it into &<group> if absent (replaces the old `sed -i` edits). See
+# helpers/example_namelists/set_nml_var.py.
+set_var() { "${PYTHON:-python3}" "${hicar_repo}/helpers/example_namelists/set_nml_var.py" "$1" "$2" "$3" --group "$4" --insert || exit 1; }
+
 # Generate default namelist
 default_file="${hicar_repo}/tests/Test_Cases/input/default_hicar_options.nml"
 if [ -f "$default_file" ]; then
@@ -146,12 +151,6 @@ fi
 
 export OMP_NUM_THREADS=1
 
-# Cleanup trap for temp files
-cleanup() {
-    rm -f "${hicar_repo}/tests/Test_Cases/input"/*.bak
-}
-trap cleanup EXIT
-
 # -------------------------------------------------------
 # Helper: generate_standard_nml <output_nml> <output_dir> <restart_dir>
 # -------------------------------------------------------
@@ -174,22 +173,21 @@ generate_standard_nml() {
 
     # Override wind, Sx, and output_vars for reproducibility testing. wind is at
     # its default in the example (so absent from the namelist) — insert it.
-    "${PYTHON:-python3}" "${hicar_repo}/helpers/example_namelists/set_nml_var.py" "$out_nml" wind "'none'" --group physics --insert
-    sed -i'.bak' 's/Sx = .True./Sx = .False./g' "$out_nml"
-    sed -i'.bak' "s/output_vars = .*$/output_vars = 'all'/g" "$out_nml"
+    set_var "$out_nml" wind        "'none'"        physics
+    set_var "$out_nml" Sx          ".False."       wind
+    set_var "$out_nml" output_vars "'all'"         output
 
     if [ $use_gpu = true ]; then
         # GPU mode: use all available GPUs and half for decomposition test, so set end time to 10 min for both runs
-        sed -i'.bak' "s/rad = 'rrtmg'/rad = 'rrtmgp'/g" "$out_nml"
+        set_var "$out_nml" rad     "'rrtmgp'"      physics
     fi
     # Shorten run (default 10 min, or the override), output every 5 min for restart checkpoints
-    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '${end_date}'/g" "$out_nml"
-    sed -i'.bak' 's/outputinterval = 600/outputinterval = 300/g' "$out_nml"
+    set_var "$out_nml" end_date       "'${end_date}'" general
+    set_var "$out_nml" outputinterval 300            output
 
     # Override output and restart folders
-    sed -i'.bak' "s|output_folder = '../output/Standard/'|output_folder = '${output_dir}'|g" "$out_nml"
-    sed -i'.bak' "s|restart_folder = '../restart/Standard/'|restart_folder = '${restart_dir}'|g" "$out_nml"
-    rm -f "${out_nml}.bak"
+    set_var "$out_nml" output_folder  "'${output_dir}'"  output
+    set_var "$out_nml" restart_folder "'${restart_dir}'" restart
 
     cd $hicar_repo
 
@@ -213,24 +211,23 @@ generate_restart_nml() {
 
     # Override wind, Sx, and output_vars for reproducibility testing. wind is at
     # its default in the example (so absent from the namelist) — insert it.
-    "${PYTHON:-python3}" "${hicar_repo}/helpers/example_namelists/set_nml_var.py" "$out_nml" wind "'none'" --group physics --insert
-    sed -i'.bak' 's/Sx = .True./Sx = .False./g' "$out_nml"
-    sed -i'.bak' "s/output_vars = .*$/output_vars = 'all'/g" "$out_nml"
+    set_var "$out_nml" wind        "'none'"        physics
+    set_var "$out_nml" Sx          ".False."       wind
+    set_var "$out_nml" output_vars "'all'"         output
 
     if [ $use_gpu = true ]; then
         # GPU mode: use all available GPUs and half for decomposition test, so set end time to 10 min for both runs
-        sed -i'.bak' "s/rad = 'rrtmg'/rad = 'rrtmgp'/g" "$out_nml"
+        set_var "$out_nml" rad     "'rrtmgp'"      physics
     fi
 
     # Shorten run: end at 10 min, restart from 5 min checkpoint, output every 5 min
-    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '2017-02-14 00:10:00'/g" "$out_nml"
-    sed -i'.bak' "s/restart_date = '2017-02-14 00:10:00'/restart_date = '2017-02-14 00:05:00'/g" "$out_nml"
-    #sed -i'.bak' 's/outputinterval = 600/outputinterval = 300/g' "$out_nml"
+    set_var "$out_nml" end_date     "'2017-02-14 00:10:00'" general
+    set_var "$out_nml" restart_date "'2017-02-14 00:05:00'" restart
+    #set_var "$out_nml" outputinterval 300 output
 
     # Override output and restart folders
-    sed -i'.bak' "s|output_folder = '../output/Standard/'|output_folder = '${output_dir}'|g" "$out_nml"
-    sed -i'.bak' "s|restart_folder = '../restart/Standard/'|restart_folder = '${restart_dir}'|g" "$out_nml"
-    rm -f "${out_nml}.bak"
+    set_var "$out_nml" output_folder  "'${output_dir}'"  output
+    set_var "$out_nml" restart_folder "'${restart_dir}'" restart
 
     cd $hicar_repo
 }

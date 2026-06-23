@@ -3638,7 +3638,7 @@ contains
                 ! if just updating, use the dqdt variable otherwise use the 3D variable
                 if (update_only) then
                     call interpolate_variable(this%forcing_hi(p)%dqdt_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
-                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth, is_fm_var=var_is_fm)
+                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, is_fm_var=var_is_fm)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind tendencies
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
                         call smooth_array(this%forcing_hi(p), windowsize=1, ydim=3, &
@@ -3652,7 +3652,7 @@ contains
                     endif
                 else
                     call interpolate_variable(this%forcing_hi(p)%data_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
-                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth, is_fm_var=var_is_fm)
+                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, is_fm_var=var_is_fm)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind fields
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
                         call smooth_array(this%forcing_hi(p), windowsize=1, ydim=3, &
@@ -3825,7 +3825,7 @@ contains
     !! calling the appropriate interpolation routine (2D vs 3D) with the appropriate grid (mass, u, v)
     !!
     !! -------------------------------
-    subroutine interpolate_variable(var_data, input_data, forcing, dom, interpolate_agl_in, var_is_u, var_is_v, nsmooth, is_fm_var)
+    subroutine interpolate_variable(var_data, input_data, forcing, dom, interpolate_agl_in, var_is_u, var_is_v, is_fm_var)
         implicit none
         real,  allocatable, intent(inout) :: var_data(:,:,:)
         type(variable_t),   intent(inout) :: input_data
@@ -3833,7 +3833,6 @@ contains
         type(domain_t),     intent(in)    :: dom
         logical,            intent(in),   optional :: interpolate_agl_in
         logical,            intent(in),   optional :: var_is_u, var_is_v
-        integer,            intent(in),   optional :: nsmooth
         logical,            intent(in),   optional :: is_fm_var
 
         ! note that 3D variables have a different number of vertical levels, so they have to first be interpolated
@@ -3841,7 +3840,7 @@ contains
         real, allocatable :: temp_3d(:,:,:)
         logical :: interpolate_agl, uvar, vvar, fm_var
         integer :: nx, ny, nz, ims, ime, jms, jme
-        integer :: windowsize, z
+        integer :: z
 
         interpolate_agl=.False.
         if (present(interpolate_agl_in)) interpolate_agl = interpolate_agl_in
@@ -3849,8 +3848,6 @@ contains
         if (present(var_is_u)) uvar = var_is_u
         vvar = .False.
         if (present(var_is_v)) vvar = var_is_v
-        windowsize = 0
-        if (present(nsmooth)) windowsize = nsmooth
         fm_var = .False.
         if (present(is_fm_var)) fm_var = is_fm_var
 
@@ -3889,8 +3886,15 @@ contains
         ! Interpolate to the u staggered grid
         else if (uvar) then
 
-            ! One grid cell smoothing of original input data
-            if (windowsize > 0) call smooth_array(input_data%data_3d, windowsize=1, ydim=3)
+            ! NOTE: the legacy "one grid cell smoothing of the original input data"
+            ! that used to run here was removed. It smoothed the per-rank forcing
+            ! tile in place with no halo exchange, so cells near a tile boundary used
+            ! clamped (one-sided) stencils whose result depended on the domain
+            ! decomposition — breaking bit-for-bit MPI reproducibility whenever
+            ! smooth_wind_distance > 0. Wind smoothing is now done exclusively after
+            ! interpolation by the halo-aware smooth_array (smooth_array_var) in
+            ! interpolate_forcing (added in 88e04ca9 "decomposition-independent
+            ! smoothing"), which exchanges halos between passes.
             call geo_interp(temp_3d, input_data%data_3d, forcing%geo_u%geolut)
 
             call vinterp(var_data, temp_3d, forcing%geo_u%vert_lut)
@@ -3898,8 +3902,6 @@ contains
         ! Interpolate to the v staggered grid
         else if (vvar) then
 
-            ! One grid cell smoothing of original input data
-            if (windowsize > 0) call smooth_array(input_data%data_3d, windowsize=1, ydim=3)
             call geo_interp(temp_3d, input_data%data_3d, forcing%geo_v%geolut)
             
             call vinterp(var_data, temp_3d, forcing%geo_v%vert_lut)
