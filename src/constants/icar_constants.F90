@@ -523,6 +523,17 @@ module icar_constants
 !! ------------------------------------------------
     real,   parameter :: kSMALL_VALUE = 1e-6
 
+!>------------------------------------------------
+!! Relaxation timescale [s] of the lateral-boundary absorber for the
+!! prognostic RANS winds (Davies ring nudge of u/v toward the balanced
+!! forcing targets, and Rayleigh damping of w_real). Must be on the
+!! order of the gravity-wave period (~2*pi/N): the generic scalar
+!! Davies rate (relax_filter per HOUR) was orders of magnitude too weak
+!! to absorb wave energy, which then accumulates in the relaxation
+!! taper (found in the Agnesi mountain-wave validation).
+!! ------------------------------------------------
+    real,   parameter :: kRANS_LATERAL_TAU = 300.0
+
     integer, parameter :: kMAINTAIN_LON      = 0
     integer, parameter :: kPRIME_CENTERED    = 1
     integer, parameter :: kDATELINE_CENTERED = 2

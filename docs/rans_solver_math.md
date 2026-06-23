@@ -425,10 +425,22 @@ double-counting.
 ## 7. Lateral and top boundaries
 
 * **Lateral**: u, v get `force_boundaries = .True.` under `kRANS_WINDS`
-  (metadata), so `apply_forcing` runs its boundary-only Davies relaxation:
-  `var ← var + relax_filter·Δt_h·(forcing − var)` in the relaxation ring,
-  hard-set on the outermost ring — the same machinery scalars use. The
-  interior is never touched by forcing.
+  (metadata), so `apply_forcing` runs its boundary-only Davies relaxation,
+  hard-set on the outermost ring; the interior is never touched by forcing.
+  The relaxation RATE is `relax_filter·Δt/τ` with τ = `kRANS_LATERAL_TAU`
+  (300 s), NOT the scalars' per-hour rate: the ring must absorb gravity-wave
+  energy (period 2π/N ≈ 10 min), and at the per-hour rate it cannot.
+  Matching state damping for w_real: implicit lateral Rayleigh
+  `w_real ← w_real / (1 + relax_filter·Δt/τ)` applied with the blending
+  (below) in `rans_momentum_step`. Found in the Agnesi validation: the
+  increment blending slows wave propagation through the taper, so without
+  a state sink on the wave-period timescale, incident wave energy SHOALS
+  there — |w| at the inflow taper grew linearly (~0.16 m/s per hour, to
+  1 m/s in 4 h on the hm=100 case; ring-edge jets and a shear instability
+  within 1–2 h on hm=500). With the absorber both cases reach a clean
+  steady state; τ = 100 s gave results identical to 300 s (the residual
+  ~0.13 m/s taper dipole is the steady incident-flux/absorber
+  equilibrium, not absorber-limited).
   **`relax_filters = .True.` is required in practice** (the solver warns at
   init if not): with it off, the filter is a hard step (1 in the outer halo
   ring, 0 elsewhere) and the resulting shear line destabilizes the

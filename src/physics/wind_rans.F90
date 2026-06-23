@@ -40,7 +40,7 @@
 !!------------------------------------------------------------
 module wind_rans
 
-    use icar_constants,    only : STD_OUT_PE, kVARS
+    use icar_constants,    only : STD_OUT_PE, kVARS, kRANS_LATERAL_TAU
     use domain_interface,  only : domain_t
     use options_interface, only : options_t
     use adv_std,           only : adv_std_advect3d, adv_theta_ref
@@ -215,6 +215,12 @@ contains
             do k = kms, kme
                 do i = its, ite
                     wr_data(i,k,j) = wr_n(i,k,j) + (1.0 - rf(i,k,j)) * (wr_data(i,k,j) - wr_n(i,k,j))
+                    ! Lateral absorber: implicit Rayleigh damping of w_real in
+                    ! the ring (u/v get the matching state nudge in
+                    ! apply_forcing). The increment blending above only slows
+                    ! the dynamics — without state damping, wave energy
+                    ! entering the taper has no sink and accumulates there.
+                    wr_data(i,k,j) = wr_data(i,k,j) / (1.0 + rf(i,k,j) * dt / kRANS_LATERAL_TAU)
                 enddo
             enddo
         enddo

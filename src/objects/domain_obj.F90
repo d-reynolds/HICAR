@@ -3603,6 +3603,10 @@ contains
                 ! relax_filter (mass grid) indices are clamped for the
                 ! staggered u/v grids.
                 if (options%physics%windtype == kRANS_WINDS .and. is_wind) then
+                    ! Absorber rate dt/kRANS_LATERAL_TAU, NOT the scalar dt_h
+                    ! (per-hour) rate: the ring must absorb gravity-wave energy
+                    ! (period ~2*pi/N ~ 10 min), and at the per-hour rate wave
+                    ! energy accumulates in the relaxation taper instead.
                     !$acc parallel loop gang vector collapse(3) present(var_data, f_data, f_dqdt, relax_filter) private(rf_loc)
                     do j = jms,jme
                         do k = kms, kme
@@ -3613,7 +3617,7 @@ contains
                                     var_data(i,k,j) = f_data(i,k,j)
                                 else
                                     var_data(i,k,j) = var_data(i,k,j) + &
-                                        (rf_loc * dt_h) * (f_data(i,k,j) - var_data(i,k,j))
+                                        (rf_loc * dt / kRANS_LATERAL_TAU) * (f_data(i,k,j) - var_data(i,k,j))
                                 endif
                             enddo
                         enddo
