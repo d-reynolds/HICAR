@@ -244,7 +244,7 @@
 
     output_folder = '../output/'                    ! (-) Path to output folder
 
-    output_vars = 'all'                             ! List of variables to output. Call HICAR as: './HICAR --out-vars keyword' to get information
+    output_vars = 'qv','temperature','precipitation','u','v','swtd','swtb','lwtr','hfls','hfss','w' ! List of variables to output. Call HICAR as: './HICAR --out-vars keyword' to get information
                                                     ! about the available output variables matching the keyword.
 
  /
