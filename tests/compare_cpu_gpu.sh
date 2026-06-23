@@ -93,7 +93,19 @@ run_one "$GPU_EXE" gpu
 
 echo "-------------------------------------------------------"
 echo -e "Comparing GPU vs CPU (reference) within tolerance..."
+# pyyaml is needed by compare_outputs.py --tolerance-spec.
 python_exe=$(command -v python3 || command -v python)
+if [ -z "$python_exe" ] || ! "$python_exe" -c "import xarray,numpy,netCDF4,yaml" 2>/dev/null; then
+    venv="${hicar_repo}/tests/Test_Cases/venv"
+    if [ ! -x "${venv}/bin/python" ]; then
+        echo -e "Creating venv at ${venv}"
+        "${python_exe:-python3}" -m venv "$venv"
+        "${venv}/bin/pip" -q install numpy netCDF4 xarray matplotlib pyyaml
+    else
+        "${venv}/bin/pip" -q install pyyaml >/dev/null 2>&1 || true
+    fi
+    python_exe="${venv}/bin/python"
+fi
 "$python_exe" "$COMPARE" \
     "output/cmp_cpu/${OUTPUT_FILENAME}" \
     "output/cmp_gpu/${OUTPUT_FILENAME}" \

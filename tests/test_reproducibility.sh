@@ -140,12 +140,18 @@ if [ -z "$python_exe" ]; then
     exit 1
 fi
 
-if ! $python_exe -c "import xarray, numpy, netCDF4" &> /dev/null; then
+# pyyaml is needed by compare_outputs.py --tolerance-spec (the restart compare).
+if ! $python_exe -c "import xarray, numpy, netCDF4, yaml" &> /dev/null; then
     PY_ENV_PATH=${hicar_repo}/tests/Test_Cases/venv
-    echo -e "Creating virtual environment at ${BLUE}${PY_ENV_PATH}${NC}"
-    mkdir -p "$PY_ENV_PATH"
-    $python_exe -m venv "${PY_ENV_PATH}"
-    "${PY_ENV_PATH}/bin/pip" install numpy netCDF4 xarray matplotlib
+    if [ ! -x "${PY_ENV_PATH}/bin/python" ]; then
+        echo -e "Creating virtual environment at ${BLUE}${PY_ENV_PATH}${NC}"
+        mkdir -p "$PY_ENV_PATH"
+        $python_exe -m venv "${PY_ENV_PATH}"
+        "${PY_ENV_PATH}/bin/pip" install numpy netCDF4 xarray matplotlib pyyaml
+    else
+        # Reuse an existing venv that may predate the pyyaml requirement.
+        "${PY_ENV_PATH}/bin/pip" -q install pyyaml >/dev/null 2>&1 || true
+    fi
     python_exe="${PY_ENV_PATH}/bin/python"
 fi
 

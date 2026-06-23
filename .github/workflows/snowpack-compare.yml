@@ -180,6 +180,7 @@ jobs:
           path: |
             tests/figures/snowpack_compare/**
             tests/Test_Cases/input/SNOWPACK_*.err
+            tests/Test_Cases/input/SNOWPACK_*.out
           if-no-files-found: ignore
 
   # --- Sign the commit as having passed snow-model parity ---------------------

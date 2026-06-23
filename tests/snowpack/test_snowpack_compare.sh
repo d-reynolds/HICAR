@@ -307,15 +307,22 @@ run_one() {
     ( cd "$input_dir" && "$mpiexec_path" -np "$np" "$exe" "$(basename "$nml")" ) \
         > "${input_dir}/SNOWPACK_${label}.out" 2> "${input_dir}/SNOWPACK_${label}.err"
     local status=$?
+    # HICAR writes its fatal messages (incl. a bare `stop`, which exits 0) to
+    # STDOUT, not stderr -- so always surface the tail of the .out on failure.
     if [ $status -ne 0 ]; then
-        echo -e "${RED}${label} run failed (exit ${status}). Last stderr:${NC}"
+        echo -e "${RED}${label} run failed (exit ${status}). Last stdout:${NC}"
+        tail -n 25 "${input_dir}/SNOWPACK_${label}.out"
+        echo -e "${RED}Last stderr:${NC}"
         tail -n 15 "${input_dir}/SNOWPACK_${label}.err"
         RUN_OUT=""
         return 1
     fi
     RUN_OUT="$(ls -1 "${out_dir}"/*.nc 2>/dev/null | head -1)"
     if [ -z "$RUN_OUT" ]; then
-        echo -e "${RED}${label}: no output .nc produced in ${out_dir}${NC}"
+        # Exit 0 but no output -> typically a bare `stop` (exit 0) during init.
+        # The reason is in stdout; show it so CI logs are self-diagnosing.
+        echo -e "${RED}${label}: no output .nc produced in ${out_dir}. Last stdout:${NC}"
+        tail -n 25 "${input_dir}/SNOWPACK_${label}.out"
         return 1
     fi
     echo -e "${GREEN}${label} completed${NC} -> $(basename "$RUN_OUT")"
