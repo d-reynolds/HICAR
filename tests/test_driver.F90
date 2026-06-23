@@ -30,8 +30,8 @@ program test_driver
     logical :: init_flag, verbose
     logical :: no_test_run = .True.
     character(len=9) :: file
-#ifdef _OPENACC
     integer :: dev, devNum, local_rank, comm_size
+#ifdef _OPENACC
     type(MPI_Comm) :: local_comm
     integer(acc_device_kind) :: devtype
 #endif
@@ -154,8 +154,11 @@ program test_driver
     end if
 
     call MPI_Allreduce(stat, global_stat, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD)
+
     if (global_stat > 0) then
-    if (my_index == 1) write(error_unit, '(i0, 1x, a)') global_stat, "test(s) failed!"
+        call MPI_Comm_size(MPI_COMM_WORLD, comm_size)
+
+        if (my_index == 1) write(error_unit, '(i0, 1x, a)') (global_stat/comm_size), "test(s) failed!"
         call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
     end if
 

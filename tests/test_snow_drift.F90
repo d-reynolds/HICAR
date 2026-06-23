@@ -147,8 +147,12 @@ contains
             associate(q => domain%vars_3d(qsv)%data_3d)
                 qs_fm_old(:,:,:) = q(:,:,:)
             end associate
-            call adv_std_compute_wind_2d_fm(u_fm, v_fm, rho_fm, jaco_fm, jaco_u_fm, jaco_v_fm, &
-                dx, dt, U_m_fm, V_m_fm, denom_fm, 1, N)
+            call adv_std_compute_wind_2d_fm(u_fm, v_fm, rho_fm, &
+                jaco_fm, jaco_u_fm, jaco_v_fm, &
+                domain%mapfac_my_u, domain%mapfac_mx_v, domain%mapfac_mxy, &
+                dx, dt, &
+                U_m_fm, V_m_fm, denom_fm, 1, N)
+
             if (options%adv%flux_corr == kFLUXCOR_MONO) then
                 call init_fluxcorr_fm(1, N)
                 call set_sign_arrays_fm(U_m_fm, V_m_fm, 1, N)
