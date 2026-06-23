@@ -71,7 +71,7 @@ contains
                          [kVARS%water_vapor, kVARS%temperature, kVARS%potential_temperature, kVARS%surface_pressure, &
                          kVARS%dz_interface, kVARS%pressure,  kVARS%skin_temperature, &
                          kVARS%sensible_heat, kVARS%latent_heat, kVARS%u_10m, kVARS%v_10m,                  &
-                         kVARS%roughness_z0, kVARS%hpbl, kVARS%mol, kVARS%QFX,       &
+                         kVARS%roughness_z0, kVARS%hpbl, kVARS%mol, kVARS%ustar, kVARS%QFX,       &
                          kVARS%chs,               &
                          kVARS%u, kVARS%v ])
 

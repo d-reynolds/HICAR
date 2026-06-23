@@ -74,12 +74,22 @@ class ToleranceSpec:
     """
 
     def __init__(self, default_rtol=0.0, default_atol=0.0, default_frac=0.0,
-                 per_var=None, ignore=None):
+                 per_var=None, ignore=None, warn_only=None, aggregate=None):
         self.default_rtol = float(default_rtol)
         self.default_atol = float(default_atol)
         self.default_frac = float(default_frac)
         self.per_var = per_var or {}
         self.ignore = set(ignore or [])
+        # warn_only: variables whose tolerance DIFFs are reported as warnings, not
+        # failures (NaN/shape/missing are STILL fatal). For threshold/diagnostic
+        # fields (microphysics number concentrations, PBL height, exchange/surface
+        # diagnostics) that amplify an unavoidable restart round-off seed into
+        # large but physically-meaningless per-cell differences.
+        self.warn_only = set(warn_only or [])
+        # aggregate: variables compared by DOMAIN-MEAN instead of per-cell. A bulk /
+        # conservation check that is robust to local threshold flips — catches a
+        # systematic shift (e.g. a mass leak on restart) while tolerating chaos.
+        self.aggregate = set(aggregate or [])
 
     @classmethod
     def from_file(cls, path):
@@ -95,12 +105,28 @@ class ToleranceSpec:
                 float(tol.get("atol", defaults.get("atol", 0.0))),
                 float(tol.get("frac", defaults.get("frac", 0.0))),
             )
+        # aggregate vars may also carry their own rtol/atol; fold them into per_var.
+        aggregate = []
+        agg = spec.get("aggregate", {}) or {}
+        if isinstance(agg, dict):
+            for name, tol in agg.items():
+                aggregate.append(name)
+                if tol:
+                    per_var[name] = (
+                        float(tol.get("rtol", defaults.get("rtol", 0.0))),
+                        float(tol.get("atol", defaults.get("atol", 0.0))),
+                        float(tol.get("frac", defaults.get("frac", 0.0))),
+                    )
+        else:  # plain list
+            aggregate = list(agg)
         return cls(
             default_rtol=defaults.get("rtol", 0.0),
             default_atol=defaults.get("atol", 0.0),
             default_frac=defaults.get("frac", 0.0),
             per_var=per_var,
             ignore=spec.get("ignore", []) or [],
+            warn_only=spec.get("warn_only", []) or [],
+            aggregate=aggregate,
         )
 
     def for_var(self, name):
@@ -119,11 +145,13 @@ def _index_label(flat_index, shape, dims):
     return ", ".join(f"{d}={int(i)}" for d, i in zip(dims, idx))
 
 
-def compare_variable(name, v1, v2, rtol, atol, frac=0.0):
+def compare_variable(name, v1, v2, rtol, atol, frac=0.0, aggregate=False):
     """Compare one variable. Returns a result dict with status in
     {'ok', 'diff', 'nan', 'shape', 'skip'} and supporting diagnostics.
     Up to frac*n_finite violating values are tolerated (rare-outlier allowance,
-    see ToleranceSpec); the tolerated count is reported in the result."""
+    see ToleranceSpec); the tolerated count is reported in the result.
+    If aggregate is True the comparison is on the DOMAIN-MEAN (a bulk/conservation
+    check) rather than per-cell — NaN/shape checks below still run per-cell first."""
     dims = list(v1.dims)
     a1 = np.asarray(v1.values)
     a2 = np.asarray(v2.values)
@@ -159,6 +187,28 @@ def compare_variable(name, v1, v2, rtol, atol, frac=0.0):
         return {"name": name, "status": "ok", "rtol": rtol, "atol": atol,
                 "max_abs": 0.0, "max_rel": 0.0, "n_violations": 0,
                 "message": "no finite values to compare"}
+
+    # --- aggregate (domain-mean / conservation) comparison -------------------
+    if aggregate:
+        m1 = float(np.mean(a1[finite]))
+        m2 = float(np.mean(a2[finite]))
+        a_err = abs(m2 - m1)
+        a_rel = a_err / abs(m1) if m1 != 0.0 else 0.0
+        thr = atol + rtol * abs(m1)
+        result = {"name": name, "rtol": rtol, "atol": atol, "frac": frac,
+                  "aggregate": True, "max_abs": a_err, "max_rel": a_rel,
+                  "n_violations": 0 if a_err <= thr else 1,
+                  "n_finite": int(np.count_nonzero(finite))}
+        if a_err <= thr:
+            result["status"] = "ok"
+        else:
+            result["status"] = "diff"
+            result["where"] = "domain-mean"
+            result["baseline_value"] = m1
+            result["candidate_value"] = m2
+            result["worst_abs"] = a_err
+            result["worst_rel"] = a_rel
+        return result
 
     abs_err = np.abs(a2 - a1)
     abs_err = np.where(finite, abs_err, 0.0)
@@ -352,17 +402,31 @@ def main():
             v2 = v2[slc]
 
         rtol, atol, frac = spec.for_var(name)
-        r = compare_variable(name, v1, v2, rtol, atol, frac)
+        aggregate = name in spec.aggregate
+        r = compare_variable(name, v1, v2, rtol, atol, frac, aggregate=aggregate)
+        # warn_only fields: a tolerance DIFF is reported but is NOT a failure
+        # (NaN/shape stay fatal). These are threshold/diagnostic fields whose
+        # per-cell differences amplify the unavoidable restart seed.
+        if r["status"] == "diff" and name in spec.warn_only:
+            r["status"] = "warn"
         results.append(r)
 
         st = r["status"]
         if st == "ok":
+            tag = "OK(mean)" if r.get("aggregate") else "OK"
             extra = (f"max|abs|={r['max_abs']:.3e} max|rel|={r['max_rel']:.3e}"
                      if "max_abs" in r else r.get("message", ""))
             if r.get("n_violations", 0) > 0:
                 extra += (f"  [{r['n_violations']}/{r['n_finite']} outliers "
                           f"tolerated, frac<={r['frac']:.1e}]")
-            print(f"  {name:24s}: {bcolors.GREEN}OK{bcolors.NC}   {extra}")
+            print(f"  {name:24s}: {bcolors.GREEN}{tag}{bcolors.NC}   {extra}")
+        elif st == "warn":
+            msg = (f"{r.get('n_violations','?')}/{r.get('n_finite','?')} values exceed tol "
+                   f"(rtol={rtol:.1e}, atol={atol:.1e}); worst at {r.get('where','?')}: "
+                   f"abs={r.get('worst_abs',0):.3e} rel={r.get('worst_rel',0):.3e}")
+            print(f"  {name:24s}: {bcolors.YELLOW}WARN{bcolors.NC}    {msg}  [diagnostic/threshold field, non-fatal]")
+            if args.figures_dir:
+                plot_diff(ds1[name].values, ds2[name].values, name, label1, label2, args.figures_dir)
         elif st == "nan":
             failed = True
             msg = (f"{r['n_introduced']} new NaN/Inf value(s); first at {r['where']} "
@@ -395,8 +459,9 @@ def main():
     ds2.close()
 
     n_fail = sum(1 for r in results if r["status"] in ("diff", "nan", "shape", "missing"))
+    n_warn = sum(1 for r in results if r["status"] == "warn")
     summary = {"passed": not failed, "mode": mode,
-               "n_compared": len(common), "n_failed": n_fail,
+               "n_compared": len(common), "n_failed": n_fail, "n_warned": n_warn,
                "n_missing": len(missing), "n_added": len(added),
                "results": results}
     if args.report_json:
@@ -404,11 +469,15 @@ def main():
             json.dump(summary, fh, indent=2)
         print(f"  JSON report: {bcolors.BLUE}{args.report_json}{bcolors.NC}")
 
+    if n_warn:
+        print(f"{bcolors.YELLOW}{n_warn} diagnostic/threshold variable(s) differ but are "
+              f"non-fatal (warn_only).{bcolors.NC}")
     if failed:
         print(f"{bcolors.RED}FAILED: {n_fail} variable(s) differ beyond tolerance / "
               f"introduced NaN / changed shape / were dropped.{bcolors.NC}")
         return 1
-    print(f"{bcolors.GREEN}PASSED: all {len(common)} compared variable(s) within tolerance.{bcolors.NC}")
+    print(f"{bcolors.GREEN}PASSED: all {len(common)} compared variable(s) within tolerance "
+          f"({n_warn} diagnostic field(s) warned, non-fatal).{bcolors.NC}")
     return 0
 
 

@@ -3467,13 +3467,13 @@ contains
             forcing_dt_seconds = this%input_dt%seconds()
             this%forcing_elapsed = forcing_dt_seconds - dt_seconds
         endif
+        forcing_elapsed_local = this%forcing_elapsed
 
         if (dt_seconds <= 10.0) then
             write(*,*) "WARNING: In domain_obj::update_delta_fields, dt_seconds <= 10.0"
         endif
         
         ! Now iterate through the dictionary as long as there are more elements present
-        forcing_elapsed_local = this%forcing_elapsed
         do n = 1,size(this%forcing_hi)
             associate(forcing_hi => this%forcing_hi(n))
             !Update delta fields on the high-resolution forcing varaibles...
