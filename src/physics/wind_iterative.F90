@@ -567,7 +567,6 @@ contains
         real(c_double) :: ts, tt, rs, rt, ss
         real(c_double) :: rnorm_global, rnorm_squared, target_norm
         real(c_double) :: rho0_pack(2), b_norm2
-        type(MPI_Request) :: req_sigma, req_red5
         real(c_double) :: t0_solve, t0_region
 
         status_out    = 1
@@ -673,10 +672,8 @@ contains
             !$acc update host(sigma_dev)
             sigma_global = sigma_dev(1)
 #else
-            call MPI_Iallreduce(sigma_local, sigma_global, 1, MPI_DOUBLE_PRECISION, &
-                                MPI_SUM, solver_comm, req_sigma, ierr)
-            ! No useful overlap candidate — wait
-            call MPI_Wait(req_sigma, MPI_STATUS_IGNORE, ierr)
+            call MPI_Allreduce(sigma_local, sigma_global, 1, MPI_DOUBLE_PRECISION, &
+                               MPI_SUM, solver_comm, ierr)
 #endif
             t_allreduce_acc = t_allreduce_acc + (MPI_Wtime() - t0_region)
 
@@ -726,10 +723,8 @@ contains
             !$acc update host(red5_dev)
             red5_global(1:5) = red5_dev(1:5)
 #else
-            call MPI_Iallreduce(red5_local, red5_global, 5, MPI_DOUBLE_PRECISION, &
-                                MPI_SUM, solver_comm, req_red5, ierr)
-            ! No useful overlap candidate — wait
-            call MPI_Wait(req_red5, MPI_STATUS_IGNORE, ierr)
+            call MPI_Allreduce(red5_local, red5_global, 5, MPI_DOUBLE_PRECISION, &
+                               MPI_SUM, solver_comm, ierr)
 #endif
             t_allreduce_acc = t_allreduce_acc + (MPI_Wtime() - t0_region)
 

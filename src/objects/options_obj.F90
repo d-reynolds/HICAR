@@ -366,14 +366,19 @@ contains
             if (STD_OUT_PE) write(*,*) "  Start time must be before end time"
             stop
         endif
-        if (this%restart%restart_time >= this%general%end_time) then
-            if (STD_OUT_PE) write(*,*) "  Restart time must be before end time"
-            stop
-        endif
-
-
-        ! check if restart_time is between start and end time
+        ! Restart-time bounds checks apply ONLY when a restart is actually requested.
+        ! When restart is off, restart_namelist() returns early WITHOUT initialising
+        ! restart_time (see "if (.not. options%restart%restart) return"), so reading
+        ! it here would be an uninitialised access — its garbage value is platform-
+        ! dependent and spuriously tripped "Restart time must be before end time" on
+        ! some builds (e.g. the snowpack-compare run, which sets no restart_date).
         if (this%restart%restart) then
+            if (this%restart%restart_time >= this%general%end_time) then
+                if (STD_OUT_PE) write(*,*) "  Restart time must be before end time"
+                stop
+            endif
+
+            ! check if restart_time is between start and end time
             if (this%restart%restart_time < this%general%start_time) then
                 if (STD_OUT_PE) write(*,*) "  Restart time is before start time for nest ", this%nest_indx
                 if (STD_OUT_PE) write(*,*) "  Setting restart to .False."

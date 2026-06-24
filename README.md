@@ -24,9 +24,8 @@ While being fast to run compared to traditional weather models, HICAR has still 
 
 - Parallel NetCDF4
 - FFTW
-- PETSc
 
-HICAR currently supports either the GNU Fortran or Cray compilers. The Cray compiler offers a better adoption of the Coarray-Fortran standard and faster optimization options, and is thus significantly faster than the GNU compiler. However, debugging is sometimes easier with the GNU compiler.
+HICAR currently supports either the GNU Fortran or NVFortran compilers.
 
 #### Static data requirements
 

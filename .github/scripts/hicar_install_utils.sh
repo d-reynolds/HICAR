@@ -54,7 +54,7 @@ fi
 set -e
 set -x
 
-export JN=-j8
+export JN="-j${MAKE_JOBS:-8}"
 
 if [ -z "$WORKDIR" ]; then
     export WORKDIR=$HOME/workdir

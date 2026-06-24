@@ -96,10 +96,20 @@ Using the same `hicar_install` entrypoint (with the same `HICAR_MODE` /
 `HICAR_CMAKE_EXTRA`) is what makes the local run faithful to CI — only the
 compiler/OS differ.
 
-Tools like `act` (nektos/act) can execute the workflow YAML itself in local
-Docker containers, but they are a poor fit for these suites: the jobs rebuild
-the full dependency stack inside an emulated ubuntu container (hours on macOS),
-and caches, artifacts, commit statuses, and Environment approval gates are not
-faithfully simulated. Reserve `act`/`actionlint` for checking workflow *wiring*;
-run the test scripts directly for everything else. To exercise real CI on a
-branch before opening a PR: `gh workflow run <workflow>.yml --ref <branch>`.
+### Reproducing the GH runner (Docker)
+
+To run
+in the runner's environment, use the **CI-repro image** — a faithful clone of the
+hosted CPU runner (`.github/docker/Dockerfile.ci-repro`):
+
+```bash
+# From the repo root. The image BUILD *is* the CI compile — if HICAR fails to
+# build on CI, it fails here too, in the same toolchain. Default = cpu-debug:
+docker build -f .github/docker/Dockerfile.ci-repro -t hicar-ci-repro .
+
+# Reproduce another lane's build via build args:
+docker build -f .github/docker/Dockerfile.ci-repro -t hicar-ci-repro-rel \
+  --build-arg HICAR_MODE=release .
+docker build -f .github/docker/Dockerfile.ci-repro -t hicar-ci-repro-cpp \
+  --build-arg HICAR_CMAKE_EXTRA=-DSNOWPACK_CPP=ON .
+```
