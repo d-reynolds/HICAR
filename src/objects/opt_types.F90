@@ -324,7 +324,6 @@ module options_types
 
         logical :: debug                ! outputs a little more information at runtime (not much at present)
         logical :: interactive          ! set to true if running at the commandline to see %complete printed
-        logical :: ideal                ! this is an ideal simulation, forcing will be held constant
 
         ! date/time parameters
         type(Time_type) :: start_time   ! Date to start running the model

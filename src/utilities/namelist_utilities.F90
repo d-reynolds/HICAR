@@ -3305,6 +3305,16 @@ contains
                 values = [1, 2]
                 default = "1"
                 group = "LSM_Parameters"
+            case ("nmp_opt_infdv")
+                description = "Noah-MP Dynamic VIC infiltration option"//achar(10)//BLNK_CHR_N// &
+                                                     "(only active when nmp_opt_runsrf = 6)"//achar(10)//BLNK_CHR_N// &
+                                                     "1 = Philip"//achar(10)//BLNK_CHR_N// &
+                                                     "2 = Green-Ampt"//achar(10)//BLNK_CHR_N// &
+                                                     "3 = Smith-Parlange"
+                allocate(values(3))
+                values = [1, 2, 3]
+                default = "1"
+                group = "LSM_Parameters"
             case ("nmp_opt_rad")
                 description = "Noah-MP Radiative Transfer option"//achar(10)//BLNK_CHR_N// &
                                                      "1 = Modified two-stream (known to cause problems when vegetation fraction is small)"//achar(10)//BLNK_CHR_N// &

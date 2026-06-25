@@ -1996,7 +1996,7 @@ contains
         integer :: num_soil_layers(kMAX_NESTS)
         real    :: nmp_soiltstep(kMAX_NESTS)
         integer, dimension(kMAX_NESTS) :: nmp_dveg, nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_frz, nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_wet, nmp_opt_snf, nmp_opt_tbot, nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo, nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, noahmp_output
-        integer, dimension(kMAX_NESTS) :: nmp_opt_runsrf, nmp_opt_runsub, nmp_opt_tksno, nmp_opt_scf, nmp_opt_compact
+        integer, dimension(kMAX_NESTS) :: nmp_opt_runsrf, nmp_opt_runsub, nmp_opt_tksno, nmp_opt_scf, nmp_opt_compact, nmp_opt_infdv
         integer :: lake_category(kMAX_NESTS)                    ! index that defines the lake category in (some) LU_Categories
 
         ! define the namelist
@@ -2004,7 +2004,7 @@ contains
                                   urban_category, ice_category, water_category, lake_category, snow_den_const,&
                                   monthly_vegfrac, max_swe,  nmp_dveg,   &
                                   nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_frz, nmp_opt_wet, &
-                                  nmp_opt_runsrf, nmp_opt_runsub, nmp_opt_tksno, nmp_opt_scf, nmp_opt_compact, &
+                                  nmp_opt_runsrf, nmp_opt_runsub, nmp_opt_tksno, nmp_opt_scf, nmp_opt_compact, nmp_opt_infdv, &
                                   nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_snf, nmp_opt_tbot,           &
                                   nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo,          &
                                   nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, nmp_soiltstep,       &
@@ -2035,6 +2035,7 @@ contains
         call set_nml_var_default(nmp_opt_btr, 'nmp_opt_btr', print_info, gennml)
         call set_nml_var_default(nmp_opt_runsrf, 'nmp_opt_runsrf', print_info, gennml)
         call set_nml_var_default(nmp_opt_runsub, 'nmp_opt_runsub', print_info, gennml)
+        call set_nml_var_default(nmp_opt_infdv, 'nmp_opt_infdv', print_info, gennml)
         call set_nml_var_default(nmp_opt_tksno, 'nmp_opt_tksno', print_info, gennml)
         call set_nml_var_default(nmp_opt_scf, 'nmp_opt_scf', print_info, gennml)
         call set_nml_var_default(nmp_opt_compact, 'nmp_opt_compact', print_info, gennml)
@@ -2109,6 +2110,7 @@ contains
         call set_nml_var(lsm_options%nmp_opt_btr, nmp_opt_btr(n_indx), 'nmp_opt_btr', nmp_opt_btr(1))
         call set_nml_var(lsm_options%nmp_opt_runsrf, nmp_opt_runsrf(n_indx), 'nmp_opt_runsrf', nmp_opt_runsrf(1))
         call set_nml_var(lsm_options%nmp_opt_runsub, nmp_opt_runsub(n_indx), 'nmp_opt_runsub', nmp_opt_runsub(1))
+        call set_nml_var(lsm_options%nmp_opt_infdv, nmp_opt_infdv(n_indx), 'nmp_opt_infdv', nmp_opt_infdv(1))
         call set_nml_var(lsm_options%nmp_opt_tksno, nmp_opt_tksno(n_indx), 'nmp_opt_tksno', nmp_opt_tksno(1))
         call set_nml_var(lsm_options%nmp_opt_scf, nmp_opt_scf(n_indx), 'nmp_opt_scf', nmp_opt_scf(1))
         call set_nml_var(lsm_options%nmp_opt_compact, nmp_opt_compact(n_indx), 'nmp_opt_compact', nmp_opt_compact(1))
@@ -2147,9 +2149,9 @@ contains
 
         integer :: sm_nsnow_max(kMAX_NESTS)      ! maximum number of snow layers in the FSM2trans snow model
         integer, dimension(kMAX_NESTS) :: fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
-                   fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_sntran, fsm_zoffst
+                   fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_sntran, fsm_zoffst, fsm_oshdtn, fsm_alradt
         real, dimension(kMAX_NESTS)    :: fsm_ds_min, fsm_ds_surflay, lowest_susp_level
-        logical, dimension(kMAX_NESTS) :: fsm_hn_on, fsm_for_hn
+        logical, dimension(kMAX_NESTS) :: fsm_hn_on, fsm_for_hn, fsm_z0pert, fsm_wcpert, fsm_fspert, fsm_alpert, fsm_slpert
 
         integer, dimension(kMAX_NESTS) :: snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt
         logical, dimension(kMAX_NESTS) :: snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable
@@ -2167,6 +2169,7 @@ contains
         namelist /sm_parameters/ sm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
                                  fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_sntran, fsm_zoffst, &
                                  fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn, &
+                                 fsm_oshdtn, fsm_alradt, fsm_z0pert, fsm_wcpert, fsm_fspert, fsm_alpert, fsm_slpert, &
                                  snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt, &
                                  snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable, &
                                  snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_reduce_n_elements, snowpack_variant, snowpack_enable_vapour_transport, &
@@ -2199,6 +2202,13 @@ contains
         
         call set_nml_var_default(fsm_hn_on, 'fsm_hn_on', print_info, gennml)
         call set_nml_var_default(fsm_for_hn, 'fsm_for_hn', print_info, gennml)
+        call set_nml_var_default(fsm_oshdtn, 'fsm_oshdtn', print_info, gennml)
+        call set_nml_var_default(fsm_alradt, 'fsm_alradt', print_info, gennml)
+        call set_nml_var_default(fsm_z0pert, 'fsm_z0pert', print_info, gennml)
+        call set_nml_var_default(fsm_wcpert, 'fsm_wcpert', print_info, gennml)
+        call set_nml_var_default(fsm_fspert, 'fsm_fspert', print_info, gennml)
+        call set_nml_var_default(fsm_alpert, 'fsm_alpert', print_info, gennml)
+        call set_nml_var_default(fsm_slpert, 'fsm_slpert', print_info, gennml)
         call set_nml_var_default(snicar_bandnumber_opt, 'snicar_bandnumber_opt', print_info, gennml)
         call set_nml_var_default(snicar_snowoptics_opt, 'snicar_snowoptics_opt', print_info, gennml)
         call set_nml_var_default(snicar_solarspec_opt, 'snicar_solarspec_opt', print_info, gennml)
@@ -2243,6 +2253,11 @@ contains
             ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
             fsm_hn_on(n_indx) = fsm_hn_on(1)
             fsm_for_hn(n_indx) = fsm_for_hn(1)
+            fsm_z0pert(n_indx) = fsm_z0pert(1)
+            fsm_wcpert(n_indx) = fsm_wcpert(1)
+            fsm_fspert(n_indx) = fsm_fspert(1)
+            fsm_alpert(n_indx) = fsm_alpert(1)
+            fsm_slpert(n_indx) = fsm_slpert(1)
 
             snicar_use_aerosol(n_indx) = snicar_use_aerosol(1)
             snicar_snowbc_intmix(n_indx) = snicar_snowbc_intmix(1)
@@ -2282,6 +2297,14 @@ contains
 
         call set_nml_var(sm_options%fsm_hn_on, fsm_hn_on(n_indx), 'fsm_hn_on')
         call set_nml_var(sm_options%fsm_for_hn, fsm_for_hn(n_indx), 'fsm_for_hn')
+
+        call set_nml_var(sm_options%fsm_oshdtn, fsm_oshdtn(n_indx), 'fsm_oshdtn', fsm_oshdtn(1))
+        call set_nml_var(sm_options%fsm_alradt, fsm_alradt(n_indx), 'fsm_alradt', fsm_alradt(1))
+        call set_nml_var(sm_options%fsm_z0pert, fsm_z0pert(n_indx), 'fsm_z0pert')
+        call set_nml_var(sm_options%fsm_wcpert, fsm_wcpert(n_indx), 'fsm_wcpert')
+        call set_nml_var(sm_options%fsm_fspert, fsm_fspert(n_indx), 'fsm_fspert')
+        call set_nml_var(sm_options%fsm_alpert, fsm_alpert(n_indx), 'fsm_alpert')
+        call set_nml_var(sm_options%fsm_slpert, fsm_slpert(n_indx), 'fsm_slpert')
 
         call set_nml_var(sm_options%snicar_bandnumber_opt, snicar_bandnumber_opt(n_indx), 'snicar_bandnumber_opt', snicar_bandnumber_opt(1))
         call set_nml_var(sm_options%snicar_snowoptics_opt, snicar_snowoptics_opt(n_indx), 'snicar_snowoptics_opt', snicar_snowoptics_opt(1))
@@ -3252,7 +3275,6 @@ contains
 
         ! --- general group (behavior-affecting fields only) ---
         call append_kv_str    (config_str, pos, 'general', 'calendar',         trim(this%general%calendar))
-        call append_kv_logical(config_str, pos, 'general', 'ideal',            this%general%ideal)
         call append_kv_int    (config_str, pos, 'general', 'nests',            this%general%nests)
         call append_kv_int    (config_str, pos, 'general', 'parent_nest',      this%general%parent_nest)
         call append_kv_logical(config_str, pos, 'general', 'use_mp_options',   this%general%use_mp_options)
