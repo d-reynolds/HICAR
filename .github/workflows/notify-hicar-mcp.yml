@@ -1,0 +1,33 @@
+name: notify-hicar-mcp
+
+# On a HICAR release, tell the hicar-mcp repo to regenerate its bundled
+# knowledge artifacts (namelist schema, scheme registry, variable catalog,
+# docs and the semantic index) from this release's source.
+#
+# Requires a repository secret HICAR_MCP_DISPATCH_TOKEN: a fine-grained PAT (or
+# GitHub App token) with "Contents: read/write" + "Actions" on
+# HICAR-Model/hicar-mcp so it can trigger that repo's workflows.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "HICAR ref to send (defaults to the release tag)"
+        required: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch regeneration to hicar-mcp
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.HICAR_MCP_DISPATCH_TOKEN }}
+          repository: HICAR-Model/hicar-mcp
+          event-type: hicar-release
+          client-payload: |
+            {
+              "ref": "${{ github.event.release.tag_name || github.event.inputs.ref || github.ref_name }}"
+            }

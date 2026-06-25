@@ -73,6 +73,7 @@ jobs:
           name: cpu-debug-diagnostics
           path: |
             tests/Test_Cases/input/*.err
+            tests/Test_Cases/input/*.out
             tests/figures/**
           if-no-files-found: ignore
 
@@ -105,6 +106,15 @@ jobs:
           cd tests/Test_Cases
           bash test_case_runner.sh "$GITHUB_WORKSPACE" \
             "Standard,Standard_restart,Nested,Nested_restart"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-diagnostics
+          path: |
+            tests/Test_Cases/input/*.err
+            tests/Test_Cases/input/*.out
+          if-no-files-found: ignore
+
       # Regression reference = most recent ancestor with hicar-regression-blessed=success.
       - name: Resolve blessed regression commit
         id: blessed
