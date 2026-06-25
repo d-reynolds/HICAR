@@ -1,26 +1,21 @@
 # Nightly valgrind memcheck of the HICAR unit-test suite (CPU debug build).
 #
-# WHY THIS EXISTS: the normal test run plus the debug build's -finit-* flags do
-# NOT catch every uninitialised-memory bug. gfortran's -finit-real/-integer/
-# -logical only poison LOCAL/stack variables — they do NOT initialise heap /
-# allocatable memory. An uninitialised `logical` component of an *allocatable*
-# options object therefore passed every local test (reading garbage-false) yet
-# failed deterministically on the CI amd64 runner (reading garbage-true). Only
-# valgrind --track-origins reliably detects that class in Fortran (gfortran has
-# no MemorySanitizer), which is why this lane is worth keeping.
+# WHY: the debug build's -finit-* flags only poison LOCAL/stack variables, not
+# heap/allocatable memory. An uninitialised `logical` in an *allocatable* options
+# object passed every local test (garbage-false) yet failed on the CI amd64 runner
+# (garbage-true). gfortran has no MemorySanitizer, so valgrind --track-origins is
+# the only reliable detector for that class — worth keeping.
 #
-# SCOPE / COST: CPU debug build, HICAR-tester only. Integration cases are far
-# too slow under valgrind, and the GPU/OpenACC build can't run under valgrind at
-# all. Runs nightly, on manual dispatch, and automatically after the CPU
-# full-test passes on a commit that has an open PR to main. That last lane posts
-# the `valgrind` commit status that main's ruleset REQUIRES before a PR can merge
-# (sign-valgrind below). valgrind is ~10-50x slower than native, so it sits
-# behind the full-test gate rather than running on every push.
+# SCOPE: CPU debug, HICAR-tester only (integration cases are too slow under
+# valgrind; the GPU build can't run under it at all). ~10-50x slower than native,
+# so it sits behind the full-test gate. Runs nightly, on manual dispatch, and after
+# a full-test pass on a commit with an open PR to main (posts the required
+# `valgrind` status).
 name: Valgrind memcheck (nightly)
 
 on:
-  # Auto-run after the CPU full-test completes; the `changed` gate below filters
-  # to a successful full-test on a commit that has an open PR to main.
+  # Auto-run after the CPU full-test; the `changed` gate filters to a pass on a
+  # commit with an open PR to main.
   workflow_run:
     workflows: ["HICAR full-test (CPU)"]
     types: [completed]
@@ -30,21 +25,20 @@ on:
 
 permissions:
   contents: read
-  actions: read         # query previous runs of this workflow (the "changed" gate)
+  actions: read         # the `changed` gate queries previous runs
   pull-requests: read   # detect an open PR to main (workflow_run lane)
 
 concurrency:
-  # Per-commit for the workflow_run lane (don't let a newer develop push cancel an
+  # Per-commit for the workflow_run lane (a newer develop push must not cancel an
   # in-flight valgrind for a different commit); per-ref otherwise.
   group: valgrind-${{ github.event.workflow_run.head_sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # --- Skip the nightly when main hasn't moved since the last run -------------
-  # The schedule fires daily even if nothing merged. Compare the commit under
-  # test against the head SHA of the most recent completed run of this workflow
-  # on main; identical => main was already checked at that SHA, so skip. Manual
-  # dispatch always runs.
+  # Decide whether to run, and on which SHA:
+  #   workflow_run -> only a PASSED full-test on a branch with an open PR to main
+  #   schedule     -> skip if a completed run already covers this commit
+  #   manual       -> always
   changed:
     runs-on: ubuntu-22.04
     outputs:
@@ -56,18 +50,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           event="${{ github.event_name }}"
-
-          # SHA the memcheck job should check out: the commit the full-test ran on
-          # for the workflow_run lane, otherwise this run's branch HEAD.
+          # SHA to check out: the full-test commit for workflow_run, else branch HEAD.
           echo "head_sha=${{ github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
 
-          # --- workflow_run lane: only a PASSED full-test on an open main PR ---
           if [ "$event" = "workflow_run" ]; then
             concl="${{ github.event.workflow_run.conclusion }}"
             head_branch="${{ github.event.workflow_run.head_branch }}"
             echo "full-test conclusion=$concl head=$head_branch"
             if [ "$concl" != "success" ]; then
-              echo "full-test did not pass — skipping valgrind."
+              echo "full-test did not pass — skipping."
               echo "should_run=false" >> "$GITHUB_OUTPUT"; exit 0
             fi
             n=$(gh pr list --repo "${{ github.repository }}" \
@@ -116,22 +107,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # workflow_run defaults to main's HEAD; check out the commit the
-          # full-test actually ran on (a no-op for schedule/manual runs).
+          # workflow_run defaults to main's HEAD; use the full-test commit instead
+          # (a no-op for schedule/manual).
           ref: ${{ needs.changed.outputs.head_sha }}
-
-      # Same cache key as hicar-full-test's build-deps, so this restores the
-      # already-built ~/installdir toolchain instead of rebuilding netcdf/hdf5.
-      - uses: actions/cache@v4
-        with:
-          path: ~/installdir
-          key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
-          restore-keys: hicar-deps-${{ runner.os }}-
-
-      - run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies
+      - uses: ./.github/actions/hicar-deps
       - run: bash .github/scripts/hicar_install_utils.sh hicar_install
       - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
-
       - name: Install valgrind
         run: sudo apt-get update && sudo apt-get install -y valgrind
 
@@ -139,15 +120,11 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="$HOME/installdir/lib:$LD_LIBRARY_PATH"
           cd build
-          # Disable the runner's default -e/-o pipefail so we can capture the
-          # tester's own exit code and post-process the valgrind log ourselves.
+          # Capture the tester's exit code and post-process the log ourselves.
           set +e -o pipefail
-          # -q prints only error blocks. We deliberately do NOT use
-          # --error-exitcode: mpich is not valgrind-clean, so its internal
-          # errors would flap the gate. Instead we gate on whether any error
-          # block cites a HICAR Fortran source (.F90) — the real signal, and
-          # robust to mpich/libc/ld noise. --track-origins reports where an
-          # uninitialised value was created (the bit that found the restart bug).
+          # No --error-exitcode: mpich isn't valgrind-clean, so we gate on whether
+          # any error block cites a HICAR .F90 (the real signal, robust to mpich/
+          # libc/ld noise). --track-origins reports where the value was created.
           mpiexec -np 4 valgrind -q \
               --track-origins=yes \
               --leak-check=no --errors-for-leak-kinds=none \
@@ -159,7 +136,7 @@ jobs:
           fail=0
           echo "----- scanning valgrind output for errors in HICAR Fortran sources -----"
           if grep -qE "[A-Za-z0-9_]+\.F90:[0-9]+" valgrind.log; then
-            echo "::error::valgrind reported memory errors citing HICAR Fortran sources (see below / artifact)"
+            echo "::error::valgrind reported memory errors citing HICAR Fortran sources (see artifact)"
             grep -nE "depends on uninitialised|Use of uninitialised|Invalid (read|write)|Conditional jump|[A-Za-z0-9_]+\.F90:[0-9]+|was created by" valgrind.log || true
             fail=1
           else
@@ -179,30 +156,23 @@ jobs:
           path: build/valgrind.log
           if-no-files-found: ignore
 
-  # --- Sign the commit with the required `valgrind` status --------------------
-  # Posts the `valgrind` commit status that main's ruleset requires before a PR
-  # can merge. Posts success/failure on the SHA that was actually checked out
-  # (changed.outputs.head_sha = the full-test commit for the workflow_run lane, or
-  # the dispatched branch HEAD = PR head). Only runs when the gate decided to run
-  # memcheck (should_run), so a skipped nightly / no-open-PR run posts nothing.
-  # always() so a memcheck FAILURE posts a red `valgrind=failure` (clear PR block)
-  # instead of leaving the required check perpetually "Expected".
+  # Post the required `valgrind` status on the checked-out SHA. always() so a
+  # FAILURE posts a red status (clear PR block) rather than leaving it "Expected";
+  # gated on should_run so a skipped nightly / no-open-PR run posts nothing.
   sign-valgrind:
     needs: [changed, memcheck]
     if: always() && needs.changed.outputs.should_run == 'true'
     runs-on: ubuntu-22.04
     permissions:
       statuses: write
+    env:
+      STATE: ${{ needs.memcheck.result == 'success' && 'success' || 'failure' }}
     steps:
-      - name: Sign commit (valgrind status)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SIGN_SHA: ${{ needs.changed.outputs.head_sha }}
-          STATE: ${{ needs.memcheck.result == 'success' && 'success' || 'failure' }}
-        run: |
-          gh api -X POST "/repos/${{ github.repository }}/statuses/${SIGN_SHA}" \
-            -f state="$STATE" \
-            -f context=valgrind \
-            -f description="valgrind memcheck: ${STATE}" \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "Signed ${SIGN_SHA} as valgrind=${STATE}"
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/sign-commit
+        with:
+          sha: ${{ needs.changed.outputs.head_sha }}
+          context: valgrind
+          state: ${{ env.STATE }}
+          description: valgrind memcheck (${{ env.STATE }})
+          token: ${{ github.token }}

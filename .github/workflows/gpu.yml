@@ -1,24 +1,16 @@
 # GPU test suite (NVFortran, self-hosted).
 #
-# SECURITY POSTURE: the self-hosted runner NEVER runs untrusted PR code. Triggers
-# are only the nightly schedule (which GitHub runs on the default branch, main)
-# and manual dispatch — no push and no pull_request trigger (so a fork PR can
-# never execute on the GPU box). develop is GPU-tested by the nightly after it
-# merges to main, not on the open develop -> main PR.
+# SECURITY: the self-hosted GPU runner never runs untrusted PR code — triggers are
+# only the nightly schedule (run on main) and manual dispatch, no push/pull_request.
+# develop is GPU-tested by the nightly after it merges to main.
 #
 # FLOW:
-#   0. changed       — nightly only: skip the whole run if main has not advanced
-#                      since the last GPU workflow run (manual dispatch always
-#                      runs). Avoids re-testing an unchanged main every night.
-#   1. check-signed  — is this commit marked hicar-full-test=success (CPU gate)?
-#   2. full-test     — if NOT signed, run the CPU full-test suite (reusable
-#                      workflow). If it fails, the GPU job does not run.
-#   3. gpu-tests     — build a CPU-reference exe (NVHPC, OPENACC=OFF) and a GPU
-#                      exe (NVHPC, OPENACC=ON) from this commit, run both on the
-#                      Standard case, and compare GPU-vs-CPU by tolerance. Same
-#                      compiler for both isolates the GPU port. Then validation.
-#   4. sign-gpu      — on gpu-tests success, post the gpu-check=success commit
-#                      status that main's ruleset requires before a PR can merge.
+#   0. changed       — nightly only: skip if a completed run already covers this commit.
+#   1. check-signed  — is this commit hicar-full-test=success (the CPU gate)?
+#   2. full-test     — if not signed, run the CPU full-test (reusable workflow).
+#   3. gpu-tests     — build CPU-ref (OPENACC=OFF) + GPU (OPENACC=ON) exes with the
+#                      same NVHPC compiler, run both on Standard, compare by tolerance.
+#   4. sign-gpu      — on success, post gpu-check=success (required by main's ruleset).
 name: GPU test suite (NVFortran)
 
 on:
@@ -28,19 +20,16 @@ on:
 
 permissions:
   contents: read
-  actions: read     # query previous runs of this workflow (the "changed" gate)
-  statuses: write   # read to check the gate; write so a reused full-test can sign
+  actions: read     # the `changed` gate queries previous runs
+  statuses: write   # read the CPU gate; a reused full-test signs
 
 concurrency:
   group: gpu-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # --- 0. Skip the nightly when main hasn't moved since the last GPU run -------
-  # The nightly schedule fires every day even if nothing merged. Compare the
-  # commit under test against the head SHA of the most recent *completed* run of
-  # this same workflow on main; if they're identical, main was already
-  # GPU-tested at that SHA, so we skip. Manual dispatch always runs.
+  # 0. On a nightly, skip if a completed run already covers this commit (pass OR
+  #    fail). Manual dispatch always runs.
   changed:
     runs-on: ubuntu-22.04
     outputs:
@@ -76,7 +65,7 @@ jobs:
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           fi
 
-  # --- 1. Has this commit passed the CPU full-test gate? ----------------------
+  # 1. Has this commit passed the CPU full-test gate?
   check-signed:
     needs: changed
     if: needs.changed.outputs.should_run == 'true'
@@ -97,7 +86,7 @@ jobs:
             echo "signed=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # --- 2. Run the CPU full-test only if the commit isn't already signed -------
+  # 2. Run the CPU full-test only if this commit isn't already signed.
   full-test:
     needs: check-signed
     if: needs.check-signed.outputs.signed != 'true'
@@ -105,12 +94,16 @@ jobs:
       contents: write
       statuses: write
     uses: ./.github/workflows/hicar-full-test.yml
+    # force: an unsigned commit (possibly a prior full-test failure) must re-run.
+    # Without it, full-test's own gate would skip — in a reused workflow
+    # github.event_name is this caller's 'schedule'.
+    with:
+      force: true
 
-  # --- 3. GPU build + GPU-vs-CPU regression + validation ----------------------
+  # 3. GPU build + GPU-vs-CPU regression + validation.
   gpu-tests:
     needs: [check-signed, full-test]
-    # Run when the commit was already signed, OR the full-test we just ran passed.
-    # (When signed, the full-test job is skipped, so guard with always()+result.)
+    # Run when already signed (full-test skipped) OR the full-test we ran passed.
     if: >
       always() &&
       needs.check-signed.result == 'success' &&
@@ -123,22 +116,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-
       - name: Show GPU / toolchain
         run: |
           nvidia-smi -L
           nvfortran --version | head -n2
-
-      # CPU reference: NVHPC, host (OPENACC=OFF). Build ONLY the HICAR target
-      # (not HICAR-tester) to avoid an unnecessary device link.
+      # CPU reference: NVHPC, OPENACC=OFF. Only the HICAR target (skip the device link).
       - name: Build CPU reference exe (NVHPC, OPENACC=OFF)
         run: |
           rm -rf build_cpu
           cmake -S . -B build_cpu -DMODE=release -DOPENACC=OFF
           cmake --build build_cpu --target HICAR -j"$(nproc)"
           cmake --install build_cpu
-
-      # GPU build: NVHPC, OpenACC. Build the HICAR target + fetch test data.
       - name: Build GPU exe (NVHPC, OPENACC=ON) + test data
         run: |
           rm -rf build_gpu
@@ -146,18 +134,14 @@ jobs:
           cmake --build build_gpu --target HICAR -j"$(nproc)"
           cmake --install build_gpu
           cmake --build build_gpu --target download_test_data
-
       - name: GPU-vs-CPU regression (tolerance)
         continue-on-error: true   # flip to false once the comparison is stable
         run: |
           bash tests/compare_cpu_gpu.sh "$GITHUB_WORKSPACE" \
             "$GITHUB_WORKSPACE/bin/HICAR" "$GITHUB_WORKSPACE/bin/HICAR_gpu"
-
       - name: Validation (stub)
         run: |
-          echo "TODO: GPU validation — idealized analytic case and/or conservation"
-          echo "diagnostics on the regression run. Stubbed for this iteration."
-
+          echo "TODO: GPU validation — idealized analytic case and/or conservation diagnostics."
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -167,14 +151,9 @@ jobs:
             tests/figures/**
           if-no-files-found: ignore
 
-  # --- 4. Sign the commit as having passed the GPU check ----------------------
-  # Posts the `gpu-check` commit status that main's ruleset requires before a PR
-  # can merge. Per the chosen policy, the GPU-vs-CPU comparison stays advisory
-  # (continue-on-error above), so this signs on a successful NVHPC BUILD + RUN of
-  # both exes. To gate a PR, manually dispatch this workflow on the PR head branch
-  # (develop): github.sha is then the PR head commit, so the status lands where
-  # main's ruleset evaluates it. Runs on a GitHub-hosted runner (not the GPU box),
-  # which just calls the status API.
+  # 4. Post gpu-check=success (required by main's ruleset). No pull_request trigger,
+  #    so the SHA resolves to github.sha — the dispatched branch HEAD (= PR head).
+  #    Runs on a GitHub-hosted runner, not the GPU box.
   sign-gpu:
     needs: gpu-tests
     if: needs.gpu-tests.result == 'success'
@@ -182,16 +161,10 @@ jobs:
     permissions:
       statuses: write
     steps:
-      - name: Sign commit (gpu-check = success)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # No pull_request trigger on this workflow, so this resolves to
-          # github.sha — the branch HEAD the run was dispatched on (= PR head).
-          SIGN_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          gh api -X POST "/repos/${{ github.repository }}/statuses/${SIGN_SHA}" \
-            -f state=success \
-            -f context=gpu-check \
-            -f description="Passed GPU test suite (NVHPC build + GPU-vs-CPU run)" \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "Signed ${SIGN_SHA} as gpu-check=success"
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/sign-commit
+        with:
+          sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          context: gpu-check
+          description: Passed GPU test suite (NVHPC build + GPU-vs-CPU run)
+          token: ${{ github.token }}

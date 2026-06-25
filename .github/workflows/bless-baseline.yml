@@ -1,12 +1,9 @@
 # Maintainer-only: bless a commit as the regression reference.
 #
 # The regression reference is the most recent commit carrying a
-# `hicar-regression-blessed=success` commit status (the regression test recompiles
-# that commit to regenerate the reference output — see tests/test_regression.sh).
-# Blessing is therefore just posting that status — no file, no PR, no build, no LFS.
-# Same machinery as the `hicar-full-test` sign in hicar-full-test.yml.
-#
-# Bless a commit that has passed hicar-full-test (the job warns if it hasn't).
+# hicar-regression-blessed=success status (test_regression.sh recompiles it to
+# regenerate the reference output). Blessing is just posting that status — no
+# file, no build. Bless a commit that has passed hicar-full-test (warns if not).
 name: Bless regression commit
 
 on:
@@ -30,10 +27,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Bless commit (hicar-regression-blessed = success)
+        with: { fetch-depth: 0 }
+      - name: Resolve commit (warn if not full-tested)
+        id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -46,10 +42,10 @@ jobs:
                  --jq '[.statuses[] | select(.context=="hicar-full-test")][0].state // "none"')
           echo "hicar-full-test status of $sha: $ft"
           [ "$ft" = "success" ] || echo "::warning::Blessing $sha which has NOT passed hicar-full-test (status=$ft)"
-
-          gh api -X POST "/repos/${{ github.repository }}/statuses/$sha" \
-            -f state=success \
-            -f context=hicar-regression-blessed \
-            -f description="Regression reference — ${{ inputs.reason }}" \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "Blessed $sha as hicar-regression-blessed=success"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/sign-commit
+        with:
+          sha: ${{ steps.resolve.outputs.sha }}
+          context: hicar-regression-blessed
+          description: Regression reference — ${{ inputs.reason }}
+          token: ${{ github.token }}
