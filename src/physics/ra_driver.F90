@@ -122,7 +122,7 @@ module radiation
 
     integer :: update_interval
     real*8  :: last_model_time(kMAX_NESTS), next_update_time(kMAX_NESTS)
-    real    :: solar_constant
+    real    :: solar_constant, declin
     real    :: p_top = 100000.0
     
     !! MJ added to aggregate radiation over output interval
@@ -243,6 +243,10 @@ contains
             allocate(shortwave_cached(ims:ime,jms:jme))
 
             !$acc enter data create(cos_project_angle, solar_elevation_store, solar_azimuth_store, shortwave_cached)
+
+            shortwave_cached = 0.0
+            call radconst(domain%sim_time%day_of_year(), declin, solar_constant)
+            !$acc update device(shortwave_cached)
         ! endif
 
         ! Initialize terrain reflected shortwave lookup tables
@@ -854,7 +858,7 @@ contains
         real, allocatable:: t_1d(:), p_1d(:), Dz_1d(:), qv_1d(:), qc_1d(:), qi_1d(:), qs_1d(:), cf_1d(:)
         real, allocatable :: qi(:,:,:), qc(:,:,:), qs(:,:,:), cldfra(:,:,:), re_c(:,:,:), re_i(:,:,:), re_s(:,:,:)
 
-        real :: gridkm, ra_dt, declin, hour_frac, air_mass_lay, cld_frc
+        real :: gridkm, ra_dt, hour_frac, air_mass_lay, cld_frc
         real :: relmax, relmin, reimax, reimin
         real(real64) :: date_seconds, julian_day
         integer :: i, k, j, col_indx,sim_month
@@ -914,6 +918,8 @@ contains
         real :: trans_atm, trans_atm_dir, max_dir_1, max_dir_2, max_dir, elev_th, ratio_dif, tzone
         integer :: zdx, zdx_max
         real(real64) :: sun_declin_deg, eq_of_time_minutes
+        logical :: sun_up, sun_up_global         ! .true. if the sun is above the horizon anywhere in the local/global domain
+        real    :: coszen_max, coszen_max_g     ! local / global max cos(zenith) for the sun_up test
 
         ! Terrain reflected SW local variables
         real :: local_albedo, nbr_albedo, albedo_sum, weight_sum
@@ -925,6 +931,8 @@ contains
         if (options%physics%radiation == 0) return
         
         run_full_radiation = (domain%sim_time%seconds() >= next_update_time(domain%nest_indx))
+        sun_up = .false.   ! recomputed below when terrain_shading; must be defined (`.and.` is not short-circuit)
+        sun_up_global = .false.
 
         !We only need to calculate these variables if we are using terrain shading, otherwise only call on each radiation update
         if (options%rad%terrain_shading .or. run_full_radiation) then
@@ -949,9 +957,10 @@ contains
             enddo
 
             if (options%rad%terrain_shading) then
+                coszen_max = -2.0   ! below the minimum possible cos(zenith) of -1
                 associate(slope => domain%vars_2d(domain%var_indx(kVARS%slope_angle)%v)%data_2d, &
                           aspect => domain%vars_2d(domain%var_indx(kVARS%aspect_angle)%v)%data_2d)
-                !$acc parallel loop gang vector collapse(2) async(1)
+                !$acc parallel loop gang vector collapse(2) reduction(max:coszen_max) async(1)
                 do j = jts,jte
                     do i = its,ite
                         cosine_zenith_angle(i,j)=sin(solar_elevation_store(i,j))
@@ -959,9 +968,11 @@ contains
                         cos_project_angle(i,j)= cos(slope(i,j))*sin(solar_elevation_store(i,j)) + &
                                                 sin(slope(i,j))*cos(solar_elevation_store(i,j))   &
                                                 *cos(solar_azimuth_store(i,j)-aspect(i,j))
+                        coszen_max = max(coszen_max, cosine_zenith_angle(i,j))
                     enddo
                 enddo
                 end associate
+                sun_up = (coszen_max > 0.0)
             else
                 !$acc parallel loop gang vector collapse(2) async(1)
                 do j = jts,jte
@@ -1758,75 +1769,87 @@ contains
         !! MJ: note that radiation down scaling works only for simple and rrtmg schemes as they provide the above-topography radiation per horizontal plane
         !! MJ corrected, as calc_solar_elevation has largley understimated the zenith angle in Switzerland
         !! MJ added: this is Tobias Jonas (TJ) scheme based on swr function in metDataWizard/PROCESS_COSMO_DATA_1E2E.m and also https://github.com/Tobias-Jonas-SLF/HPEval
-        if (options%rad%terrain_shading) then            
-            !! partitioning the total radiation per horizontal plane into the diffusive and direct ones based on https://www.sciencedirect.com/science/article/pii/S0168192320300058, HPEval
-            if (.not.(options%physics%radiation==kRA_RRTMG .or. options%physics%radiation==kRA_RRTMGP)) then
-                ratio_dif=0.            
+        !! sun_up gate: skip the downscaling when the sun is down everywhere. This both
+        !! avoids pointless night-time work and -- crucially -- prevents the downscaling
+        !! from running on radiation state (shortwave_cached, solar_constant) that a full
+        !! RRTMG call has not yet seeded after a restart. The restored shortwave_* fields
+        !! (0 at night) then persist unchanged.
+        if (options%rad%terrain_shading) then
+            if (sun_up) then
+                !! partitioning the total radiation per horizontal plane into the diffusive and direct ones based on https://www.sciencedirect.com/science/article/pii/S0168192320300058, HPEval
+                if (.not.(options%physics%radiation==kRA_RRTMG .or. options%physics%radiation==kRA_RRTMGP)) then
+                    ratio_dif=0.            
+                    do j = jts,jte
+                        do i = its,ite
+                            trans_atm = max(min(domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d(i,j)/&
+                                    ( solar_constant* (sin(solar_elevation_store(i,j)+1.e-4)) ),1.),0.)   ! atmospheric transmissivity
+                            if (trans_atm<=0.22) then
+                                ratio_dif=1.-0.09*trans_atm  
+                            elseif (0.22<trans_atm .and. trans_atm<=0.8) then
+                                ratio_dif=0.95-0.16*trans_atm+4.39*trans_atm**2.-16.64*trans_atm**3.+12.34*trans_atm**4.   
+                            elseif (trans_atm>0.8) then
+                                ratio_dif=0.165
+                            endif
+                            domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d(i,j)= &
+                                    ratio_dif*shortwave_cached(i,j)*domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d(i,j)
+                        enddo
+                    enddo                
+                endif
+                !!
+                zdx_max = ubound(domain%vars_3d(domain%var_indx(kVARS%hlm)%v)%data_3d,1)
+
+                associate(shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
+                        shortwave_direct => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d, &
+                        shortwave_diffuse => domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
+                        hlm => domain%vars_3d(domain%var_indx(kVARS%hlm)%v)%data_3d)
+                
+                !$acc parallel loop gang vector collapse(2) present(shortwave_cached, shortwave_diffuse, shortwave_direct, &
+                !$acc&      hlm, shortwave, solar_elevation_store, solar_azimuth_store, cos_project_angle) wait(1)
                 do j = jts,jte
                     do i = its,ite
-                        trans_atm = max(min(domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d(i,j)/&
-                                ( solar_constant* (sin(solar_elevation_store(i,j)+1.e-4)) ),1.),0.)   ! atmospheric transmissivity
-                        if (trans_atm<=0.22) then
-                            ratio_dif=1.-0.09*trans_atm  
-                        elseif (0.22<trans_atm .and. trans_atm<=0.8) then
-                            ratio_dif=0.95-0.16*trans_atm+4.39*trans_atm**2.-16.64*trans_atm**3.+12.34*trans_atm**4.   
-                        elseif (trans_atm>0.8) then
-                            ratio_dif=0.165
+                        shortwave_direct(i,j) = max( shortwave_cached(i,j) - shortwave_diffuse(i,j),0.0)
+
+                        !!
+                        zdx=floor(solar_azimuth_store(i,j)*(180./piconst)/4.0) !! MJ added= we have 90 by 4 deg for hlm ...zidx is the right index based on solar azimuthal angle
+
+                        zdx = max(min(zdx,zdx_max),1)
+                        elev_th=(90.-hlm(i,zdx,j))*DEGRAD !! MJ added: it is the solar elevation threshold above which we see the sun from the pixel  
+                        if (solar_elevation_store(i,j)>=elev_th) then
+                            ! determin maximum allowed direct swr
+                            trans_atm_dir = max(min(shortwave_direct(i,j)/&
+                                            (solar_constant*sin(solar_elevation_store(i,j)+1.e-4)),1.),0.)  ! atmospheric transmissivity for direct sw radiation
+                            max_dir_1     = solar_constant*exp(log(1.-0.165)/max(sin(solar_elevation_store(i,j)),1.e-4))            
+                            max_dir_2     = solar_constant*trans_atm_dir                          
+                            max_dir       = min(max_dir_1,max_dir_2)                     ! applying both above criteria 1 and 2                    
+
+                            shortwave_direct(i,j) = min(shortwave_direct(i,j)/            &
+                                                                max(sin(solar_elevation_store(i,j)),0.01),max_dir) * &
+                                                                max(cos_project_angle(i,j),0.)
+                        else
+                            shortwave_direct(i,j)=0.
                         endif
-                        domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d(i,j)= &
-                                ratio_dif*shortwave_cached(i,j)*domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d(i,j)
+                        shortwave(i,j) = shortwave_diffuse(i,j) + shortwave_direct(i,j)
                     enddo
-                enddo                
+                enddo  
+                end associate
             endif
-            !!
-            zdx_max = ubound(domain%vars_3d(domain%var_indx(kVARS%hlm)%v)%data_3d,1)
-
-            associate(shortwave => domain%vars_2d(domain%var_indx(kVARS%shortwave)%v)%data_2d, &
-                      shortwave_direct => domain%vars_2d(domain%var_indx(kVARS%shortwave_direct)%v)%data_2d, &
-                      shortwave_diffuse => domain%vars_2d(domain%var_indx(kVARS%shortwave_diffuse)%v)%data_2d, &
-                      hlm => domain%vars_3d(domain%var_indx(kVARS%hlm)%v)%data_3d)
-            
-            !$acc parallel loop gang vector collapse(2) present(shortwave_cached, shortwave_diffuse, shortwave_direct, &
-            !$acc&      hlm, shortwave, solar_elevation_store, solar_azimuth_store, cos_project_angle) wait(1)
-            do j = jts,jte
-                do i = its,ite
-                    shortwave_direct(i,j) = max( shortwave_cached(i,j) - shortwave_diffuse(i,j),0.0)
-
-                    !!
-                    zdx=floor(solar_azimuth_store(i,j)*(180./piconst)/4.0) !! MJ added= we have 90 by 4 deg for hlm ...zidx is the right index based on solar azimuthal angle
-
-                    zdx = max(min(zdx,zdx_max),1)
-                    elev_th=(90.-hlm(i,zdx,j))*DEGRAD !! MJ added: it is the solar elevation threshold above which we see the sun from the pixel  
-                    if (solar_elevation_store(i,j)>=elev_th) then
-                        ! determin maximum allowed direct swr
-                        trans_atm_dir = max(min(shortwave_direct(i,j)/&
-                                        (solar_constant*sin(solar_elevation_store(i,j)+1.e-4)),1.),0.)  ! atmospheric transmissivity for direct sw radiation
-                        max_dir_1     = solar_constant*exp(log(1.-0.165)/max(sin(solar_elevation_store(i,j)),1.e-4))            
-                        max_dir_2     = solar_constant*trans_atm_dir                          
-                        max_dir       = min(max_dir_1,max_dir_2)                     ! applying both above criteria 1 and 2                    
-
-                        shortwave_direct(i,j) = min(shortwave_direct(i,j)/            &
-                                                               max(sin(solar_elevation_store(i,j)),0.01),max_dir) * &
-                                                               max(cos_project_angle(i,j),0.)
-                    else
-                        shortwave_direct(i,j)=0.
-                    endif
-                    shortwave(i,j) = shortwave_diffuse(i,j) + shortwave_direct(i,j)
-                enddo
-            enddo  
-            end associate
-
             ! --- Terrain reflected shortwave radiation ---
             ! Based on Dozier (1980), Helbig et al. (2009), Chu et al. (2021)
             ! Simple method with multi-reflection correction and elevation-aware neighborhood albedo
             if (run_full_radiation .and. options%rad%terrain_refl_radius > 0) then
 
+                !$acc wait(1) ! ensure the async coszen_max reduction is resident on the host
+                call MPI_Allreduce(coszen_max, coszen_max_g, 1, MPI_REAL, MPI_MAX, domain%compute_comms)
+                sun_up_global = (coszen_max_g > 0.0)
+
                 allocate(nbr_buffer(domain%ihs:domain%ihe, domain%jhs:domain%jhe))
                 !$acc data create(nbr_buffer)
 
-                !$acc wait(1) ! wait for prior update to shortwave radiation before calculating reflected SW in following subroutine
-                ! Gather neighborhood albedo from neighboring MPI processes
-                call gather_neighborhood_albedo(domain, nbr_buffer)
+                ! Reflected-SW neighbourhood albedo gather -- only when the sun is up
+                ! somewhere (no reflected SW at night). The LW gather below is unconditional.
+                if (sun_up_global) then
+                    call gather_neighborhood_albedo(domain, nbr_buffer)
+                endif
 
                 associate(svf        => domain%vars_2d(domain%var_indx(kVARS%svf)%v)%data_2d,                    &
                           slope_ang  => domain%vars_2d(domain%var_indx(kVARS%neighbor_slope_angle)%v)%data_2d,   &
@@ -1839,6 +1862,8 @@ contains
                           longwave   => domain%vars_2d(domain%var_indx(kVARS%longwave)%v)%data_2d,               &
                           ihs => domain%ihs, ihe => domain%ihe, jhs => domain%jhs, jhe => domain%jhe)
 
+                ! --- Terrain-reflected SHORTWAVE (only when the sun is up somewhere) ---
+                if (sun_up_global) then
                 !$acc parallel loop gang vector collapse(2) &
                 !$acc& present(svf, slope_ang, aspect_ang, albedo_2d, nbr_buffer, shortwave, sw_terrain, &
                 !$acc&         azimuth_offset, inv_dist2_offset, ihs, ihe, jhs, jhe) &
@@ -1897,7 +1922,16 @@ contains
                         shortwave(i,j) = shortwave(i,j) + sw_terrain(i,j)
                     end do
                 end do
+                else
+                !$acc parallel loop gang vector collapse(2) present(sw_terrain) private(i,j)
+                do j = jts, jte
+                    do i = its, ite
+                        sw_terrain(i,j) = 0.0
+                    enddo
+                enddo
+                endif   ! sun_up_global -- reflected shortwave only
 
+                ! --- Terrain-emitted LONGWAVE (sun-independent: runs day AND night) ---
                 !$acc wait(1) ! wait for prior update to shortwave radiation before calculating terrain emitted LW in following subroutine
                 ! Gather neighborhood LW emission from neighboring MPI processes
                 call gather_neighborhood_lw_emit(domain, nbr_buffer)
@@ -2073,14 +2107,14 @@ contains
 !BOP
 ! !IROUTINE: radconst - compute radiation terms
 ! !INTERFAC:
-   SUBROUTINE radconst(JULIAN, DECLIN, SOLCON)
+   SUBROUTINE radconst(JULIAN, DECLIN_OUT, SOLCON)
 !---------------------------------------------------------------------
    IMPLICIT NONE
 !---------------------------------------------------------------------
 
 ! !ARGUMENTS:
    REAL, INTENT(IN   )      ::       JULIAN
-   REAL, INTENT(OUT  )      ::       DECLIN,SOLCON
+   REAL, INTENT(OUT  )      ::       DECLIN_OUT,SOLCON
    REAL                     ::       OBECL,SINOB,SXLONG,ARG,  &
                                      DECDEG,DJUL,RJUL,ECCFAC
 !
@@ -2090,7 +2124,7 @@ contains
 
 ! for short wave radiation
 
-   DECLIN=0.
+   DECLIN_OUT=0.
    SOLCON=0.
 
 !-----OBECL : OBLIQUITY = 23.5 DEGREE.
@@ -2104,8 +2138,8 @@ contains
    IF(JULIAN.LT.80.)SXLONG=DPD*(JULIAN+285.)
    SXLONG=SXLONG*DEGRAD
    ARG=SINOB*SIN(SXLONG)
-   DECLIN=ASIN(ARG)
-   DECDEG=DECLIN/DEGRAD
+   DECLIN_OUT=ASIN(ARG)
+   DECDEG=DECLIN_OUT/DEGRAD
 !----SOLAR CONSTANT ECCENTRICITY FACTOR (PALTRIDGE AND PLATT 1976)
    DJUL=JULIAN*360./365.
    RJUL=DJUL*DEGRAD

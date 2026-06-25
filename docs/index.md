@@ -41,6 +41,8 @@ specifying the model options. See [Forcing data](forcing_data.md) and
   template.
 - **[Namelist options](namelist_options.md)** — the self-documenting executable
   and nested-run configuration.
+- **[AI assistant (MCP)](mcp.md)** — connect Claude Code,
+  Cursor, or other AI agents to HICAR's namelist, physics-scheme, variable, docs, and code knowledge.
 
 For the code, see the **[Code overview](code_overview.md)** and
 **[Developing](developing.md)** pages.

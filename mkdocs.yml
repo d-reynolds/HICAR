@@ -10,6 +10,7 @@ nav:
   - Compiling: compiling.md
   - Running: running.md
   - Namelist options: namelist_options.md
+  - AI assistant (MCP): mcp.md
   - Forcing data: forcing_data.md
   - Domain generation: domain_generation.md
   - Testing: testing.md
