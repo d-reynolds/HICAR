@@ -150,7 +150,7 @@ module wind_iterative
         integer :: solver_rank, east_neighbor, west_neighbor, north_neighbor, south_neighbor
         type(MPI_Comm) :: solver_comm
         ! Flags
-        logical :: structure_uploaded
+        logical :: structure_uploaded = .false.   ! default-init: read at restore_from_cache
         logical :: operator_probed = .false.
         integer :: wind_solver_max_iters
         integer :: precond_n_sweeps = BASE_PREC_SWEEPS
@@ -1642,44 +1642,44 @@ contains
         nreq = 0
         if (.not. domain%east_boundary) then
             nreq = nreq + 1
-            call MPI_Irecv(east_recv,  nz_w*ny_w, MPI_DOUBLE_PRECISION, east_neighbor,  tag_we, &
+            call MPI_Irecv(east_recv(k_s-1, j_s-1),  nz_w*ny_w, MPI_DOUBLE_PRECISION, east_neighbor,  tag_we, &
                            solver_comm, reqs(nreq), ierr)
         endif
         if (.not. domain%west_boundary) then
             nreq = nreq + 1
-            call MPI_Irecv(west_recv,  nz_w*ny_w, MPI_DOUBLE_PRECISION, west_neighbor,  tag_ew, &
+            call MPI_Irecv(west_recv(k_s-1, j_s-1),  nz_w*ny_w, MPI_DOUBLE_PRECISION, west_neighbor,  tag_ew, &
                            solver_comm, reqs(nreq), ierr)
         endif
         if (.not. domain%north_boundary) then
             nreq = nreq + 1
-            call MPI_Irecv(north_recv, nx_w*nz_w, MPI_DOUBLE_PRECISION, north_neighbor, tag_sn, &
+            call MPI_Irecv(north_recv(i_s-1, k_s-1), nx_w*nz_w, MPI_DOUBLE_PRECISION, north_neighbor, tag_sn, &
                            solver_comm, reqs(nreq), ierr)
         endif
         if (.not. domain%south_boundary) then
             nreq = nreq + 1
-            call MPI_Irecv(south_recv, nx_w*nz_w, MPI_DOUBLE_PRECISION, south_neighbor, tag_ns, &
+            call MPI_Irecv(south_recv(i_s-1, k_s-1), nx_w*nz_w, MPI_DOUBLE_PRECISION, south_neighbor, tag_ns, &
                            solver_comm, reqs(nreq), ierr)
         endif
 
         ! Post all Isends
         if (.not. domain%east_boundary) then
             nreq = nreq + 1
-            call MPI_Isend(east_send,  nz_w*ny_w, MPI_DOUBLE_PRECISION, east_neighbor,  tag_ew, &
+            call MPI_Isend(east_send(k_s-1, j_s-1),  nz_w*ny_w, MPI_DOUBLE_PRECISION, east_neighbor,  tag_ew, &
                            solver_comm, reqs(nreq), ierr)
         endif
         if (.not. domain%west_boundary) then
             nreq = nreq + 1
-            call MPI_Isend(west_send,  nz_w*ny_w, MPI_DOUBLE_PRECISION, west_neighbor,  tag_we, &
+            call MPI_Isend(west_send(k_s-1, j_s-1),  nz_w*ny_w, MPI_DOUBLE_PRECISION, west_neighbor,  tag_we, &
                            solver_comm, reqs(nreq), ierr)
         endif
         if (.not. domain%north_boundary) then
             nreq = nreq + 1
-            call MPI_Isend(north_send, nx_w*nz_w, MPI_DOUBLE_PRECISION, north_neighbor, tag_ns, &
+            call MPI_Isend(north_send(i_s-1, k_s-1), nx_w*nz_w, MPI_DOUBLE_PRECISION, north_neighbor, tag_ns, &
                            solver_comm, reqs(nreq), ierr)
         endif
         if (.not. domain%south_boundary) then
             nreq = nreq + 1
-            call MPI_Isend(south_send, nx_w*nz_w, MPI_DOUBLE_PRECISION, south_neighbor, tag_sn, &
+            call MPI_Isend(south_send(i_s-1, k_s-1), nx_w*nz_w, MPI_DOUBLE_PRECISION, south_neighbor, tag_sn, &
                            solver_comm, reqs(nreq), ierr)
         endif
 

@@ -44,6 +44,7 @@ set(
   tests
   advect
   snow_drift
+  wind_iterative
   control_flow
   halo_exch
   geo

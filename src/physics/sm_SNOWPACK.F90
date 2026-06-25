@@ -572,6 +572,7 @@ module module_sm_SNOWPACKdrv
 
         integer(c_size_t) :: n_elem, n_node
         integer :: ne_arr(1:kMAX_SNOWPACK_ELEMENTS)
+        integer :: n_layers_use
         integer(c_short) :: sn_k, hicar_k
         type(element_data) :: elem
         real(kind=8) :: z_node_arr(1:kMAX_SNOWPACK_ELEMENTS+1)
@@ -607,9 +608,11 @@ module module_sm_SNOWPACKdrv
             do i = its, ite
                 if (.not.(run_snowpack_flag(i,j))) cycle
 
-                do k = 1, n_snow_layers(i,j)
+                n_layers_use = min(int(n_snow_layers(i,j)), kSNOW_GRID_Z)
+
+                do k = 1, n_layers_use
                     sn_k = k
-                    hicar_k = n_snow_layers(i,j) - k + 1
+                    hicar_k = n_layers_use - k + 1
                     elem = element_data(sn_k)               
                     call elem%set_theta([real(Vol_Frac_S(i,hicar_k,j),kind=8), &
                                             real(Vol_Frac_I(i,hicar_k,j),kind=8), &
