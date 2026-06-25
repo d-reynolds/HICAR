@@ -108,6 +108,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: ./.github/actions/hicar-deps
+      - uses: ./.github/actions/snowpack-src-cache   # outage fallback for the git.wsl.ch snowpack+meteoio fetch
 
       # Build A (reference): C++ SNOWPACK into its OWN tree so its shared libs
       # survive Build B; the exe's RPATH points into build_cpp, so no LD juggling.

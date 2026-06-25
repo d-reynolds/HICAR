@@ -54,6 +54,21 @@ include(ExternalProject)
 find_package(Git)
 set(GIT_CLONE_RETRY_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/git_clone_retry.cmake")
 
+# Stable, build-tree-independent cache of the snowpack/meteoio source clones,
+# used by git_clone_retry as the outage FALLBACK (so a git.wsl.ch stall does not
+# fail the build). CI keeps it warm with actions/cache; it survives `rm -rf
+# build/*` because it lives outside the build tree. Override with
+# -DHICAR_DEPS_SRC_CACHE=... (e.g. on a runner where $HOME is not writable).
+if(NOT DEFINED HICAR_DEPS_SRC_CACHE)
+    if(DEFINED ENV{HICAR_DEPS_SRC_CACHE})
+        set(HICAR_DEPS_SRC_CACHE "$ENV{HICAR_DEPS_SRC_CACHE}")
+    elseif(DEFINED ENV{HOME})
+        set(HICAR_DEPS_SRC_CACHE "$ENV{HOME}/.cache/hicar-deps-src")
+    else()
+        set(HICAR_DEPS_SRC_CACHE "${CMAKE_BINARY_DIR}/../.hicar-deps-src")
+    endif()
+endif()
+
 if (SNOWPACK_INCLUDE_DIR AND SNOWPACK_LIBRARY)
   # Already in cache, be silent
   set (SNOWPACK_FIND_QUIETLY TRUE)
@@ -101,6 +116,7 @@ if (NOT SNOWPACK_CPP)
             -DREPO=https://git.wsl.ch/snow-models/snowpack.git
             -DTAG=fortran-bindings
             -DDEST=${SNOWPACK_DIR}
+            -DFALLBACK=${HICAR_DEPS_SRC_CACHE}/SNOWPACK
             -P ${GIT_CLONE_RETRY_SCRIPT}
         PREFIX            "${SNOWPACK_STAMPS}"
         SOURCE_DIR        "${SNOWPACK_DIR}"
@@ -177,6 +193,7 @@ else()
             -DREPO=https://git.wsl.ch/snow-models/meteoio.git
             -DTAG=master
             -DDEST=${METEOIO_DIR}
+            -DFALLBACK=${HICAR_DEPS_SRC_CACHE}/meteoio
             -P ${GIT_CLONE_RETRY_SCRIPT}
         PREFIX            "${METEOIO_STAMPS}"
         SOURCE_DIR        "${METEOIO_DIR}"
@@ -219,6 +236,7 @@ else()
             -DREPO=https://git.wsl.ch/snow-models/snowpack.git
             -DTAG=fortran-bindings
             -DDEST=${SNOWPACK_DIR}
+            -DFALLBACK=${HICAR_DEPS_SRC_CACHE}/SNOWPACK
             -P ${GIT_CLONE_RETRY_SCRIPT}
         PREFIX            "${SNOWPACK_STAMPS}"
         SOURCE_DIR        "${SNOWPACK_DIR}"

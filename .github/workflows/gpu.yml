@@ -111,6 +111,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      - uses: ./.github/actions/snowpack-src-cache   # outage fallback for the git.wsl.ch fetch (survives rm -rf build_*)
       - name: Show GPU / toolchain
         run: |
           nvidia-smi -L

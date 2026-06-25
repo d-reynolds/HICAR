@@ -1,0 +1,30 @@
+# Persist the SNOWPACK (and MeteoIO) source clones across CI runs.
+#
+# Why: every build fetches snowpack (and, for the C++ reference build, meteoio)
+# from git.wsl.ch — a flaky upstream. cmake/git_clone_retry.cmake keeps a stable
+# FALLBACK copy of each clone in ~/.cache/hicar-deps-src: it UPDATES that copy to
+# the branch tip when git.wsl.ch is reachable (so branch tags still track HEAD)
+# and FALLS BACK to it if the host is down, instead of failing the build. This
+# action is what makes that fallback copy persist on an otherwise-ephemeral
+# runner. The cache is ONLY an outage fallback — builds still pull HEAD whenever
+# git.wsl.ch is reachable.
+#
+# Place this AFTER actions/checkout and BEFORE the build step. One stable path
+# (~/.cache/hicar-deps-src) covers every build dir and every lane, and it is not
+# wiped by the build's `rm -rf build/*`.
+name: Cache SNOWPACK/MeteoIO source
+description: Persist the snowpack/meteoio clones so the git_clone_retry fallback survives a git.wsl.ch outage.
+runs:
+  using: composite
+  steps:
+    - id: week
+      shell: bash
+      # Rotate weekly so the outage-fallback copy stays reasonably fresh;
+      # restore-keys still serves the most recent prior copy on a miss.
+      run: echo "w=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      with:
+        path: ~/.cache/hicar-deps-src
+        key: snowpack-src-${{ github.workflow }}-${{ runner.os }}-${{ steps.week.outputs.w }}
+        restore-keys: |
+          snowpack-src-${{ github.workflow }}-${{ runner.os }}-
