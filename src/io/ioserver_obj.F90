@@ -383,12 +383,12 @@ contains
             if (allocated(mask)) deallocate(mask)
             allocate(mask(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1))
             mask_size = (parent_ime(n)-parent_ims(n)+2)*(parent_jme(n)-parent_jms(n)+2)
-            mask = kEMPT_BUFF
+            mask(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1) = kEMPT_BUFF
             if (my_rank == n-1) then
                 mask(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1) = &
                     test_write_buffer_2d(parent_ims(n):parent_ime(n)+1,parent_jms(n):parent_jme(n)+1)
             endif
-            call MPI_Bcast(mask, mask_size, MPI_REAL, n-1, this%IO_Comms, ierr)
+            call MPI_Bcast(mask(parent_ims(n), parent_jms(n)), mask_size, MPI_REAL, n-1, this%IO_Comms, ierr)
 
             i_start = max(parent_ims(n),child_ioserver%i_s_r)
             i_end   = min(parent_ime(n),child_ioserver%i_e_r)+1
@@ -692,9 +692,8 @@ contains
             endif
         enddo
 
-        call MPI_Alltoallw(gather_buffer_test,  send_msg_size_alltoall, disp_alltoall, ioserver%send_nest_types(child_indx,:), &
-                          forcing_buffer_test,  buff_msg_size_alltoall, disp_alltoall, ioserver%buffer_nest_types(child_indx,:), ioserver%IO_Comms)
-
+        call MPI_Alltoallw(gather_buffer_test(1, ioserver%i_s_w, ioserver%k_s_w, ioserver%j_s_w),  send_msg_size_alltoall, disp_alltoall, ioserver%send_nest_types(child_indx,:), &
+                          forcing_buffer_test(1, child_ioserver%i_s_r, child_ioserver%k_s_r, child_ioserver%j_s_r),  buff_msg_size_alltoall, disp_alltoall, ioserver%buffer_nest_types(child_indx,:), ioserver%IO_Comms)
 
         ! check that the whole of the forcing buffer has been filled correctly
         do j = child_ioserver%j_s_r, child_ioserver%j_e_r+1
@@ -1288,8 +1287,8 @@ contains
             endif
         enddo
 
-        call MPI_Alltoallw(this%gather_buffer,  send_msg_size_alltoall, disp_alltoall, this%send_nest_types(child_indx,:), &
-                        child_ioserver%forcing_buffer, buff_msg_size_alltoall, disp_alltoall, this%buffer_nest_types(child_indx,:), this%IO_Comms)
+        call MPI_Alltoallw(this%gather_buffer(1, this%i_s_w, this%k_s_w, this%j_s_w),  send_msg_size_alltoall, disp_alltoall, this%send_nest_types(child_indx,:), &
+                        child_ioserver%forcing_buffer(1, child_ioserver%i_s_r, child_ioserver%k_s_r, child_ioserver%j_s_r), buff_msg_size_alltoall, disp_alltoall, this%buffer_nest_types(child_indx,:), this%IO_Comms)
 
         ! This call will scatter the forcing fields to the ioclients of the nest child
         call child_ioserver%scatter_forcing()
@@ -1419,8 +1418,8 @@ contains
                         buff_2d_sizes(ci) = merge(1, 0, extent > real_size)
                     enddo
 
-                    call MPI_Alltoallw(this%gather_buffer_2d, send_2d_sizes, disp_2d, this%send_nest_types_2d(n,:), &
-                        child_ioserver%forcing_buffer_2d, buff_2d_sizes, disp_2d, this%buffer_nest_types_2d(n,:), this%IO_Comms)
+                    call MPI_Alltoallw(this%gather_buffer_2d(1, this%i_s_w, this%j_s_w), send_2d_sizes, disp_2d, this%send_nest_types_2d(n,:), &
+                        child_ioserver%forcing_buffer_2d(1, child_ioserver%i_s_r, child_ioserver%j_s_r), buff_2d_sizes, disp_2d, this%buffer_nest_types_2d(n,:), this%IO_Comms)
                     deallocate(send_2d_sizes, buff_2d_sizes, disp_2d)
 
                     ! Fire-and-forget Isend of 2D data to each child ioclient.
@@ -1475,8 +1474,8 @@ contains
                         buff_3d_sizes(ci) = merge(1, 0, extent > real_size)
                     enddo
 
-                    call MPI_Alltoallw(this%gather_buffer_3d_init, send_3d_sizes, disp_3d, this%send_nest_types_3d_init(n,:), &
-                        child_ioserver%forcing_buffer_3d_init, buff_3d_sizes, disp_3d, this%buffer_nest_types_3d_init(n,:), this%IO_Comms)
+                    call MPI_Alltoallw(this%gather_buffer_3d_init(1, this%i_s_w, 1, this%j_s_w), send_3d_sizes, disp_3d, this%send_nest_types_3d_init(n,:), &
+                        child_ioserver%forcing_buffer_3d_init(1, child_ioserver%i_s_r, 1, child_ioserver%j_s_r), buff_3d_sizes, disp_3d, this%buffer_nest_types_3d_init(n,:), this%IO_Comms)
                     deallocate(send_3d_sizes, buff_3d_sizes, disp_3d)
 
                     ! Fire-and-forget Isend of 3D init data to each child

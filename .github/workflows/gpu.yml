@@ -5,7 +5,7 @@
 # develop is GPU-tested by the nightly after it merges to main.
 #
 # FLOW:
-#   0. changed       — nightly only: skip if a completed run already covers this commit.
+#   0. changed       — nightly only: skip if main is unchanged since the last run.
 #   1. check-signed  — is this commit hicar-full-test=success (the CPU gate)?
 #   2. full-test     — if not signed, run the CPU full-test (reusable workflow).
 #   3. gpu-tests     — build CPU-ref (OPENACC=OFF) + GPU (OPENACC=ON) exes with the
@@ -28,8 +28,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # 0. On a nightly, skip if a completed run already covers this commit (pass OR
-  #    fail). Manual dispatch always runs.
+  # 0. On a nightly, skip if main is unchanged since the last completed run.
+  #    Manual dispatch always runs.
   changed:
     runs-on: ubuntu-22.04
     outputs:
@@ -94,11 +94,6 @@ jobs:
       contents: write
       statuses: write
     uses: ./.github/workflows/hicar-full-test.yml
-    # force: an unsigned commit (possibly a prior full-test failure) must re-run.
-    # Without it, full-test's own gate would skip — in a reused workflow
-    # github.event_name is this caller's 'schedule'.
-    with:
-      force: true
 
   # 3. GPU build + GPU-vs-CPU regression + validation.
   gpu-tests:

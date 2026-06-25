@@ -37,7 +37,7 @@ concurrency:
 jobs:
   # Decide whether to run, and on which SHA:
   #   workflow_run -> only a PASSED full-test on a branch with an open PR to main
-  #   schedule     -> skip if a completed run already covers this commit
+  #   schedule     -> skip if main is unchanged since the last completed run
   #   manual       -> always
   changed:
     runs-on: ubuntu-22.04

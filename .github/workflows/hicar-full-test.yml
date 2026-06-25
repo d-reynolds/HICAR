@@ -9,9 +9,7 @@
 # artifact and commits it back — develop not main, because it pushes directly and
 # main is PR-protected. It runs regardless of test outcome, independent of `sign`.
 #
-# Triggers: PR, push to main/develop, nightly, manual, workflow_call (gpu.yml).
-# The nightly is a safety net for a commit that never got a push run; the
-# `changed` gate skips it when this exact commit was already full-tested.
+# Triggers: PR, push to main/develop, manual, and workflow_call (gpu.yml).
 name: HICAR full-test (CPU)
 
 on:
@@ -19,70 +17,28 @@ on:
     branches: [main, develop]
   push:
     branches: [main, develop]
-  schedule:
-    - cron: '0 2 * * *'   # 02:00 UTC — earliest lane, so its sign lands before gpu.yml's 04:00 check
   workflow_dispatch:
   workflow_call:
-    inputs:
-      force:
-        # gpu.yml sets this so its workflow_call reuse isn't skipped by the gate
-        # below (in a reused workflow github.event_name is the caller's, e.g. 'schedule').
-        description: Run even if this commit was already full-tested.
-        type: boolean
-        required: false
-        default: false
 
 permissions:
   contents: read
   statuses: write   # sign posts the commit status
-  actions: read     # the `changed` gate queries previous runs
 
 concurrency:
   group: fulltest-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # changed: on a bare nightly, skip if a completed run already covers this commit
-  # (push runs already test every main/develop commit). Any other trigger — and
-  # gpu.yml's workflow_call, which sets inputs.force — always runs.
-  changed:
-    runs-on: ubuntu-22.04
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-    steps:
-      - id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "${{ github.event_name }}" != "schedule" ] || [ "${{ inputs.force }}" = "true" ]; then
-            echo "Event '${{ github.event_name }}' (force=${{ inputs.force }}) — running."
-            echo "should_run=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          # total_count>=1 completed runs for this exact SHA => already tested (the
-          # in-progress run isn't 'completed'). API error => run (fail open).
-          n=$(gh api \
-            "/repos/${{ github.repository }}/actions/workflows/hicar-full-test.yml/runs?head_sha=${{ github.sha }}&status=completed&exclude_pull_requests=true&per_page=1" \
-            --jq '.total_count // 0') || n=""
-          echo "completed prior runs for ${{ github.sha }}: ${n:-<api error>}"
-          if [ -z "$n" ] || [ "${n:-0}" -lt 1 ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Already ran for ${{ github.sha }} — skipping."
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-          fi
-
   # build-deps: build the dependency toolchain once (cached) so cpu-debug and
   # cpu-release restore it instead of each rebuilding netcdf/hdf5/pnetcdf.
   build-deps:
-    needs: changed
-    # Gate 1: the nightly skip above. Gate 2: de-dup push+PR — a same-repo
-    # main/develop PR only re-tests the already-signed push commit, so skip it;
-    # fork PRs and feature-branch PRs (never push-tested) still run.
+    # De-dup push+PR: a same-repo main/develop PR only re-tests the already-signed
+    # push commit, so skip it; fork PRs and feature-branch PRs (never push-tested)
+    # still run.
     if: >-
-      needs.changed.outputs.should_run == 'true' &&
-      ( github.event_name != 'pull_request' ||
-        github.event.pull_request.head.repo.full_name != github.repository ||
-        !contains(fromJSON('["main", "develop"]'), github.head_ref) )
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      !contains(fromJSON('["main", "develop"]'), github.head_ref)
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4

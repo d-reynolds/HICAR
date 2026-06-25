@@ -46,8 +46,8 @@ permissions:
   statuses: write   # the optional parity bless (workflow_dispatch with bless=true)
 
 jobs:
-  # On a nightly, skip if a completed run already covers this commit (pass OR
-  # fail). PRs (path-filtered) and manual dispatch always run.
+  # On a nightly, skip if main is unchanged since the last completed run.
+  # PRs (path-filtered) and manual dispatch always run.
   changed:
     runs-on: ubuntu-22.04
     outputs:
