@@ -280,10 +280,14 @@ contains
             jaco_w => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d, &
             rho => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
             dz => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
+            mf_my_u => domain%mapfac_my_u, &
+            mf_mx_v => domain%mapfac_mx_v, &
+            mf_mxy  => domain%mapfac_mxy, &
             dx => domain%dx &
         )
 
-        !$acc data present(div, u, v, w, dz, jaco, jaco_u, jaco_v, jaco_w, rho, dx) create(rho_i, u_met, v_met, w_met)
+        !$acc data present(div, u, v, w, dz, jaco, jaco_u, jaco_v, jaco_w, rho, dx, &
+        !$acc              mf_my_u, mf_mx_v, mf_mxy) create(rho_i, u_met, v_met, w_met)
 
         !Multiplication of U/V by metric terms, converting jacobian to staggered-grid where possible, otherwise making assumption of
         !Constant jacobian at edges
@@ -416,12 +420,19 @@ contains
         end if ! end if advect_density
 
 
+        ! Map factors (finite-volume form on the projected grid): each face
+        ! flux is divided by its transverse factor (true face length =
+        ! dx/m) and the cell sum is multiplied by the cell-area factor
+        ! m_x*m_y. The vertical term below needs no factor — m is
+        ! column-constant, so it cancels between the top and bottom faces.
+        ! All factors are exactly 1.0 when use_map_factors is off.
         !$acc parallel loop gang vector collapse(3) async(1) wait(0)
         do j = jms, jme
             do k = kms, kme
             do i = ims, ime
-                div(i,k,j) = (u_met(i+1, k, j) - u_met(i, k, j) + &
-                              v_met(i, k, j+1) - v_met(i, k, j)) / dx
+                div(i,k,j) = mf_mxy(i,j) * &
+                             (u_met(i+1, k, j)/mf_my_u(i+1,j) - u_met(i, k, j)/mf_my_u(i,j) + &
+                              v_met(i, k, j+1)/mf_mx_v(i,j+1) - v_met(i, k, j)/mf_mx_v(i,j)) / dx
 
             enddo
             enddo
@@ -986,6 +997,108 @@ contains
 
     end subroutine calc_idealized_wgrid
     
+    !>------------------------------------------------------------
+    !! Calibrate the elliptic operator to the exact discrete
+    !! composition A = 2*D o G by lattice probing (27 colorings; see
+    !! wind_iterative.F90). Used by BOTH wind solvers: the RANS path
+    !! probes once per nest (alpha == 1, constant); the diagnostic
+    !! path re-probes whenever its Froude-dependent alpha field is
+    !! refreshed (the operator depends on alpha through the w
+    !! correction). The u/v/w dqdt workspace is preserved across the
+    !! probe scratch usage.
+    !!------------------------------------------------------------
+    subroutine calibrate_projection_operator(domain, options, div)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        type(options_t),intent(in)    :: options
+        real,           intent(inout) :: div(ims:ime,kms:kme,jms:jme)
+
+        integer :: ca, cb, cc, i, j, k
+        real :: max_leak
+        real, allocatable :: us(:,:,:), vs(:,:,:), ws(:,:,:)
+
+        allocate(us(ims:ime+1,kms:kme,jms:jme))
+        allocate(vs(ims:ime,kms:kme,jms:jme+1))
+        allocate(ws(ims:ime,kms:kme,jms:jme))
+        associate(u_dqdt => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                  v_dqdt => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                  w_dqdt => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+        !$acc enter data create(us, vs, ws)
+        !$acc parallel default(present)
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime+1
+                    us(i,k,j) = u_dqdt(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme+1
+            do k = kms, kme
+                do i = ims, ime
+                    vs(i,k,j) = v_dqdt(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    ws(i,k,j) = w_dqdt(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc end parallel
+
+        max_leak = 0.0
+        do cc = 0, 2
+            do cb = 0, 2
+                do ca = 0, 2
+                    call probe_lambda_pattern(ca, cb, cc)
+                    call probe_zero_corrections(domain)
+                    call probe_apply_corrections(domain, options%adv%advect_density)
+                    call calc_divergence(div, domain, advect_density=options%adv%advect_density, &
+                                         horz_only=.False., use_dqdt=.True.)
+                    !$acc update host(div)
+                    call probe_record(domain, div, ca, cb, cc, max_leak)
+                enddo
+            enddo
+        enddo
+        call probe_finalize(max_leak)
+
+        !$acc parallel default(present)
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime+1
+                    u_dqdt(i,k,j) = us(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme+1
+            do k = kms, kme
+                do i = ims, ime
+                    v_dqdt(i,k,j) = vs(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    w_dqdt(i,k,j) = ws(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc end parallel
+        end associate
+        !$acc exit data delete(us, vs, ws)
+        deallocate(us, vs, ws)
+    end subroutine calibrate_projection_operator
+
+
     subroutine calc_alpha(alpha, froude)
         implicit none
         real,    intent(in)    :: froude(ims:ime,kms:kme,jms:jme)

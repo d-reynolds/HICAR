@@ -1,0 +1,54 @@
+# Faithful reproduction of the GitHub-hosted CPU full-test runner
+# (ubuntu-22.04 = gfortran-11 + mpich) for debugging GH runner failures locally
+# Build context = repo root:  docker build -f .github/docker/Dockerfile.ci-repro -t hicar-ci-repro .
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN echo 'APT::Get::Assume-Yes "true";' > /etc/apt/apt.conf.d/90assumeyes
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential gfortran cmake git wget ca-certificates m4 pkg-config \
+        mpich libmpich-dev \
+        zlib1g-dev libfftw3-dev libxml2-dev \
+        python3 python3-pip python3-venv \
+        vim less nano bash-completion \
+    && rm -rf /var/lib/apt/lists/*
+
+# The install script uses `sudo apt-get` for its apt deps (already installed
+# above). The container runs as root with no sudo, so provide a passthrough shim.
+RUN printf '#!/bin/sh\nexec "$@"\n' > /usr/local/bin/sudo && chmod +x /usr/local/bin/sudo
+
+ENV GITHUB_WORKSPACE=/work
+WORKDIR /work
+
+# --- Stage 1: dependency toolchain (cached across source edits) -------------
+# Only the install script is needed to build zlib/HDF5/PnetCDF/netcdf into
+# ~/installdir, so copy it alone first. This layer is reused whenever the script
+# is unchanged, so editing HICAR sources does NOT rebuild netcdf. The build mode
+# ARGs are declared AFTER this so changing them never rebuilds the dep stack.
+COPY .github/scripts/hicar_install_utils.sh /work/.github/scripts/hicar_install_utils.sh
+RUN bash .github/scripts/hicar_install_utils.sh hicar_dependencies
+
+# --- Stage 2: HICAR build (re-runs on any source/CMake change) --------------
+# HICAR_MODE / HICAR_CMAKE_EXTRA are build ARGs so one Dockerfile reproduces any
+# CPU lane's build. Examples:
+#   (default)                                       -> cpu-debug
+#   --build-arg HICAR_MODE=release                  -> cpu-release
+#   --build-arg HICAR_CMAKE_EXTRA=-DSNOWPACK_CPP=ON -> snowpack C++ reference build
+ARG HICAR_MODE=debug
+ARG HICAR_CMAKE_EXTRA=""
+# Cap HICAR build parallelism to fit a memory-limited Docker VM. HICAR + its
+# bundled deps (noah_mp, rte-rrtmgp) have large Fortran files that use ~1-2 GB each
+# in gfortran; too many in parallel OOM-kill f951 ("Killed signal terminated
+# program f951") on a stock ~8 GB Docker VM. 2 is a safe default there; raise it
+# after giving Docker more RAM (Settings > Resources > Memory), or drop to 1 if a
+# single heavy file (e.g. SnowInputSnicarMod.F90) still gets killed.
+ARG MAKE_JOBS=2
+ENV HICAR_MODE=${HICAR_MODE}
+ENV HICAR_CMAKE_EXTRA=${HICAR_CMAKE_EXTRA}
+ENV MAKE_JOBS=${MAKE_JOBS}
+COPY . /work
+RUN bash .github/scripts/hicar_install_utils.sh hicar_install \
+ && bash .github/scripts/hicar_install_utils.sh gen_test_run_data
+
+# Default: run the unit tests the way CI does (LD_LIBRARY_PATH for the dep libs).
+CMD ["bash","-lc","export LD_LIBRARY_PATH=$HOME/installdir/lib:$LD_LIBRARY_PATH && cd /work/build && mpiexec -np 4 tests/HICAR-tester"]

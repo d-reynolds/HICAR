@@ -18,7 +18,7 @@ if [ $# -lt 3 ]; then
     echo "Usage: $0 <hicar_repo> <cpu_exe> <gpu_exe> [--tolerance-spec PATH]"; exit 1
 fi
 hicar_repo=$(cd "$1" && pwd); CPU_EXE="$2"; GPU_EXE="$3"; shift 3
-TOL_SPEC="$hicar_repo/tests/tolerances.yaml"
+TOL_SPEC="$hicar_repo/tests/tolerances/tolerances_gpu_cpu.yaml"
 while [ $# -gt 0 ]; do
     case "$1" in
         --tolerance-spec) TOL_SPEC="$2"; shift 2;;
@@ -32,6 +32,11 @@ done
 COMPARE="$hicar_repo/tests/compare_outputs.py"
 STANDARD_GEN="$hicar_repo/tests/Test_Cases/input/nml_gen_scripts/Standard.sh"
 OUTPUT_FILENAME="Gaudergrat_250m_2017-02-14_00-00-00.nc"
+
+# set_var <nml_file> <name> <value> <group>: set a namelist variable by name,
+# inserting it into &<group> if absent (replaces the old `sed -i` edits). See
+# helpers/example_namelists/set_nml_var.py.
+set_var() { "${PYTHON:-python3}" "$hicar_repo/helpers/example_namelists/set_nml_var.py" "$1" "$2" "$3" --group "$4" --insert || exit 1; }
 # Radiation scheme used for BOTH runs so physics is identical. rrtmgp is the
 # portable RTE+RRTMGP scheme (runs on host with OPENACC=OFF and on the GPU). If a
 # clean run needs the legacy rrtmg instead, set RAD=rrtmg — but keep it the SAME
@@ -52,6 +57,8 @@ cd "$hicar_repo/tests/Test_Cases"
 # separately in the CPU full-test).
 np=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l | tr -d ' ')
 [ "${np:-0}" -lt 1 ] && np=1
+# number of total ranks for the run is num gpu * 2, to get one IO process per GPU
+np=$((np * 2))
 export OMP_NUM_THREADS=1
 
 mpiexec_path=""
@@ -71,11 +78,10 @@ run_one() {  # $1=exe  $2=tag
     local nml="cmp_${tag}.nml"
     "$exe" --gen-nml "$nml"
     bash "$STANDARD_GEN" "$nml"
-    sed -i'.bak' "s|output_vars = .*|output_vars = 'all'|" "$nml"
-    sed -i'.bak' "s|output_folder = '../output/Standard/'|output_folder = '${out_dir}/'|" "$nml"
-    sed -i'.bak' "s|restart_folder = '../restart/Standard/'|restart_folder = '${rst_dir}/'|" "$nml"
-    sed -i'.bak' "s|rad = 'rrtmg'|rad = '${RAD}'|g" "$nml"
-    rm -f "${nml}.bak"
+    set_var "$nml" output_vars    "'all'"          output
+    set_var "$nml" output_folder  "'${out_dir}/'"  output
+    set_var "$nml" restart_folder "'${rst_dir}/'"  restart
+    set_var "$nml" rad            "'${RAD}'"       physics
     echo -e "Running ${BLUE}${tag}${NC} (${exe##*/}) with ${np} ranks, rad=${RAD}..."
     "$mpiexec_path" -np "$np" "$exe" "$nml" 1>"cmp_${tag}.out" 2>"cmp_${tag}.err" || {
         echo -e "${RED}${tag} run failed; last stderr:${NC}"; tail -n 20 "cmp_${tag}.err"; exit 1; }
@@ -89,7 +95,19 @@ run_one "$GPU_EXE" gpu
 
 echo "-------------------------------------------------------"
 echo -e "Comparing GPU vs CPU (reference) within tolerance..."
+# pyyaml is needed by compare_outputs.py --tolerance-spec.
 python_exe=$(command -v python3 || command -v python)
+if [ -z "$python_exe" ] || ! "$python_exe" -c "import xarray,numpy,netCDF4,yaml" 2>/dev/null; then
+    venv="${hicar_repo}/tests/Test_Cases/venv"
+    if [ ! -x "${venv}/bin/python" ]; then
+        echo -e "Creating venv at ${venv}"
+        "${python_exe:-python3}" -m venv "$venv"
+        "${venv}/bin/pip" -q install numpy netCDF4 xarray matplotlib pyyaml
+    else
+        "${venv}/bin/pip" -q install pyyaml >/dev/null 2>&1 || true
+    fi
+    python_exe="${venv}/bin/python"
+fi
 "$python_exe" "$COMPARE" \
     "output/cmp_cpu/${OUTPUT_FILENAME}" \
     "output/cmp_gpu/${OUTPUT_FILENAME}" \

@@ -18,6 +18,8 @@ set(TEST_DATA_DIR "${PROJECT_SOURCE_DIR}/Test_Cases")
 ExternalProject_Add(hicar_test_data
   GIT_REPOSITORY    https://github.com/HICAR-Model/Test-Data.git
   GIT_TAG           main
+  GIT_SHALLOW       TRUE
+  GIT_DEPTH         1
   SOURCE_DIR        "${TEST_DATA_DIR}"
   CONFIGURE_COMMAND ""  # No configuration needed for data-only repo
   BUILD_COMMAND     ""  # No build needed
@@ -42,6 +44,7 @@ set(
   tests
   advect
   snow_drift
+  wind_iterative
   control_flow
   halo_exch
   geo

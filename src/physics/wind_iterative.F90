@@ -20,7 +20,7 @@
 module wind_iterative
     use iso_c_binding
     use domain_interface,  only : domain_t
-    use icar_constants,    only : STD_OUT_PE, kVARS
+    use icar_constants,    only : STD_OUT_PE, kVARS, kITERATIVE_WINDS
     use options_interface, only : options_t
     use iso_fortran_env
     use mpi_f08
@@ -75,6 +75,12 @@ module wind_iterative
     integer, parameter :: BASE_PREC_SWEEPS = 2
     integer, parameter :: MAX_PREC_SWEEPS  = 4
     integer :: precond_n_sweeps = BASE_PREC_SWEEPS
+
+    ! Per-solve status/residual/timing printing. Off by default under
+    ! RANS (one solve per physics step makes it far too verbose); on in
+    ! debug mode or under the diagnostic iterative solver (solves only at
+    ! wind updates). Convergence-failure/retry warnings always print.
+    logical :: verbose_solver = .False.
 
     ! 15-point stencil coefficients (same names as AMGX module)
     real, allocatable, dimension(:,:,:) :: A_coef, B_coef, C_coef, D_coef, E_coef, F_coef, G_coef, &
@@ -144,7 +150,7 @@ module wind_iterative
         integer :: solver_rank, east_neighbor, west_neighbor, north_neighbor, south_neighbor
         type(MPI_Comm) :: solver_comm
         ! Flags
-        logical :: structure_uploaded
+        logical :: structure_uploaded = .false.   ! default-init: read at restore_from_cache
         logical :: operator_probed = .false.
         integer :: wind_solver_max_iters
         integer :: precond_n_sweeps = BASE_PREC_SWEEPS
@@ -264,6 +270,9 @@ contains
         south_neighbor = solver_rank - domain%grid%ximages
 
         wind_solver_max_iters = options%wind%wind_solver_iterations
+
+        verbose_solver = options%general%debug .or. &
+                         (options%physics%windtype == kITERATIVE_WINDS)
 
         call init_module_vars(domain)
 
@@ -435,7 +444,7 @@ contains
         ! Solve A x = b at the current preconditioner sweep count
         call bicgstab_solve(domain, wind_solver_max_iters, status, n_iters, res0, res_final)
 
-        if (STD_OUT_PE) then
+        if (STD_OUT_PE .and. verbose_solver) then
             write(*,*) ' HICAR BiCGStab status=', status, ' iterations=', n_iters, &
                        ' precond_n_sweeps=', precond_n_sweeps
             write(*,*) '   Residual at iter 0:    ', res0
@@ -558,7 +567,6 @@ contains
         real(c_double) :: ts, tt, rs, rt, ss
         real(c_double) :: rnorm_global, rnorm_squared, target_norm
         real(c_double) :: rho0_pack(2), b_norm2
-        type(MPI_Request) :: req_sigma, req_red5
         real(c_double) :: t0_solve, t0_region
 
         status_out    = 1
@@ -664,10 +672,8 @@ contains
             !$acc update host(sigma_dev)
             sigma_global = sigma_dev(1)
 #else
-            call MPI_Iallreduce(sigma_local, sigma_global, 1, MPI_DOUBLE_PRECISION, &
-                                MPI_SUM, solver_comm, req_sigma, ierr)
-            ! No useful overlap candidate — wait
-            call MPI_Wait(req_sigma, MPI_STATUS_IGNORE, ierr)
+            call MPI_Allreduce(sigma_local, sigma_global, 1, MPI_DOUBLE_PRECISION, &
+                               MPI_SUM, solver_comm, ierr)
 #endif
             t_allreduce_acc = t_allreduce_acc + (MPI_Wtime() - t0_region)
 
@@ -717,10 +723,8 @@ contains
             !$acc update host(red5_dev)
             red5_global(1:5) = red5_dev(1:5)
 #else
-            call MPI_Iallreduce(red5_local, red5_global, 5, MPI_DOUBLE_PRECISION, &
-                                MPI_SUM, solver_comm, req_red5, ierr)
-            ! No useful overlap candidate — wait
-            call MPI_Wait(req_red5, MPI_STATUS_IGNORE, ierr)
+            call MPI_Allreduce(red5_local, red5_global, 5, MPI_DOUBLE_PRECISION, &
+                               MPI_SUM, solver_comm, ierr)
 #endif
             t_allreduce_acc = t_allreduce_acc + (MPI_Wtime() - t0_region)
 
@@ -1119,11 +1123,12 @@ contains
 
         associate(u_q => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
                   v_q => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
-                  w_q => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+                  w_q => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+                  kms => domain%kms, kme => domain%kme)
         !$acc parallel default(present)
         !$acc loop gang vector collapse(3)
         do j = jms, jme
-            do k = domain%kms, domain%kme
+            do k = kms, kme
                 do i = ims, ime+1
                     u_q(i,k,j) = 0.0
                 enddo
@@ -1131,7 +1136,7 @@ contains
         enddo
         !$acc loop gang vector collapse(3)
         do j = jms, jme+1
-            do k = domain%kms, domain%kme
+            do k = kms, kme
                 do i = ims, ime
                     v_q(i,k,j) = 0.0
                 enddo
@@ -1139,7 +1144,7 @@ contains
         enddo
         !$acc loop gang vector collapse(3)
         do j = jms, jme
-            do k = domain%kms, domain%kme
+            do k = kms, kme
                 do i = ims, ime
                     w_q(i,k,j) = 0.0
                 enddo
@@ -1637,44 +1642,44 @@ contains
         nreq = 0
         if (.not. domain%east_boundary) then
             nreq = nreq + 1
-            call MPI_Irecv(east_recv,  nz_w*ny_w, MPI_DOUBLE_PRECISION, east_neighbor,  tag_we, &
+            call MPI_Irecv(east_recv(k_s-1, j_s-1),  nz_w*ny_w, MPI_DOUBLE_PRECISION, east_neighbor,  tag_we, &
                            solver_comm, reqs(nreq), ierr)
         endif
         if (.not. domain%west_boundary) then
             nreq = nreq + 1
-            call MPI_Irecv(west_recv,  nz_w*ny_w, MPI_DOUBLE_PRECISION, west_neighbor,  tag_ew, &
+            call MPI_Irecv(west_recv(k_s-1, j_s-1),  nz_w*ny_w, MPI_DOUBLE_PRECISION, west_neighbor,  tag_ew, &
                            solver_comm, reqs(nreq), ierr)
         endif
         if (.not. domain%north_boundary) then
             nreq = nreq + 1
-            call MPI_Irecv(north_recv, nx_w*nz_w, MPI_DOUBLE_PRECISION, north_neighbor, tag_sn, &
+            call MPI_Irecv(north_recv(i_s-1, k_s-1), nx_w*nz_w, MPI_DOUBLE_PRECISION, north_neighbor, tag_sn, &
                            solver_comm, reqs(nreq), ierr)
         endif
         if (.not. domain%south_boundary) then
             nreq = nreq + 1
-            call MPI_Irecv(south_recv, nx_w*nz_w, MPI_DOUBLE_PRECISION, south_neighbor, tag_ns, &
+            call MPI_Irecv(south_recv(i_s-1, k_s-1), nx_w*nz_w, MPI_DOUBLE_PRECISION, south_neighbor, tag_ns, &
                            solver_comm, reqs(nreq), ierr)
         endif
 
         ! Post all Isends
         if (.not. domain%east_boundary) then
             nreq = nreq + 1
-            call MPI_Isend(east_send,  nz_w*ny_w, MPI_DOUBLE_PRECISION, east_neighbor,  tag_ew, &
+            call MPI_Isend(east_send(k_s-1, j_s-1),  nz_w*ny_w, MPI_DOUBLE_PRECISION, east_neighbor,  tag_ew, &
                            solver_comm, reqs(nreq), ierr)
         endif
         if (.not. domain%west_boundary) then
             nreq = nreq + 1
-            call MPI_Isend(west_send,  nz_w*ny_w, MPI_DOUBLE_PRECISION, west_neighbor,  tag_we, &
+            call MPI_Isend(west_send(k_s-1, j_s-1),  nz_w*ny_w, MPI_DOUBLE_PRECISION, west_neighbor,  tag_we, &
                            solver_comm, reqs(nreq), ierr)
         endif
         if (.not. domain%north_boundary) then
             nreq = nreq + 1
-            call MPI_Isend(north_send, nx_w*nz_w, MPI_DOUBLE_PRECISION, north_neighbor, tag_ns, &
+            call MPI_Isend(north_send(i_s-1, k_s-1), nx_w*nz_w, MPI_DOUBLE_PRECISION, north_neighbor, tag_ns, &
                            solver_comm, reqs(nreq), ierr)
         endif
         if (.not. domain%south_boundary) then
             nreq = nreq + 1
-            call MPI_Isend(south_send, nx_w*nz_w, MPI_DOUBLE_PRECISION, south_neighbor, tag_sn, &
+            call MPI_Isend(south_send(i_s-1, k_s-1), nx_w*nz_w, MPI_DOUBLE_PRECISION, south_neighbor, tag_sn, &
                            solver_comm, reqs(nreq), ierr)
         endif
 
@@ -1787,12 +1792,14 @@ contains
                   jaco_v_domain => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
                   jaco_domain   => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d, &
                   dzdx_u => domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, &
-                  dzdy_v => domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d)
+                  dzdy_v => domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, &
+                  mf_mx_u => domain%mapfac_mx_u, &
+                  mf_my_v => domain%mapfac_my_v)
 
         !$acc enter data create(u_temp, v_temp, u_dlambdz, v_dlambdz, rho, rho_u, rho_v, rho_w)
         !$acc data present(density, u, v, jaco_u_domain, jaco_v_domain, jaco_domain, dzdx_u, dzdy_v, &
         !$acc              u_temp, v_temp, u_dlambdz, v_dlambdz, rho, rho_u, rho_v, rho_w, &
-        !$acc              alpha, dz_if, lambda_3d)
+        !$acc              alpha, dz_if, lambda_3d, mf_mx_u, mf_my_v)
 
         !$acc kernels
         rho   = 1.0
@@ -2003,13 +2010,19 @@ contains
             enddo
         enddo
 
+        ! Map factors: the horizontal lambda gradient in TRUE distance is
+        ! m_x * (terrain-following bracket) — the whole bracket scales,
+        ! including the dzdx cross term (true slope = m_x * grid slope).
+        ! Factors are exactly 1.0 when use_map_factors is off. The probed
+        ! operator A = D∘G absorbs these on the next (re-)probe.
         !$acc parallel loop gang vector collapse(3)
         do j = j_s, j_e
             do k = k_s, k_e
                 do i = i_start, i_end
-                    u(i,k,j) = u(i,k,j) + 0.5 * ( (lambda_3d(i,k,j) - lambda_3d(i-1,k,j)) / dx - &
-                                                   dzdx_u(i,k,j) * (u_dlambdz(i,k,j)) / jaco_u_domain(i,k,j) ) &
-                                                / (rho_u(i,k,j))
+                    u(i,k,j) = u(i,k,j) + 0.5 * mf_mx_u(i,j) * &
+                                          ( (lambda_3d(i,k,j) - lambda_3d(i-1,k,j)) / dx - &
+                                            dzdx_u(i,k,j) * (u_dlambdz(i,k,j)) / jaco_u_domain(i,k,j) ) &
+                                          / (rho_u(i,k,j))
                 enddo
             enddo
         enddo
@@ -2018,9 +2031,10 @@ contains
         do j = j_start, j_end
             do k = k_s, k_e
                 do i = i_s, i_e
-                    v(i,k,j) = v(i,k,j) + 0.5 * ( (lambda_3d(i,k,j) - lambda_3d(i,k,j-1)) / dx - &
-                                                   dzdy_v(i,k,j) * (v_dlambdz(i,k,j)) / jaco_v_domain(i,k,j) ) &
-                                                / (rho_v(i,k,j))
+                    v(i,k,j) = v(i,k,j) + 0.5 * mf_my_v(i,j) * &
+                                          ( (lambda_3d(i,k,j) - lambda_3d(i,k,j-1)) / dx - &
+                                            dzdy_v(i,k,j) * (v_dlambdz(i,k,j)) / jaco_v_domain(i,k,j) ) &
+                                          / (rho_v(i,k,j))
                 enddo
             enddo
         enddo

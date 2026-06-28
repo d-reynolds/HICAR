@@ -44,6 +44,31 @@ endmacro(FIND_HEADER_PATH)
 
 include(ExternalProject)
 
+# Resilient git clone wrapper for the flaky upstream host (git.wsl.ch). Used as a
+# DOWNLOAD_COMMAND below so a transient multi-minute outage retries with backoff
+# instead of failing the build (CMake's built-in gitclone only retries 3 times
+# back-to-back). find_package(Git) gives GIT_EXECUTABLE since the declares no
+# longer pass GIT_REPOSITORY (which would otherwise have provided it). Not
+# REQUIRED: the pre-installed-library branch below needs no clone, so it must not
+# hard-depend on git just because this module was included.
+find_package(Git)
+set(GIT_CLONE_RETRY_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/git_clone_retry.cmake")
+
+# Stable, build-tree-independent cache of the snowpack/meteoio source clones,
+# used by git_clone_retry as the outage FALLBACK (so a git.wsl.ch stall does not
+# fail the build). CI keeps it warm with actions/cache; it survives `rm -rf
+# build/*` because it lives outside the build tree. Override with
+# -DHICAR_DEPS_SRC_CACHE=... (e.g. on a runner where $HOME is not writable).
+if(NOT DEFINED HICAR_DEPS_SRC_CACHE)
+    if(DEFINED ENV{HICAR_DEPS_SRC_CACHE})
+        set(HICAR_DEPS_SRC_CACHE "$ENV{HICAR_DEPS_SRC_CACHE}")
+    elseif(DEFINED ENV{HOME})
+        set(HICAR_DEPS_SRC_CACHE "$ENV{HOME}/.cache/hicar-deps-src")
+    else()
+        set(HICAR_DEPS_SRC_CACHE "${CMAKE_BINARY_DIR}/../.hicar-deps-src")
+    endif()
+endif()
+
 if (SNOWPACK_INCLUDE_DIR AND SNOWPACK_LIBRARY)
   # Already in cache, be silent
   set (SNOWPACK_FIND_QUIETLY TRUE)
@@ -70,24 +95,35 @@ FIND_LIB(snowpack SNOWPACK_LIBRARY "${SNOWPACK_DIR}")
 FIND_LIB(snowpack_fortran SNOWPACK_FORTRAN_LIBRARY "${SNOWPACK_DIR}")
 FIND_LIB(meteoio METEOIO_LIBRARY "${METEOIO_DIR}")
 
-if (SNOWPACK_FORTRAN) 
-    # If GPU SNOWPACK is enabled, also look for the GPU Fortran bindings library
-    message(STATUS "SNOWPACK_FORTRAN is enabled, only fetching snowpack repo...")
+if (NOT SNOWPACK_CPP)
+    # Native-Fortran SNOWPACK port (default): fetch the snowpack repo only (the
+    # fortran/*.F90 bindings are compiled into HICAR; no C++ build needed).
+    message(STATUS "Native-Fortran SNOWPACK port: fetching snowpack repo only...")
 
     set(SNOWPACK_DIR "${CMAKE_BINARY_DIR}/external/SNOWPACK" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
     set(SNOWPACK_BUILD "${CMAKE_BINARY_DIR}/external/SNOWPACK-build" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
     set(SNOWPACK_STAMPS "${CMAKE_BINARY_DIR}/external/SNOWPACK-stamps" CACHE PATH "Directory where SNOWPACK is installed" FORCE)
 
-    # Fetch SNOWPACK
+    # Fetch SNOWPACK — DOWNLOAD ONLY. HICAR compiles the fortran/*.F90 bindings
+    # into its own target and never builds SNOWPACK's CMake project. SOURCE_SUBDIR
+    # points at a directory that contains no CMakeLists.txt, so
+    # FetchContent_MakeAvailable populates the sources without calling
+    # add_subdirectory() on them. (Replaces the now-deprecated single-argument
+    # FetchContent_Populate(SNOWPACK); see CMake policy CMP0169.)
     FetchContent_Declare(SNOWPACK
-        GIT_REPOSITORY    https://git.wsl.ch/snow-models/snowpack.git
-        GIT_TAG           fortran-bindings
-        GIT_SHALLOW       TRUE
+        DOWNLOAD_COMMAND  ${CMAKE_COMMAND}
+            -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+            -DREPO=https://git.wsl.ch/snow-models/snowpack.git
+            -DTAG=fortran-bindings
+            -DDEST=${SNOWPACK_DIR}
+            -DFALLBACK=${HICAR_DEPS_SRC_CACHE}/SNOWPACK
+            -P ${GIT_CLONE_RETRY_SCRIPT}
         PREFIX            "${SNOWPACK_STAMPS}"
         SOURCE_DIR        "${SNOWPACK_DIR}"
         BINARY_DIR        "${SNOWPACK_BUILD}"
+        SOURCE_SUBDIR     __hicar_download_only__
     )
-	FetchContent_Populate(SNOWPACK)
+	FetchContent_MakeAvailable(SNOWPACK)
 
     set(SNOWPACK_FOUND TRUE)
 
@@ -152,10 +188,13 @@ else()
 
     # Build MeteoIO first (SNOWPACK dependency)
     ExternalProject_Add(MeteoIO
-        GIT_REPOSITORY    https://git.wsl.ch/snow-models/meteoio.git
-        GIT_TAG           master
-        GIT_SHALLOW       TRUE
-        UPDATE_DISCONNECTED TRUE
+        DOWNLOAD_COMMAND  ${CMAKE_COMMAND}
+            -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+            -DREPO=https://git.wsl.ch/snow-models/meteoio.git
+            -DTAG=master
+            -DDEST=${METEOIO_DIR}
+            -DFALLBACK=${HICAR_DEPS_SRC_CACHE}/meteoio
+            -P ${GIT_CLONE_RETRY_SCRIPT}
         PREFIX            "${METEOIO_STAMPS}"
         SOURCE_DIR        "${METEOIO_DIR}"
         BINARY_DIR        "${METEOIO_BUILD}"
@@ -168,7 +207,7 @@ else()
             -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${METEOIO_DIR}/lib
             -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=${METEOIO_DIR}/lib
             -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${METEOIO_DIR}/lib
-        BUILD_COMMAND     ${CMAKE_COMMAND} --build . --parallel
+        BUILD_COMMAND     ${CMAKE_COMMAND} --build . --parallel 4
         INSTALL_COMMAND   ${CMAKE_COMMAND} --install . --prefix ${METEOIO_DIR} --component headers
             COMMAND ${CMAKE_COMMAND} -E make_directory ${METEOIO_DIR}/lib
             COMMAND sh -c "cp -P ${METEOIO_BUILD}/meteoio/${CMAKE_SHARED_LIBRARY_PREFIX}meteoio${CMAKE_SHARED_LIBRARY_SUFFIX}* ${METEOIO_DIR}/lib/ 2>/dev/null || true"
@@ -192,10 +231,13 @@ else()
     # Build SNOWPACK (depends on MeteoIO)
     ExternalProject_Add(SNOWPACK
         DEPENDS           MeteoIO
-        GIT_REPOSITORY    https://git.wsl.ch/snow-models/snowpack.git
-        GIT_TAG           fortran-bindings
-        GIT_SHALLOW       TRUE
-        UPDATE_DISCONNECTED TRUE
+        DOWNLOAD_COMMAND  ${CMAKE_COMMAND}
+            -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+            -DREPO=https://git.wsl.ch/snow-models/snowpack.git
+            -DTAG=fortran-bindings
+            -DDEST=${SNOWPACK_DIR}
+            -DFALLBACK=${HICAR_DEPS_SRC_CACHE}/SNOWPACK
+            -P ${GIT_CLONE_RETRY_SCRIPT}
         PREFIX            "${SNOWPACK_STAMPS}"
         SOURCE_DIR        "${SNOWPACK_DIR}"
         BINARY_DIR        "${SNOWPACK_BUILD}"
@@ -210,7 +252,7 @@ else()
             -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${SNOWPACK_DIR}/lib
             -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=${SNOWPACK_DIR}/lib
             -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${SNOWPACK_DIR}/lib
-        BUILD_COMMAND     ${CMAKE_COMMAND} --build . --parallel
+        BUILD_COMMAND     ${CMAKE_COMMAND} --build . --parallel 4
         INSTALL_COMMAND   ${CMAKE_COMMAND} --install . --prefix ${SNOWPACK_DIR} --component headers
             COMMAND ${CMAKE_COMMAND} -E make_directory ${SNOWPACK_DIR}/lib
             COMMAND sh -c "cp -P ${SNOWPACK_BUILD}/snowpack/${CMAKE_SHARED_LIBRARY_PREFIX}snowpack${CMAKE_SHARED_LIBRARY_SUFFIX}* ${SNOWPACK_DIR}/lib/ 2>/dev/null || true"

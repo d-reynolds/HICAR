@@ -6,12 +6,12 @@
 # SNOWPACK snow model, from a prescribed multi-layer snowpack, using two
 # executables that differ ONLY in the snow driver:
 #
-#   reference (A): built with -DSNOWPACK=ON          (C++ Alpine3D/SNOWPACK)
-#   candidate (B): built with -DSNOWPACK_FORTRAN=ON  (native-Fortran port)
+#   reference (A): built with -DSNOWPACK_CPP=ON  (C++ Alpine3D/SNOWPACK)
+#   candidate (B): default build                 (native-Fortran port)
 #
 # Both are CPU/gfortran builds reading the SAME seeded domain through the SAME
 # namelist, so any output difference is the snow implementation. Outputs are
-# compared over ALL variables against tests/snowpack/tolerances_snowpack.yaml.
+# compared over ALL variables against tests/tolerances/tolerances_snowpack.yaml.
 #
 # Usage:
 #   test_snowpack_compare.sh <hicar_repo> <cpp_exe> <fortran_exe> [np]
@@ -49,6 +49,11 @@ fi
 
 hicar_repo="$(cd "$1" && pwd)"
 
+# set_var <nml_file> <name> <value> <group>: set a namelist variable by name,
+# inserting it into &<group> if absent (replaces the old `sed -i` edits). See
+# helpers/example_namelists/set_nml_var.py.
+set_var() { "${PYTHON:-python3}" "$hicar_repo/helpers/example_namelists/set_nml_var.py" "$1" "$2" "$3" --group "$4" --insert || exit 1; }
+
 # --- bless mode: post the parity-blessed status (with the SNOWPACK SHA) -----
 if [ "$2" = "--bless" ]; then
     shift 2
@@ -77,7 +82,7 @@ if [ "$2" = "--bless" ]; then
     if [ -z "$sp_sha" ] || [ "$sp_sha" = "unknown" ]; then
         echo -e "${RED}Cannot determine the SNOWPACK anchor SHA: no git checkout at${NC}"
         echo -e "${RED}${snowpack_dir} and no snowpack_commit in ${meta}.${NC}"
-        echo "Build (-DSNOWPACK_FORTRAN=ON) or run the comparison first, or pass --snowpack-dir."
+        echo "Build SNOWPACK or run the comparison first, or pass --snowpack-dir."
         exit 1
     fi
     head_sha=$(git -C "$hicar_repo" rev-parse HEAD)
@@ -212,7 +217,7 @@ input_dir="${hicar_repo}/tests/Test_Cases/input"
 domains_dir="${hicar_repo}/tests/Test_Cases/domains"
 nmlgen_dir="${input_dir}/nml_gen_scripts"
 compare_script="${hicar_repo}/tests/compare_outputs.py"
-tol_spec="${hicar_repo}/tests/snowpack/tolerances_snowpack.yaml"
+tol_spec="${hicar_repo}/tests/tolerances/tolerances_snowpack.yaml"
 seeder="${hicar_repo}/tests/snowpack/make_snowpack_init.py"
 seeded_domain="${domains_dir}/Gaudergrat_250m_snowpack.nc"
 
@@ -280,9 +285,9 @@ echo -e "Seeding domain with a 14-layer / 1 m snowpack on all land cells..."
 "$python_exe" "$seeder" "${domains_dir}/Gaudergrat_250m.nc" "$seeded_domain" \
     --n-layers 14 --depth 1.0 || { echo -e "${RED}domain seeding failed${NC}"; exit 1; }
 
-# --- generate the base namelist + apply the SNOWPACK_Compare overrides -------
-default_nml="${input_dir}/default_hicar_options.nml"
-"$cpp_exe" --gen-nml "$default_nml" >/dev/null 2>&1
+# The comparison namelist is generated from the committed alpine_realdata
+# example by nml_gen_scripts/SNOWPACK_Compare.sh (same pattern as the other test
+# cases), so there is no separate base-namelist step here.
 
 # run_one <exe> <label>  -> sets RUN_OUT to the produced output .nc, returns status
 run_one() {
@@ -292,27 +297,32 @@ run_one() {
     rm -rf "$out_dir" "$rst_dir"; mkdir -p "$out_dir" "$rst_dir"
 
     local nml="${input_dir}/SNOWPACK_${label}.nml"
-    cp "$default_nml" "$nml"
     ( cd "$input_dir" && bash "${nmlgen_dir}/SNOWPACK_Compare.sh" "$(basename "$nml")" )
     # per-build output/restart folders
-    sed -i'.bak' "s|output_folder = '../output/Standard/'|output_folder = '../output/SNOWPACK_${label}/'|g" "$nml"
-    sed -i'.bak' "s|restart_folder = '../restart/Standard/'|restart_folder = '../restart/SNOWPACK_${label}/'|g" "$nml"
-    rm -f "${nml}.bak"
+    set_var "$nml" output_folder  "'../output/SNOWPACK_${label}/'"  output
+    set_var "$nml" restart_folder "'../restart/SNOWPACK_${label}/'" restart
 
     echo
     echo -e "Running ${BLUE}${label}${NC} ($exe) with ${np} ranks ..."
     ( cd "$input_dir" && "$mpiexec_path" -np "$np" "$exe" "$(basename "$nml")" ) \
         > "${input_dir}/SNOWPACK_${label}.out" 2> "${input_dir}/SNOWPACK_${label}.err"
     local status=$?
+    # HICAR writes its fatal messages (incl. a bare `stop`, which exits 0) to
+    # STDOUT, not stderr -- so always surface the tail of the .out on failure.
     if [ $status -ne 0 ]; then
-        echo -e "${RED}${label} run failed (exit ${status}). Last stderr:${NC}"
+        echo -e "${RED}${label} run failed (exit ${status}). Last stdout:${NC}"
+        tail -n 25 "${input_dir}/SNOWPACK_${label}.out"
+        echo -e "${RED}Last stderr:${NC}"
         tail -n 15 "${input_dir}/SNOWPACK_${label}.err"
         RUN_OUT=""
         return 1
     fi
     RUN_OUT="$(ls -1 "${out_dir}"/*.nc 2>/dev/null | head -1)"
     if [ -z "$RUN_OUT" ]; then
-        echo -e "${RED}${label}: no output .nc produced in ${out_dir}${NC}"
+        # Exit 0 but no output -> typically a bare `stop` (exit 0) during init.
+        # The reason is in stdout; show it so CI logs are self-diagnosing.
+        echo -e "${RED}${label}: no output .nc produced in ${out_dir}. Last stdout:${NC}"
+        tail -n 25 "${input_dir}/SNOWPACK_${label}.out"
         return 1
     fi
     echo -e "${GREEN}${label} completed${NC} -> $(basename "$RUN_OUT")"

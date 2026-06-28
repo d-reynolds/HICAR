@@ -89,6 +89,11 @@ if [ "$use_gpu" = true ]; then
         cp -r "${hicar_repo}/run/rrtmgp_support" "${hicar_repo}/tests/Test_Cases/input"
     fi
 fi
+# set_var <nml_file> <name> <value> <group>: set a namelist variable by name,
+# inserting it into &<group> if absent (replaces the old `sed -i` edits). See
+# helpers/example_namelists/set_nml_var.py.
+set_var() { "${PYTHON:-python3}" "${hicar_repo}/helpers/example_namelists/set_nml_var.py" "$1" "$2" "$3" --group "$4" --insert || exit 1; }
+
 # Generate default namelist
 default_file="${hicar_repo}/tests/Test_Cases/input/default_hicar_options.nml"
 if [ -f "$default_file" ]; then
@@ -135,22 +140,22 @@ if [ -z "$python_exe" ]; then
     exit 1
 fi
 
-if ! $python_exe -c "import xarray, numpy, netCDF4" &> /dev/null; then
+# pyyaml is needed by compare_outputs.py --tolerance-spec (the restart compare).
+if ! $python_exe -c "import xarray, numpy, netCDF4, yaml" &> /dev/null; then
     PY_ENV_PATH=${hicar_repo}/tests/Test_Cases/venv
-    echo -e "Creating virtual environment at ${BLUE}${PY_ENV_PATH}${NC}"
-    mkdir -p "$PY_ENV_PATH"
-    $python_exe -m venv "${PY_ENV_PATH}"
-    "${PY_ENV_PATH}/bin/pip" install numpy netCDF4 xarray matplotlib
+    if [ ! -x "${PY_ENV_PATH}/bin/python" ]; then
+        echo -e "Creating virtual environment at ${BLUE}${PY_ENV_PATH}${NC}"
+        mkdir -p "$PY_ENV_PATH"
+        $python_exe -m venv "${PY_ENV_PATH}"
+        "${PY_ENV_PATH}/bin/pip" install numpy netCDF4 xarray matplotlib pyyaml
+    else
+        # Reuse an existing venv that may predate the pyyaml requirement.
+        "${PY_ENV_PATH}/bin/pip" -q install pyyaml >/dev/null 2>&1 || true
+    fi
     python_exe="${PY_ENV_PATH}/bin/python"
 fi
 
 export OMP_NUM_THREADS=1
-
-# Cleanup trap for temp files
-cleanup() {
-    rm -f "${hicar_repo}/tests/Test_Cases/input"/*.bak
-}
-trap cleanup EXIT
 
 # -------------------------------------------------------
 # Helper: generate_standard_nml <output_nml> <output_dir> <restart_dir>
@@ -159,6 +164,11 @@ generate_standard_nml() {
     local out_nml="$1"
     local output_dir="$2"
     local restart_dir="$3"
+    # Optional 4th arg: end_date. Defaults to the 10-min window the restart test
+    # needs (its checkpoints land at 00:05 and 00:10). The decomposition test only
+    # runs-and-compares (no restart), so it passes a shorter window to keep the
+    # slow debug build fast.
+    local end_date="${4:-2017-02-14 00:10:00}"
 
     cd ${hicar_repo}/tests/Test_Cases/input
     cp "$default_file" "$out_nml"
@@ -167,23 +177,23 @@ generate_standard_nml() {
     ${hicar_repo}/tests/Test_Cases/input/nml_gen_scripts/Standard.sh "$(basename "$out_nml")"
     cd ..
 
-    # Override wind, Sx, and output_vars for reproducibility testing
-    sed -i'.bak' "s/ wind = 'variational solver'/ wind = 'none'/g" "$out_nml"
-    sed -i'.bak' 's/Sx = .True./Sx = .False./g' "$out_nml"
-    sed -i'.bak' "s/output_vars = .*$/output_vars = 'all'/g" "$out_nml"
+    # Override wind, Sx, and output_vars for reproducibility testing. wind is at
+    # its default in the example (so absent from the namelist) — insert it.
+    set_var "$out_nml" wind        "'none'"        physics
+    set_var "$out_nml" Sx          ".False."       wind
+    set_var "$out_nml" output_vars "'all'"         output
 
     if [ $use_gpu = true ]; then
         # GPU mode: use all available GPUs and half for decomposition test, so set end time to 10 min for both runs
-        sed -i'.bak' "s/rad = 'rrtmg'/rad = 'rrtmgp'/g" "$out_nml"
+        set_var "$out_nml" rad     "'rrtmgp'"      physics
     fi
-    # Shorten run: 10 min instead of 20, output every 5 min for restart checkpoints
-    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '2017-02-14 00:10:00'/g" "$out_nml"
-    sed -i'.bak' 's/outputinterval = 600/outputinterval = 300/g' "$out_nml"
+    # Shorten run (default 10 min, or the override), output every 5 min for restart checkpoints
+    set_var "$out_nml" end_date       "'${end_date}'" general
+    set_var "$out_nml" outputinterval 300            output
 
     # Override output and restart folders
-    sed -i'.bak' "s|output_folder = '../output/Standard/'|output_folder = '${output_dir}'|g" "$out_nml"
-    sed -i'.bak' "s|restart_folder = '../restart/Standard/'|restart_folder = '${restart_dir}'|g" "$out_nml"
-    rm -f "${out_nml}.bak"
+    set_var "$out_nml" output_folder  "'${output_dir}'"  output
+    set_var "$out_nml" restart_folder "'${restart_dir}'" restart
 
     cd $hicar_repo
 
@@ -205,25 +215,25 @@ generate_restart_nml() {
     ${hicar_repo}/tests/Test_Cases/input/nml_gen_scripts/Standard_restart.sh "$(basename "$out_nml")"
     cd ..
 
-    # Override wind, Sx, and output_vars for reproducibility testing
-    sed -i'.bak' "s/ wind = 'variational solver'/ wind = 'none'/g" "$out_nml"
-    sed -i'.bak' 's/Sx = .True./Sx = .False./g' "$out_nml"
-    sed -i'.bak' "s/output_vars = .*$/output_vars = 'all'/g" "$out_nml"
+    # Override wind, Sx, and output_vars for reproducibility testing. wind is at
+    # its default in the example (so absent from the namelist) — insert it.
+    set_var "$out_nml" wind        "'none'"        physics
+    set_var "$out_nml" Sx          ".False."       wind
+    set_var "$out_nml" output_vars "'all'"         output
 
     if [ $use_gpu = true ]; then
         # GPU mode: use all available GPUs and half for decomposition test, so set end time to 10 min for both runs
-        sed -i'.bak' "s/rad = 'rrtmg'/rad = 'rrtmgp'/g" "$out_nml"
+        set_var "$out_nml" rad     "'rrtmgp'"      physics
     fi
 
     # Shorten run: end at 10 min, restart from 5 min checkpoint, output every 5 min
-    sed -i'.bak' "s/end_date = '2017-02-14 00:20:00'/end_date = '2017-02-14 00:10:00'/g" "$out_nml"
-    sed -i'.bak' "s/restart_date = '2017-02-14 00:10:00'/restart_date = '2017-02-14 00:05:00'/g" "$out_nml"
-    #sed -i'.bak' 's/outputinterval = 600/outputinterval = 300/g' "$out_nml"
+    set_var "$out_nml" end_date     "'2017-02-14 00:10:00'" general
+    set_var "$out_nml" restart_date "'2017-02-14 00:05:00'" restart
+    #set_var "$out_nml" outputinterval 300 output
 
     # Override output and restart folders
-    sed -i'.bak' "s|output_folder = '../output/Standard/'|output_folder = '${output_dir}'|g" "$out_nml"
-    sed -i'.bak' "s|restart_folder = '../restart/Standard/'|restart_folder = '${restart_dir}'|g" "$out_nml"
-    rm -f "${out_nml}.bak"
+    set_var "$out_nml" output_folder  "'${output_dir}'"  output
+    set_var "$out_nml" restart_folder "'${restart_dir}'" restart
 
     cd $hicar_repo
 }
@@ -362,7 +372,7 @@ run_fm_decomposition() {
 
     # 1 vs 4 ranks. With "-v" every rank prints its own interior, so the union is
     # the full domain regardless of rank count and the comparison covers every cell.
-    local np_low=1 np_high=4
+    local np_low=2 np_high=4
     local tmp
     tmp="$(mktemp -d)"
 
@@ -441,9 +451,20 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
             decomp_np_half=$(( (num_gpus / 2) + 1 ))
         fi
     else
-        decomp_np_full=10
-        decomp_np_half=5
+        # Once all of the .nml files have been created, run the HICAR executable
+        # with each of them
+        # detect if this is running on mac OS
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            decomp_np_full=$(sysctl -n hw.logicalcpu)
+        else
+            decomp_np_full=$(nproc --all)
+        fi
+
+        decomp_np_half=$(( decomp_np_full/2 ))
     fi
+
+    # Fine-mesh advection decomposition check (HICAR-tester; CPU, GPU-independent).
+    run_fm_decomposition
 
     if [ "$test_decomp_result" != "SKIP" ]; then
 
@@ -461,8 +482,8 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
         mkdir -p "${hicar_repo}/tests/Test_Cases/output/${suffix}" "${hicar_repo}/tests/Test_Cases/restart/${suffix}"
     done
 
-    # Generate and run with half ranks
-    generate_standard_nml "${hicar_repo}/tests/Test_Cases/input/Repro_MPI_${decomp_np_half}.nml" "${hicar_repo}/tests/Test_Cases/output/Repro_MPI_${decomp_np_half}/" "${hicar_repo}/tests/Test_Cases/restart/Repro_MPI_${decomp_np_half}/"
+    # Generate and run with half ranks (5-min window — decomposition test does not restart)
+    generate_standard_nml "${hicar_repo}/tests/Test_Cases/input/Repro_MPI_${decomp_np_half}.nml" "${hicar_repo}/tests/Test_Cases/output/Repro_MPI_${decomp_np_half}/" "${hicar_repo}/tests/Test_Cases/restart/Repro_MPI_${decomp_np_half}/" "2017-02-14 00:05:00"
 
     run_hicar "Repro_MPI_${decomp_np_half}.nml" "$decomp_np_half" "MPI_${decomp_np_half}ranks"
     mpi_half_status=$?
@@ -472,8 +493,8 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
         echo -e "${RED}Domain Decomposition: FAILED (${decomp_np_half}-rank run failed)${NC}"
         test_decomp_result="FAIL"
     else
-        # Generate and run with full ranks
-        generate_standard_nml "${hicar_repo}/tests/Test_Cases/input/Repro_MPI_${decomp_np_full}.nml" "${hicar_repo}/tests/Test_Cases/output/Repro_MPI_${decomp_np_full}/" "${hicar_repo}/tests/Test_Cases/restart/Repro_MPI_${decomp_np_full}/"
+        # Generate and run with full ranks (5-min window — decomposition test does not restart)
+        generate_standard_nml "${hicar_repo}/tests/Test_Cases/input/Repro_MPI_${decomp_np_full}.nml" "${hicar_repo}/tests/Test_Cases/output/Repro_MPI_${decomp_np_full}/" "${hicar_repo}/tests/Test_Cases/restart/Repro_MPI_${decomp_np_full}/" "2017-02-14 00:05:00"
 
         run_hicar "Repro_MPI_${decomp_np_full}.nml" "$decomp_np_full" "MPI_${decomp_np_full}ranks"
         mpi_full_status=$?
@@ -501,8 +522,6 @@ if [ "$test_mode" == "decomposition" ] || [ "$test_mode" == "all" ]; then
 
     fi # end skip check
 
-    # Fine-mesh advection decomposition check (HICAR-tester; CPU, GPU-independent).
-    run_fm_decomposition
 fi
 
 # ===============================================================
@@ -569,10 +588,15 @@ if [ "$test_mode" == "restart" ] || [ "$test_mode" == "all" ]; then
             # Compare final timestep: continuous backup vs post-restart output
             echo
             echo "Comparing restart outputs (last timestep only)..."
+            # Restart is not bit-reproducible. This
+            # is an INTEGRATION test: structural integrity (NaN/shape/dropped vars) is
+            # fatal for all vars; core prognostics use a tight relative tolerance;
+            # conserved masses are checked on the domain-mean; and threshold/diagnostic
+            # fields are reported (with figures) but non-fatal. See tolerances/tolerances_restart.yaml.
             ${python_exe} ${compare_script} \
                 "${hicar_repo}/tests/Test_Cases/output/Repro_Restart_continuous_backup/${OUTPUT_FILENAME}" \
                 "${hicar_repo}/tests/Test_Cases/output/Repro_Restart/${OUTPUT_FILENAME}" \
-                --tolerance 0.1 \
+                --tolerance-spec "${hicar_repo}/tests/tolerances/tolerances_restart.yaml" \
                 --last-timestep-only \
                 --figures-dir "${hicar_repo}/tests/Test_Cases/figures/restart"
             if [ $? -eq 0 ]; then

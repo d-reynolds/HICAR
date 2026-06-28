@@ -1,0 +1,19 @@
+# Restore (or build) the HICAR dependency toolchain in ~/installdir.
+#
+# The caller must check out the repo first (local action). Cache key is the hash
+# of the install script: exact hit => restore + the hicar_dependencies sentinel
+# short-circuits; script changed => full miss => rebuild. No restore-keys — a
+# prefix fallback would restore an installdir built by an OLDER script and the
+# sentinel would then skip rebuilding, silently using stale deps.
+name: Set up HICAR dependencies
+description: Restore the cached netcdf/hdf5/pnetcdf toolchain in ~/installdir, or build it on a miss.
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      with:
+        path: ~/installdir
+        key: hicar-deps-${{ runner.os }}-${{ hashFiles('.github/scripts/hicar_install_utils.sh') }}
+    # Also persists LD_LIBRARY_PATH to $GITHUB_ENV for steps that run the exe.
+    - shell: bash
+      run: bash .github/scripts/hicar_install_utils.sh hicar_dependencies

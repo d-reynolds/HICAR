@@ -10,6 +10,7 @@ program test_driver
     use test_halo_exch, only : collect_halo_exch_suite
     use test_advect, only : collect_advect_suite
     use test_snow_drift, only : collect_snow_drift_suite
+    use test_wind_iterative, only : collect_wind_iterative_suite
     use test_control_flow, only : collect_control_flow_suite
     use test_geo, only : collect_geo_suite
     use test_time, only : collect_time_suite
@@ -23,15 +24,15 @@ program test_driver
     use output_metadata, only: initialize_var_constants
     use string, only: to_lower
     implicit none
-    integer :: stat, is, ierr, my_index, null_unit
+    integer :: stat, global_stat, is, ierr, my_index, null_unit
     character(len=:), allocatable :: suite_name, test_name, first_arg
     type(testsuite_type), allocatable :: testsuites(:)
     character(len=*), parameter :: fmt = '("#", *(1x, a))'
     logical :: init_flag, verbose
     logical :: no_test_run = .True.
     character(len=9) :: file
-#ifdef _OPENACC
     integer :: dev, devNum, local_rank, comm_size
+#ifdef _OPENACC
     type(MPI_Comm) :: local_comm
     integer(acc_device_kind) :: devtype
 #endif
@@ -81,6 +82,7 @@ program test_driver
         new_testsuite("control_flow", collect_control_flow_suite), &
         new_testsuite("advection", collect_advect_suite), &
         new_testsuite("snow_drift", collect_snow_drift_suite), &
+        new_testsuite("wind_iterative", collect_wind_iterative_suite), &
         new_testsuite("geo", collect_geo_suite), &
         new_testsuite("time", collect_time_suite), &
         new_testsuite("utilities", collect_utilities_suite) &
@@ -153,9 +155,13 @@ program test_driver
         end do
     end if
 
-    if (stat > 0) then
-      write(error_unit, '(i0, 1x, a)') stat, "test(s) failed!"
-      error stop
+    call MPI_Allreduce(stat, global_stat, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD)
+
+    if (global_stat > 0) then
+        call MPI_Comm_size(MPI_COMM_WORLD, comm_size)
+
+        if (my_index == 1) write(error_unit, '(i0, 1x, a)') (global_stat/comm_size), "test(s) failed!"
+        call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
     end if
 
     call MPI_Finalize()

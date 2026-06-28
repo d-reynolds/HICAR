@@ -54,7 +54,7 @@ fi
 set -e
 set -x
 
-export JN=-j8
+export JN="-j${MAKE_JOBS:-8}"
 
 if [ -z "$WORKDIR" ]; then
     export WORKDIR=$HOME/workdir
@@ -70,6 +70,16 @@ if [ -z "$INSTALLDIR" ]; then
     fi
 fi
 export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
+
+# Under GitHub Actions, each step runs in a fresh shell, so an `export` here is
+# lost by the next step. Persist the runtime library path to $GITHUB_ENV so the
+# later steps that RUN the HICAR executable (CLI test, unit tests, integration)
+# can resolve the dependency libs (HDF5/NetCDF/FFTW) in $INSTALLDIR/lib. Guarded
+# so the path is added once, not accumulated across the deps/build/data steps.
+if [ -n "$GITHUB_ENV" ] && [[ ":${PERSISTED_LD_LIBRARY_PATH:-}:" != *":${INSTALLDIR}/lib:"* ]]; then
+    echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"   # already has ${INSTALLDIR}/lib prefixed above
+    echo "PERSISTED_LD_LIBRARY_PATH=${INSTALLDIR}/lib" >> "$GITHUB_ENV"
+fi
 
 function install_zlib {
     echo install_zlib
@@ -218,6 +228,18 @@ function hicar_dependencies {
     sudo apt-get install libcurl4-gnutls-dev
     sudo apt-get install libfftw3-dev
 
+    # Cache hit: $INSTALLDIR was restored from the dependency cache and already
+    # holds the full toolchain. netcdf-fortran is built last, so its presence
+    # proves zlib/hdf5/pnetcdf/netcdf-c all installed successfully — skip the
+    # (expensive) source builds. The apt packages above live outside $INSTALLDIR
+    # (so they are NOT cached) and are needed at build/run time on every runner,
+    # which is why they install unconditionally before this guard.
+    if ls "$INSTALLDIR"/lib/libnetcdff.* >/dev/null 2>&1; then
+        echo "Dependencies already present in $INSTALLDIR — skipping source builds."
+        export PATH=${INSTALLDIR}/bin:$PATH
+        return 0
+    fi
+
     install_zlib
     install_hdf5
     install_PnetCDF
@@ -232,22 +254,28 @@ function hicar_install {
     echo hicar_install
     pwd
     cd ${GITHUB_WORKSPACE}
-    if [ ! -d "$GITHUB_WORKSPACE/build" ]; then
-        mkdir build
-        cd build
+    # Build directory is overridable via HICAR_BUILD_DIR (default: build). A job that
+    # builds HICAR more than once (e.g. snowpack-compare's C++ vs native-Fortran
+    # builds) can give each build its OWN tree, so the second build's `rm -rf *`
+    # below doesn't delete the first exe's RPATH'd shared libs (libsnowpack.so.*,
+    # libmeteoio.so.*). Single-build callers keep using `build` unchanged.
+    local build_dir="${HICAR_BUILD_DIR:-build}"
+    if [ ! -d "$GITHUB_WORKSPACE/$build_dir" ]; then
+        mkdir "$build_dir"
+        cd "$build_dir"
     else
-        cd build
+        cd "$build_dir"
         rm -rf *
     fi
     export NETCDF_DIR=${INSTALLDIR}
     export FFTW_DIR=/usr
     export PATH=${INSTALLDIR}/bin:$PATH
     export LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
-    cmake ../ -DFSM=OFF -DMODE=${HICAR_MODE:-debug} ${HICAR_CMAKE_EXTRA:-}
+    cmake ../ -DMODE=${HICAR_MODE:-debug} ${HICAR_CMAKE_EXTRA:-}
     make ${JN}
     make install
-    
-    echo "hicar install succeeded"
+
+    echo "hicar install succeeded (build dir: ${build_dir})"
 
 }
 

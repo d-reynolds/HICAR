@@ -1648,10 +1648,6 @@ contains
                 min = 0
                 max = kMAX_NESTS
                 group = "General"
-            case ("phys_suite")
-                description = "Physics suite to use, current options: (HICAR)"
-                group = "General"
-                type = 1
             case ("use_mp_options")
                 description = "Read the microphysics namelist section to set options relevant for the Thompson MP schemes (T/F)"
                 default = ".True."
@@ -1733,7 +1729,9 @@ contains
                 default = "0.0"
                 group = "Domain"
             case("longitude_system")
-                description = "Longitude system, values: (0=Maintain Longitude, 1=Prime Centered, 2=Dateline Centered, 3=Guess Lon)"
+                description = "Longitude convention reconciliation for the domain AND its forcing, values: "//achar(10)//BLNK_CHR_N// &
+                              "(0=Auto [default, pick a seam-free convention from the domain extent], 1=Maintain,"//achar(10)//BLNK_CHR_N// &
+                              "2=Prime Centered [-180..180], 3=Dateline Centered [0..360], "
                 allocate(values(4))
                 values = (/0, 1, 2, 3/)
                 default = "0"
@@ -1745,25 +1743,32 @@ contains
                     "or negative integer representing number of levels below model top."
                 min = -MAXLEVELS
                 max = 1.e6
-                default = "-1."
+                default = "0"
                 group = "Domain"
             case ("sleve")
                 description = "flag for using SLEVE vertical coordinates (Schär et al. 2002) (T/F)"
-                default = ".False."
+                default = ".True."
+                group = "Domain"
+            case ("use_map_factors")
+                description = "Apply map-scale factors (computed from the hi-res lat/lon fields) in the"//achar(10)//BLNK_CHR_N// &
+                    "advection fluxes and wind-solver divergence/correction operators, correcting for"//achar(10)//BLNK_CHR_N// &
+                    "projection distortion of the nominal dx. Falls back to 1.0 (off) with a warning"//achar(10)//BLNK_CHR_N// &
+                    "if the lat/lon fields are degenerate (idealized grids). (T/F)"
+                default = ".True."
                 group = "Domain"
             case ("terrain_smooth_windowsize")
                 description = "Size of the smoothing window used to split large and small scale terrain variations"//achar(10)//BLNK_CHR_N// &
                     "for calculation of the SLEVE coordinate."
                 min = 0
                 max = 100
-                default = "3"
+                default = "5"
                 group = "Domain"
             case ("terrain_smooth_cycles")
                 description = "Number of smoothing cycles used to split large and small scale terrain variations"//achar(10)//BLNK_CHR_N// &
                     "for calculation of the SLEVE coordinate."
                 min = 0
                 max = 200
-                default = "5"
+                default = "100"
                 group = "Domain"
             case ("decay_rate_L_topo")
                 description = "Decay rate for the large scale topography in the SLEVE coordinate"
@@ -1781,7 +1786,7 @@ contains
                 description = "Exponent 'n' in SLEVE coordinate equation (see Schär et al. 2002)"
                 min = 0
                 max = 10
-                default = "1.2"
+                default = "1.35"
                 group = "Domain"
             case("auto_level")
                 description = "Integer that determines whether to create levels automatically (As used in ICON & WRF):"//achar(10)//BLNK_CHR_N// &
@@ -1792,7 +1797,7 @@ contains
                     "        geogebra plots can be found at https://www.geogebra.org/u/maxsesselmann."
                 allocate(values(5))
                 values = [0, 1, 2, 3, 4]
-                default = "0"
+                default = "1"
                 group = "Domain"
             case("height_lowest_level")
                 description = "Lowest level height in meters, can only be forced when using auto_level=1 or 4."
@@ -1804,7 +1809,7 @@ contains
                 description = "Model top height in meters, only used when auto_level = 1, 2, 3 or 4."
                 min = 1000.0
                 max = 30000.0
-                default = "10000.0"
+                default = "8000.0"
                 group = "Domain"
             case("stretch_fac")
                 description = "Factor that controls distribution of the vertical levels, only used when auto_level = 1, 2, 3 or 4."//achar(10)//BLNK_CHR_N// &
@@ -2168,13 +2173,6 @@ contains
             case ("time_varying_z")
                 description = "Forcing Z variable is time varying (T/F)"
                 default = ".False."
-                group = "Forcing"
-                type = 1
-            case("forcing_longitude_system")
-                description = "Longitude system, values: (0=Maintain Logitude, 1=Prime Centered, 2=Dateline Centered, 3=Guess Lon)"
-                allocate(values(4))
-                values = (/0, 1, 2, 3/)
-                default = "0"
                 group = "Forcing"
                 type = 1
             case ("hgtvar")
@@ -2605,7 +2603,7 @@ contains
                                                        "'fluxes' = Surface fluxes from forcing data"//achar(10)//BLNK_CHR_N// &
                                                        "'simple' = cloud fraction based radiation + radiative cooling (NOT SUPPORTED)"//achar(10)//BLNK_CHR_N// &
                                                        "'RRTMG'  = RRTMG"//achar(10)//BLNK_CHR_N// &
-                                                       "'RRTMGP' = RRTMGP"
+                                                       "'RRTMGP' = RRTMGP (GPU accelerated)"
 
                 default = "none"
                 if (present(val_keys)) then
@@ -3307,6 +3305,16 @@ contains
                 values = [1, 2]
                 default = "1"
                 group = "LSM_Parameters"
+            case ("nmp_opt_infdv")
+                description = "Noah-MP Dynamic VIC infiltration option"//achar(10)//BLNK_CHR_N// &
+                                                     "(only active when nmp_opt_runsrf = 6)"//achar(10)//BLNK_CHR_N// &
+                                                     "1 = Philip"//achar(10)//BLNK_CHR_N// &
+                                                     "2 = Green-Ampt"//achar(10)//BLNK_CHR_N// &
+                                                     "3 = Smith-Parlange"
+                allocate(values(3))
+                values = [1, 2, 3]
+                default = "1"
+                group = "LSM_Parameters"
             case ("nmp_opt_rad")
                 description = "Noah-MP Radiative Transfer option"//achar(10)//BLNK_CHR_N// &
                                                      "1 = Modified two-stream (known to cause problems when vegetation fraction is small)"//achar(10)//BLNK_CHR_N// &
@@ -3738,6 +3746,7 @@ contains
                 group = "SM_Parameters"
             case("snowpack_variant")
                 description = "which SnowPack model variant to use"//achar(10)//BLNK_CHR_N// &
+                    "'default' = SnowPack model suited for general simulations"//achar(10)//BLNK_CHR_N// &
                     "'antarctica' = SnowPack model suited for Antarctica simulations"//achar(10)//BLNK_CHR_N// &
                     "'alps' = SnowPack model suited for Alps simulations"
                 if (present(val_keys)) then
@@ -3891,7 +3900,7 @@ contains
                               "smaller values allow for less adjustment of vertical winds (more stable)"
                 min = 0.2
                 max = 2.0
-                default = "-1.0"
+                default = "1.0"
                 group = "Wind"
             case ("TPI_dmax")
                 description = "Maximum lateral distance over which to calculate the TPI parameter"

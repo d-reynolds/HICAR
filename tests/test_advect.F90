@@ -125,13 +125,16 @@ module test_advect
         options%domain%lon_hi = 'lon'
         ! check that the init_conditions_file exists
         if (trim(options%domain%init_conditions_file) /= '') then
-            call check_file_exists(trim(options%domain%init_conditions_file), message='The test domain file does not exist. Ensure that the HICAR_test repo was installed to build/test when building HICAR.')
+            call check_file_exists(trim(options%domain%init_conditions_file), message='The test domain file does not exist. Ensure that the HICAR_test repo was installed and the domain file ../tests/Test_Cases/domains/flat_plane_250m.nc exists.')
         endif
 
         options%domain%dx = 250.0
         options%domain%nz = 20
-        options%domain%dz_levels = 50.0
         options%domain%sleve = .True.
+        ! These would make the advection test fail all-scalar advection by design.
+        ! The rotated cone test below is rather the test for ensuring that the map-factors
+        ! do not cause a problem with the advection scheme.
+        options%domain%use_map_factors = .False.
 
         options%domain%lat_hi = 'lat'
         options%domain%lon_hi = 'lon'
@@ -196,7 +199,7 @@ module test_advect
                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                         domain%its, domain%ite, domain%jts, domain%jte, &
-                        options%time%cfl_reduction_factor)
+                        options%time%cfl_reduction_factor, domain%max_mapfac)
 
         STD_OUT_PE = .True.
 
@@ -261,7 +264,7 @@ module test_advect
         options%domain%lat_hi = 'lat'
         options%domain%lon_hi = 'lon'
         if (trim(options%domain%init_conditions_file) /= '') then
-            call check_file_exists(trim(options%domain%init_conditions_file), message='The test domain file does not exist. Ensure that the HICAR_test repo was installed to build/test when building HICAR.')
+            call check_file_exists(trim(options%domain%init_conditions_file), message='The test domain file does not exist. Ensure that the HICAR_test repo was installed and the domain file ../tests/Test_Cases/domains/flat_plane_250m.nc exists.')
         endif
 
         options%domain%dx = 250.0
@@ -380,7 +383,7 @@ module test_advect
                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, &
                         domain%its, domain%ite, domain%jts, domain%jte, &
-                        options%time%cfl_reduction_factor)
+                        options%time%cfl_reduction_factor, domain%max_mapfac)
         call MPI_Allreduce(MPI_IN_PLACE, dt_cfl, 1, MPI_REAL, MPI_MIN, domain%compute_comms)
 
         t_period   = 2.0*pi/omega

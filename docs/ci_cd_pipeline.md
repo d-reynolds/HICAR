@@ -8,58 +8,61 @@ it. For *running tests locally*, see [testing.md](testing.md).
 
 ---
 
-## 1. Goals
-
-1. **Don't crash.** Every supported configuration should run without aborting or
-   producing NaN/Inf.
-2. **Behave as expected.** Detect unintended changes in model output (regression),
-   and verify the GPU port matches the CPU.
-3. **Informative failures.** A failed test should say *what* broke, *where*, and
-   *why* — localized to a variable, grid cell, and tolerance where possible.
-4. **No test code in the production hot path.** Tests live in separate
-   translation units / build targets; runtime assertions are compile-guarded.
-5. **Cover CPU (GNU) and GPU (NVFortran)** without trying to test the full
-   Cartesian product of physics options.
-
-Compilers in scope: **GNU** (CPU) and **NVFortran/NVHPC** (CPU host + GPU). Intel
-and Cray are deprecated.
-
----
-
-## 2. Test pyramid
+## 1. Test pyramid
 
 | Layer | Question | Where it runs |
 |---|---|---|
 | Build matrix | Does it compile? | every PR (full-test) |
 | Unit / invariant | Is a function correct in isolation? | CPU debug (full-test) |
-| Smoke / integration | Does a config run N steps without NaN/abort? | CPU debug+release |
+| Smoke / integration | Does a config run N steps without NaN/abort? | CPU release (full-test) |
 | Reproducibility | Decomposition- & restart-invariant? | CPU debug (full-test) |
 | Regression (bit-for-bit) | Did output change vs a trusted baseline? | CPU release (full-test) |
-| CPU↔GPU equivalence | Does the GPU match the CPU within tolerance? | GPU lane |
+| Memory safety | Any uninitialised / invalid memory access? | valgrind (nightly **+ required on `main` PRs**) |
+| SNOWPACK parity | Does the Fortran port match the C++ reference? | SNOWPACK-compare (**required on `main` PRs**) |
+| CPU↔GPU equivalence | Does the GPU match the CPU within tolerance? | GPU lane (**required on `main` PRs**) |
 | Validation | Is it physically right? | GPU lane (⬜ stub) |
 
 **Key principle:** localize correctness *down* the pyramid (unit/invariant), use
 regression as a catch-all tripwire, and reserve tolerance comparison for things
 that cannot be bit-for-bit (CPU↔GPU, GNU↔NVFortran).
 
+**Merge gate:** merging into `main` requires four of these lanes to have *signed*
+the PR head commit (`hicar-full-test`, `valgrind`, `gpu-check`, `snow-parity`) —
+see [§2.6](#26-merge-gate--required-checks-on-main).
+
 ---
 
-## 3. Workflow architecture (the "signed-gate" model)
+## 2. Workflow architecture (the "signed-gate" model)
 
-Two GitHub Actions workflows plus a maintenance workflow.
+Five GitHub Actions workflows: the CPU **full-test** gate, the **GPU** suite, the
+**SNOWPACK** parity comparison, the **valgrind** memcheck, and the maintenance
+**bless** workflow.
 
-### 3.1 `hicar-full-test.yml` — the CPU correctness gate ✅
+Each gating lane records its result as a **commit status** on the SHA it tested
+(`hicar-full-test`, `valgrind`, `gpu-check`, `snow-parity`). Because a status is
+attached to a commit — not to a workflow run — it can be posted by any trigger
+(push, PR, manual dispatch, or `workflow_run`) and is then honored as a green check
+wherever that commit appears. Merging into `main` requires all four to be present
+and green on the PR head commit; see [§2.6](#26-merge-gate--required-checks-on-main).
 
-GNU / CPU, GitHub-hosted. Triggers: **pull_request**, **nightly (02:00 UTC)**,
+**Nightly no-op skip.** The three lanes that run on the nightly `schedule` (GPU,
+SNOWPACK-compare, valgrind) share a small `changed` gate job: it compares the
+commit under test against the head SHA of that workflow's most recent completed
+run on `main`, and skips the whole run when `main` has not advanced since — there
+is no point re-testing an idle `main` every night. Only the scheduled trigger is
+gated; manual dispatch and event-driven (PR/push) runs always run.
+
+### 2.1 `hicar-full-test.yml` — the CPU correctness gate ✅
+
+GNU / CPU, GitHub-hosted. Triggers: **push** and **pull_request** (`main`/`develop`),
 **workflow_dispatch**, and **workflow_call** (reusable — see GPU lane).
 
 - **`cpu-debug`** (`MODE=debug`, bounds + `finit-real=nan`): unit/invariant tests
-  (`HICAR-tester`), Standard integration case (run-only), reproducibility
-  (decomposition + restart).
+  (`HICAR-tester`) and reproducibility (decomposition + restart).
 - **`cpu-release`** (`MODE=release`): runs all integration configs (Standard,
   Nested, restarts) — *run-only* — then a separate **regression** step that
   recompiles the blessed commit and diffs the integration outputs against it
-  (see §4). Integration ("did it run?") and regression ("is the output correct?")
+  (see §3). Integration ("did it run?") and regression ("is the output correct?")
   are deliberately split.
 - **`sign`** (runs only if both pass): posts a GitHub **commit status**
   `hicar-full-test = success` to the commit SHA using the built-in `GITHUB_TOKEN`
@@ -68,12 +71,19 @@ GNU / CPU, GitHub-hosted. Triggers: **pull_request**, **nightly (02:00 UTC)**,
 The commit status *is* the "signature" that a commit passed full-test — durable,
 queryable, and shown as a green check on the commit.
 
-### 3.2 `gpu.yml` — the GPU test suite ✅ / 🟡
+### 2.2 `gpu.yml` — the GPU test suite ✅ / 🟡
 
-NVFortran, self-hosted. Triggers: **push to master/develop** (+ a temporary
-`ci_pipeline` shakeout trigger), **nightly (04:00 UTC**, after the CPU nightly),
-**workflow_dispatch**. **No `pull_request` trigger** (see Security, §5).
+NVFortran, self-hosted. Triggers: **nightly (04:00 UTC)** and
+**workflow_dispatch** — **no `push` and no `pull_request` trigger** (see Security,
+§4), so a fork PR can never execute on the self-hosted box. The nightly runs
+against `main`; `develop` is GPU-tested *after* it merges to `main`, and *before*
+merge via the manual `gpu-check` gate (dispatch on the head branch — §2.6).
 
+0. **`changed`** (hosted): on the nightly schedule, compares the commit under
+   test against the head SHA of the most recent completed run of this workflow on
+   `main`. If they match (main hasn't advanced since the last GPU run), the whole
+   pipeline is skipped — no point re-testing an unchanged `main`. Manual dispatch
+   always runs.
 1. **`check-signed`** (hosted): queries the commit status; outputs `signed`.
 2. **`full-test`** (reusable call to `hicar-full-test.yml`): runs **only if the
    commit is not signed**. If it fails, the GPU job does not run.
@@ -84,11 +94,18 @@ NVFortran, self-hosted. Triggers: **push to master/develop** (+ a temporary
    - Runs both on the Standard case with an **identical namelist** and compares
      GPU-vs-CPU by tolerance (`tests/compare_cpu_gpu.sh`).
    - **Validation** ⬜ — stubbed (idealized case / conservation checks to come).
+4. **`sign-gpu`** (hosted, runs only if `gpu-tests` passed): posts the
+   **`gpu-check = success`** commit status that `main`'s ruleset requires (§2.6).
+   The GPU-vs-CPU tolerance comparison is currently *advisory*
+   (`continue-on-error`), so `gpu-check` signs on a successful NVHPC **build + run**
+   of both exes. **To gate a `main` PR**, dispatch this workflow on the PR's head
+   branch — `gh workflow run gpu.yml --ref develop` — so `github.sha` is the PR head
+   commit and the status lands where the ruleset evaluates it.
 
 Only the `HICAR` target is built (`cmake --build --target HICAR` + `cmake
 --install`), so the GPU lane does **not** pay the slow `HICAR-tester` device-link.
 
-### 3.3 `bless-baseline.yml` — bless the regression reference commit ✅
+### 2.3 `bless-baseline.yml` — bless the regression reference commit ✅
 
 Maintainer-only (`workflow_dispatch`). Posts a **`hicar-regression-blessed=success`
 commit status** to a (known-good, ideally full-test-passed) commit — the same
@@ -96,12 +113,20 @@ machinery as the full-test `sign`. The regression reference is therefore "the mo
 recent blessed commit," with no stored file, no PR, no build, no LFS, no token.
 Warns if the commit hasn't passed full-test.
 
-### 3.4 `snowpack-compare.yml` — SNOWPACK C++ vs Fortran parity, with bless ✅
+### 2.4 `snowpack-compare.yml` — SNOWPACK C++ vs Fortran parity, with bless ✅
 
-Builds HICAR twice on the same gfortran toolchain (`-DSNOWPACK=ON` C++ bindings
-vs `-DSNOWPACK_FORTRAN=ON` native port), runs a 3 h seeded-snowpack comparison
-(`tests/snowpack/test_snowpack_compare.sh`) against `tests/snowpack/tolerances_snowpack.yaml`.
-Triggers: PRs touching the snow drivers, nightly, manual.
+Builds HICAR twice on the same gfortran toolchain (`-DSNOWPACK_CPP=ON` C++
+bindings vs the default native-Fortran port), each into its **own build tree**
+(`build_cpp` / `build_fortran`, via `HICAR_BUILD_DIR`). It then runs a 3 h seeded-snowpack comparison
+(`tests/snowpack/test_snowpack_compare.sh`) against
+`tests/snowpack/tolerances_snowpack.yaml`. Triggers: PRs touching the snow drivers
+(paths-filtered), nightly, manual.
+
+A **`sign-snow`** job posts the **`snow-parity = success`** commit status that
+`main`'s ruleset requires (§2.6) whenever the comparison passes. It signs
+automatically on a PR that touches the snow drivers; for a `main` PR that does
+**not** touch them, dispatch the workflow on the head branch
+(`gh workflow run snowpack-compare.yml --ref develop`) to post the status.
 
 **Parity blessing.** Analogous to the regression bless, but with a second,
 independent status context and one extra payload: a manual dispatch with
@@ -131,19 +156,11 @@ comparison**, with three stacked controls:
    `Settings > Environments > New environment "parity-bless" > Required
    reviewers > add the owners/maintainers`, or via API:
    `gh api -X PUT repos/<owner>/<repo>/environments/parity-bless --input -`
-   with `{"reviewers":[{"type":"User","id":<numeric-uid>}]}`. NB: until the
-   reviewers are configured, the auto-created environment does NOT pause the
-   job; and environment protection rules require a public repo (or a paid
-   plan for private repos).
-
-Residual caveat: GitHub itself gates the statuses API at write access, so a
-write-level user could in principle post the status with a raw API call
-outside this tooling — controls 1 and 3 guard the sanctioned paths, which is
-where accidental or casual blessing happens.
+   with `{"reviewers":[{"type":"User","id":<numeric-uid>}]}`.
 
 **Evidence archive.** Every comparison run writes a machine-readable
 per-variable stats report (`parity_report.json`: max|abs|/max|rel|/violation
-counts for ALL 282 variables, passing ones included), the standard spatial
+counts for all variables common to both output files, passing ones included — the exact count depends on the run's `output_vars` and is reported at runtime as `n_compared`), the standard spatial
 difference maps (`diffmaps/`), and a provenance stamp into
 `tests/figures/snowpack_compare/` (uploaded as a workflow artifact, ≤90 d).
 **Blessing additionally publishes these as a permanent GitHub release**
@@ -171,29 +188,101 @@ the Fortran driver, re-run the comparison until it passes, then re-bless
 comparison run also logs the SNOWPACK SHA it used, so CI logs alone can
 bracket when a divergence appeared.
 
-### 3.5 Flow diagram
+### 2.5 `valgrind-memcheck.yml` — uninitialised-memory check ✅ (required on `main` PRs)
+
+GNU / CPU, GitHub-hosted. Triggers: **nightly (03:30 UTC)**, **workflow_dispatch**,
+and **`workflow_run`** — it fires automatically when **HICAR full-test (CPU)**
+completes. Its `changed` gate runs the memcheck only when that full-test **passed**
+*and* the tested commit has an **open PR to `main`** (it checks out the full-test's
+`head_sha`). This makes valgrind a **required merge check** (§2.6) — kept off every
+push (valgrind is ~10–50× slower than native), but run automatically once a commit
+is actually a `main`-merge candidate.
+
+A CPU **debug** build runs the unit-test suite (`HICAR-tester`) under `valgrind
+--track-origins=yes`. This lane exists because the debug build's
+`-finit-real/-integer/-logical` flags only poison **local/stack** variables — they
+do **not** initialise heap / allocatable memory. An uninitialised `logical`
+component of an *allocatable* options object therefore passed every local test
+(reading garbage-false) yet failed deterministically on the amd64 CI runner
+(reading garbage-true); only valgrind reliably catches that class of bug in
+Fortran (gfortran has no MemorySanitizer).
+
+Scope is deliberately narrow — the debug `HICAR-tester` only: integration cases
+are far too slow under valgrind, and the GPU/OpenACC build can't run under it at
+all. The gate is robust to third-party noise: instead of `--error-exitcode`
+(mpich is not valgrind-clean), it **fails only when a valgrind error block cites a
+HICAR `.F90` source**, and also fails if the tester itself exits non-zero. The
+full valgrind log is uploaded as an artifact.
+
+A **`sign-valgrind`** job posts the outcome as the **`valgrind`** commit status —
+`success` on a clean run, `failure` otherwise, so a flagged PR shows a red required
+check rather than a perpetually "Expected" one.
+
+### 2.6 Merge gate — required checks on `main`
+
+A PR into `main` can merge only when **four commit-status checks** are present and
+green on the PR **head commit**, enforced by the repository ruleset *"Require pull
+request for main"* (`required_status_checks`). Each is posted by a `sign` job on the
+SHA it tested:
+
+| Status context | Posted by | How it's produced |
+|---|---|---|
+| `hicar-full-test` | full-test `sign` | **auto** — push to `develop` (or a PR) passes the CPU suite |
+| `valgrind` | valgrind `sign-valgrind` | **auto** — `workflow_run` after full-test passes, when an open `main` PR exists |
+| `gpu-check` | gpu `sign-gpu` | **manual** — dispatch `gpu.yml` on the head branch |
+| `snow-parity` | snowpack-compare `sign-snow` | **auto** on snow-driver PRs; **manual** dispatch otherwise |
+
+Typical `develop → main` merge:
+
+1. Push to `develop` → full-test runs and signs `hicar-full-test`; valgrind then
+   auto-fires (`workflow_run`) and signs `valgrind`.
+2. `gh workflow run gpu.yml --ref develop` → signs `gpu-check`.
+3. `gh workflow run snowpack-compare.yml --ref develop` (only if the PR didn't
+   already auto-run it) → signs `snow-parity`.
+4. All four green on the head commit → the PR merges.
+
+Statuses are evaluated per-commit, so each must land on the **current** PR head:
+push a new commit and you must re-run the manual gates on it. Repo admins keep a
+ruleset **bypass** (`RepositoryRole: always`) for emergencies.
+
+> **Bootstrapping note.** A lane only becomes triggerable once its workflow file is
+> on `main` — both `workflow_dispatch` and `workflow_run` resolve from the default
+> branch. The first PR that *introduces* a new required lane therefore cannot run it
+> yet; merge that one via admin bypass (or temporarily drop the new context from the
+> ruleset), after which every later PR runs it normally.
+
+### 2.7 Flow diagram
 
 ```
-PR / nightly ──> hicar-full-test ──(both pass)──> sign commit (hicar-full-test=success)
+                 push develop / PR
+                        │
+                        ▼
+                 hicar-full-test ──(both pass)──> sign  hicar-full-test=success
+                        │
+                        └──(success)──> [workflow_run] valgrind ──> changed? (open main PR)
+                                                          └──(clean)──> sign-valgrind  valgrind=success
 
-GPU nightly ──> check-signed ──signed?──┬── yes ──> gpu-tests (CPU ref + GPU, compare)
-                                        └── no  ──> full-test ──pass──> gpu-tests
+   manual dispatch on the PR head branch (--ref develop):
+     gpu.yml          ─> changed ─> check-signed ─┬─ signed ──> gpu-tests ─(pass)─> sign-gpu  gpu-check=success
+                                                  └─ unsigned ─> full-test ─pass─> gpu-tests ─> sign-gpu
+     snowpack-compare ─> compare ─(pass)─> sign-snow  snow-parity=success   (auto on snow-driver PRs)
 
-snowpack-compare nightly ──pass──> (manual) bless: hicar-snowpack-parity-blessed
-                          ──FAIL──> snowpack_divergence_report.sh
-                                      └─> diff anchor..current upstream ─> port ─> re-bless
+   merge to main  ⇐  { hicar-full-test, valgrind, gpu-check, snow-parity } all green on the PR head
+
+   ── nightly (each gated by `changed`: skip if main unchanged) ──
+     snowpack-compare 03:00 · valgrind 03:30 · gpu 04:00
+     snowpack FAIL ─> snowpack_divergence_report.sh ─> diff anchor..upstream ─> port ─> re-bless
 ```
 
 ---
 
-## 4. Comparison engine ✅
+## 3. Comparison engine ✅
 
 `tests/compare_outputs.py` is the single comparison engine for all lanes:
 
 - `--mode exact` (bit-for-bit, CPU regression) and `--mode tolerance`
   (CPU↔GPU), driven by per-variable `rtol`/`atol` in `tests/tolerances.yaml`.
-- **NaN/Inf introduced by the candidate is always a failure** (the previous
-  engine used `nanmax` and silently passed NaNs).
+- **NaN/Inf introduced by the candidate is always a failure**
 - A dropped output variable → failure; an added one → warning.
 - On failure it localizes the **worst offender** (variable, `dim=index`, both
   values, abs/rel error), emits GitHub `::error::` annotations, and writes a
@@ -208,24 +297,23 @@ worktree), runs it on the requested cases to **regenerate** the reference output
 and diffs the *current* integration outputs against it. Both exes are built on the
 same runner/toolchain, so the comparison defaults to **bit-for-bit (`--mode
 exact`)** — any difference is a real change in model output. Nothing is stored in
-the repo; blessing just posts a commit status (§3.3).
+the repo; blessing just posts a commit status (§2.3).
 
 **CPU↔GPU** (`tests/compare_cpu_gpu.sh`) runs the GPU exe and a CPU-host NVHPC exe
 (same commit, same compiler) with an identical namelist and compares by tolerance.
 
 ---
 
-## 5. Self-hosted GPU runner & security
+## 4. Self-hosted GPU runner & security
 
 The GPU lane runs on a containerized self-hosted runner (see
-[.github/docker/README.md](../.github/docker/README.md)): NVHPC + CUDA + NCCL with
+[.github/docker/README.md](https://github.com/HICAR-Model/HICAR/blob/main/.github/docker/README.md)):
+NVHPC + CUDA + NCCL with
 an NVFortran-built NetCDF/HDF5/PnetCDF stack. HICAR is built per-run (not baked
 into the image) because `-gpu=ccnative` needs the device visible at build time.
 
 **Security posture: the runner never executes untrusted PR code.**
 
-- `gpu.yml` has **no `pull_request` trigger** — only push to master/develop,
-  nightly, and dispatch. A fork PR cannot cause execution on the hardware.
 - The runner is **ephemeral** and run as a **fresh container per job**
   (`run-runner.sh`), so no state persists between jobs.
 - Runs as non-root, **no Docker socket mounted** (no host escape).
@@ -234,72 +322,20 @@ into the image) because `-gpu=ccnative` needs the device visible at build time.
 - Recommended host hygiene: dedicated box, isolated network with egress firewall,
   `chmod 600 runner.env`.
 
-To GPU-test a contributor PR: a maintainer reviews the diff, pulls it onto an
-in-repo branch (push to `develop`), which triggers the lane on vetted code.
-
 ---
 
-## 6. The configuration-combinatorics problem
+## 5. Operating & extending
 
-We do **not** test the full Cartesian product of physics options. Instead:
-
-1. Push correctness into unit/invariant tests so a module is validated
-   independently of the others. ⬜ (mostly planned — see §8)
-2. A curated set of representative configs (Standard, Nested, restarts). ✅
-3. ⬜ A pairwise-covering config set for nightly (planned, Phase 4).
-4. Tier by cadence: fast subset per-PR, broader matrix nightly.
-
----
-
-## 7. Implementation phases & status
-
-- **Phase 0 — plumbing** ✅: comparison engine, `tolerances.yaml`, stored-baseline
-  regression + bless workflow, containerized GPU runner, the workflow set.
-- **Phase 1 — localize** ⬜: register the ~15 currently-unbuilt unit tests (in
-  `tests/CMakeLists.txt` *and* the `testsuites` array in `test_driver.F90`); add
-  `test_conservation.F90` / `test_invariants.F90` (water/mass budgets, limiter
-  monotonicity, zero-wind→zero-tendency).
-- **Phase 2 — GPU correctness** 🟡: CPU↔GPU tolerance comparison implemented;
-  per-kernel equivalence tests planned.
-- **Phase 3 — verify** ⬜: idealized/analytic cases (e.g. solid-body cone
-  advection) — currently the GPU "validation" stub.
-- **Phase 4 — breadth** ⬜: pairwise config matrix, tiered PR vs nightly.
-- **Phase 5 — performance** ⬜: per-kernel timing regression.
-
----
-
-## 8. Operating & extending
-
-- **Bless the regression reference**: run `bless-baseline.yml` (optionally pass a
-  commit; blank = default-branch HEAD). It posts a `hicar-regression-blessed`
-  commit status — no PR, no file. Bless a commit that passed full-test (it warns
-  if it hasn't). Until at least one ancestor is blessed, the regression step is
-  skipped/`continue-on-error`.
-- **Split of run vs check**: `test_case_runner.sh` only *runs* integration cases;
-  `test_regression.sh` does the comparison against the blessed commit.
-- **Trigger the GPU lane manually**: `gh workflow run gpu.yml` (once on the default
-  branch), or push to `develop`.
 - **Add a unit test**: create `tests/test_<name>.F90` with a `collect_<name>_suite`,
   add it to the `tests` list in `tests/CMakeLists.txt` **and** to the `testsuites`
   array in `tests/test_driver.F90`.
 - **Tune cross-lane tolerances**: edit `tests/tolerances.yaml` (per-variable
   `rtol`/`atol`); start loose, tighten as the nightly GPU spread is learned.
-- **Build-time note**: HICAR's NVHPC GPU build is dominated by the relocatable
-  device-code link (`acc routine` across files); ~7 min is the floor and is not
-  reducible by optimization level. Build test/CPU-reference exes at `-O0` /
-  without `deepcopy`.
-
----
-
-## 9. Known issues / assumptions to validate
-
-- 🟡 The CPU reference build (`-DOPENACC=OFF`, NVFortran host) must compile and run
-  HICAR with GPU-only paths (NCCL/cuFFT) gated off.
-- 🟡 `compare_cpu_gpu.sh` runs both exes with `RAD=rrtmgp`; if rrtmgp won't run on
-  the host build, set `RAD=rrtmg` (keep it identical for both exes).
-- 🟡 At least one ancestor commit must be blessed (`hicar-regression-blessed`
-  status) for the regression step to run; until then it's skipped. The regression
-  rebuilds the blessed commit when it changes (cached by hash in
-  `bin/HICAR_blessed`), which adds a HICAR build to the release job.
-- The temporary `ci_pipeline` push trigger in `gpu.yml` must be removed before
-  merging to master.
+- **Gate a `main` PR** (sign the head commit with the manual checks): after
+  full-test + valgrind have auto-signed, run `gh workflow run gpu.yml --ref <head>`
+  and (if the PR didn't auto-run it) `gh workflow run snowpack-compare.yml --ref
+  <head>`. See [§2.6](#26-merge-gate--required-checks-on-main).
+- **The integration runner lives in the data repo**: `tests/Test_Cases/` (including
+  `test_case_runner.sh`) is cloned from `HICAR-Model/Test-Data`, not this repo — so
+  changes to how integration cases are *run* (e.g. the hang/wall-clock watchdog) go
+  there, while the build/compare/regression scripts under `tests/` are here.

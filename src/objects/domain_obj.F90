@@ -14,7 +14,8 @@ submodule(domain_interface) domain_implementation
     use string,               only : str
     use meta_data_interface,  only : meta_data_t
     use io_routines,          only : io_write, io_read
-    use geo,                  only : geo_lut, geo_interp, geo_interp2d, standardize_geo
+    use geo,                  only : geo_lut, geo_interp, geo_interp2d, standardize_geo, standardize_latlon, &
+                                     decide_longitude_system, longitude_system_name
     use array_utilities,      only : array_offset_x, array_offset_y, smooth_array, smooth_array_2d, make_2d_x, make_2d_y
     use vertical_interpolation,only : vinterp, vLUT
     use output_metadata,            only : get_varname, get_varmeta, get_varindx
@@ -57,7 +58,8 @@ contains
 
         call init_land_variables(this, options)
 
-        
+        call init_map_factors(this, options)
+
         !$acc enter data copyin(this%dx, this%grid, this%its, this%ite, this%kts, this%kte, this%jts, this%jte, &
         !$acc                   this%ims, this%ime, this%kms, this%kme, this%jms, this%jme, &
         !$acc                   this%ihs, this%ihe, this%jhs, this%jhe, &
@@ -68,6 +70,176 @@ contains
         !update all relevant data_2d/data_3d fields of vars_2d/vars_3d to device
         call this%update_device()
     end subroutine init_domain
+
+    !>------------------------------------------------------------
+    !! Map-scale factors from the hi-res lat/lon fields.
+    !!
+    !! m = (nominal dx) / (true ground distance), so the true cell extent
+    !! is dx/m. Distances between adjacent grid points use the local
+    !! WGS84 radii of curvature (meridional M, transverse N) in double
+    !! precision — a spherical-earth formula carries an up-to-~0.3%
+    !! latitude-dependent bias, larger than the projection distortion of
+    !! a well-centred grid. Where the staggered point lies between two
+    !! mass points the factor is a direct two-point distance (m_x at
+    !! u-points, m_y at v-points); the transverse factors are 4-point
+    !! averages of those. mapfac_mxy = m_x*m_y at mass points is the
+    !! cell-area factor used by the flux-divergence assembly.
+    !!
+    !! use_map_factors = .False., or degenerate lat/lon (idealized
+    !! grids), leaves every factor at exactly 1.0: downstream kernels
+    !! multiply unconditionally, and x*1.0 is exact, so the off state
+    !! reproduces the pre-map-factor code bit-for-bit.
+    !!------------------------------------------------------------
+    subroutine init_map_factors(this, options)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        type(options_t), intent(in)    :: options
+
+        integer :: i, j, n_bad, n_clamped
+        real    :: d
+        real, parameter :: MAPFAC_MIN = 0.5, MAPFAC_MAX = 2.0
+
+        associate(ims => this%ims, ime => this%ime, &
+                  jms => this%jms, jme => this%jme)
+
+        allocate(this%mapfac_mx_u(ims:ime+1, jms:jme),   source=1.0)
+        allocate(this%mapfac_my_u(ims:ime+1, jms:jme),   source=1.0)
+        allocate(this%mapfac_mx_v(ims:ime,   jms:jme+1), source=1.0)
+        allocate(this%mapfac_my_v(ims:ime,   jms:jme+1), source=1.0)
+        allocate(this%mapfac_mxy (ims:ime,   jms:jme),   source=1.0)
+        this%max_mapfac = 1.0
+
+        if (options%domain%use_map_factors) then
+            associate(lat  => this%vars_2d(this%var_indx(kVARS%latitude)%v)%data_2d, &
+                      lon  => this%vars_2d(this%var_indx(kVARS%longitude)%v)%data_2d, &
+                      mx_u => this%mapfac_mx_u, my_u => this%mapfac_my_u, &
+                      mx_v => this%mapfac_mx_v, my_v => this%mapfac_my_v, &
+                      mxy  => this%mapfac_mxy)
+
+            n_bad     = 0
+            n_clamped = 0
+
+            ! Direct two-point factors on the natural stagger; memory-edge
+            ! staggered points (no second mass point) clamp to the first
+            ! interior value.
+            do j = jms, jme
+                do i = ims+1, ime
+                    d = ellipsoid_dist(lat(i-1,j), lon(i-1,j), lat(i,j), lon(i,j))
+                    if (d > 0.01*this%dx) then
+                        mx_u(i,j) = this%dx / d
+                    else
+                        n_bad = n_bad + 1
+                    endif
+                enddo
+                mx_u(ims,j)   = mx_u(ims+1,j)
+                mx_u(ime+1,j) = mx_u(ime,j)
+            enddo
+            do j = jms+1, jme
+                do i = ims, ime
+                    d = ellipsoid_dist(lat(i,j-1), lon(i,j-1), lat(i,j), lon(i,j))
+                    if (d > 0.01*this%dx) then
+                        my_v(i,j) = this%dx / d
+                    else
+                        n_bad = n_bad + 1
+                    endif
+                enddo
+            enddo
+            do i = ims, ime
+                my_v(i,jms)   = my_v(i,jms+1)
+                my_v(i,jme+1) = my_v(i,jme)
+            enddo
+
+            if (n_bad > 0) then
+                ! Degenerate lat/lon — revert to the exact off state.
+                mx_u = 1.0
+                my_v = 1.0
+                if (STD_OUT_PE) write(*,*) "WARNING: degenerate lat/lon spacing at ", n_bad, &
+                                           " grid points -- map factors disabled (all 1.0)"
+            else
+                do j = jms, jme
+                    do i = ims, ime+1
+                        if (mx_u(i,j) < MAPFAC_MIN .or. mx_u(i,j) > MAPFAC_MAX) then
+                            n_clamped = n_clamped + 1
+                            mx_u(i,j) = min(max(mx_u(i,j), MAPFAC_MIN), MAPFAC_MAX)
+                        endif
+                    enddo
+                enddo
+                do j = jms, jme+1
+                    do i = ims, ime
+                        if (my_v(i,j) < MAPFAC_MIN .or. my_v(i,j) > MAPFAC_MAX) then
+                            n_clamped = n_clamped + 1
+                            my_v(i,j) = min(max(my_v(i,j), MAPFAC_MIN), MAPFAC_MAX)
+                        endif
+                    enddo
+                enddo
+                if (n_clamped > 0 .and. STD_OUT_PE) then
+                    write(*,*) "WARNING: ", n_clamped, " map factors outside [0.5, 2.0] were clamped --"
+                    write(*,*) "         check that dx matches the hi-res grid spacing"
+                endif
+
+                ! Transverse factors: 4-point averages of the direct ones
+                do j = jms, jme
+                    do i = ims, ime+1
+                        my_u(i,j) = 0.25 * (my_v(max(i-1,ims),j) + my_v(max(i-1,ims),j+1) + &
+                                            my_v(min(i,ime),j)   + my_v(min(i,ime),j+1))
+                    enddo
+                enddo
+                do j = jms, jme+1
+                    do i = ims, ime
+                        mx_v(i,j) = 0.25 * (mx_u(i,max(j-1,jms)) + mx_u(i+1,max(j-1,jms)) + &
+                                            mx_u(i,min(j,jme))   + mx_u(i+1,min(j,jme)))
+                    enddo
+                enddo
+                ! Cell-area factor at mass points
+                do j = jms, jme
+                    do i = ims, ime
+                        mxy(i,j) = 0.5*(mx_u(i,j) + mx_u(i+1,j)) * 0.5*(my_v(i,j) + my_v(i,j+1))
+                    enddo
+                enddo
+
+                ! Tile-local max is sufficient: compute_dt pairs it with the
+                ! tile-local max wind, and dt is MPI_MIN-reduced globally.
+                this%max_mapfac = max(maxval(mx_u), maxval(my_v))
+                if (STD_OUT_PE) write(*,"(A,F8.5,A,F8.5)") "  Map factors (rank 0): min = ", &
+                    min(minval(mx_u), minval(my_v)), ",  max = ", this%max_mapfac
+            endif
+            end associate
+        endif
+        end associate
+
+        !$acc enter data copyin(this%mapfac_mx_u, this%mapfac_my_u, this%mapfac_mx_v, &
+        !$acc                   this%mapfac_my_v, this%mapfac_mxy)
+    end subroutine init_map_factors
+
+
+    !> True ground distance between two nearby lat/lon points using the
+    !! local WGS84 radii of curvature; double precision internally (the
+    !! angular differences are O(1e-5) rad at sub-km spacing).
+    pure function ellipsoid_dist(lat1, lon1, lat2, lon2) result(d)
+        implicit none
+        real, intent(in) :: lat1, lon1, lat2, lon2
+        real :: d
+        real(kind=8), parameter :: a_wgs  = 6378137.0d0
+        real(kind=8), parameter :: e2_wgs = 6.69437999014d-3
+        real(kind=8), parameter :: d2r    = 3.14159265358979323846d0 / 180.0d0
+        real(kind=8) :: phi, sin2, m_rad, n_rad, dphi, dlam, dn, de
+
+        phi  = 0.5d0 * (real(lat1,8) + real(lat2,8)) * d2r
+        sin2 = sin(phi)**2
+        m_rad = a_wgs * (1.0d0 - e2_wgs) / (1.0d0 - e2_wgs*sin2)**1.5d0
+        n_rad = a_wgs / sqrt(1.0d0 - e2_wgs*sin2)
+
+        dphi = (real(lat2,8) - real(lat1,8)) * d2r
+        dlam =  real(lon2,8) - real(lon1,8)
+        if (dlam >  180.0d0) dlam = dlam - 360.0d0
+        if (dlam < -180.0d0) dlam = dlam + 360.0d0
+        dlam = dlam * d2r
+
+        dn = m_rad * dphi
+        de = n_rad * cos(phi) * dlam
+        d  = real(sqrt(dn*dn + de*de))
+    end function ellipsoid_dist
+
 
     module subroutine update_device(this)
         implicit none
@@ -1171,6 +1343,93 @@ contains
 
 
     !> -------------------------------
+    !! Reconcile the longitude convention used by the domain (and, downstream, its forcing).
+    !!
+    !! The domain and forcing must share one seam-free longitude convention for the
+    !! geographic interpolation to match points correctly. When longitude_system is Auto
+    !! (the default) or the deprecated Guess, the convention is chosen here from the GLOBAL
+    !! domain longitude extent (reduced with MPI_MIN/MAX so the choice is identical on every
+    !! rank), cached back into options so the forcing reuses it, and applied in place to the
+    !! domain longitudes. The forcing is put onto the same convention later in boundary_obj.
+    !! An explicit setting (Maintain / Prime / Dateline) is honoured as-is for both grids.
+    !! -------------------------------
+    subroutine reconcile_longitude_system(this, options)
+        implicit none
+        class(domain_t), intent(inout) :: this
+        type(options_t), intent(inout) :: options
+
+        real, allocatable :: f180(:,:), f360(:,:)
+        real    :: lmin(3), lmax(3), gmin(3), gmax(3)  ! (1) = -180..180, (2) = 0..360, (3) = raw
+        real    :: span180, span360
+        integer :: lon_sys, ierr
+        logical :: modified
+
+        lon_sys = options%domain%longitude_system
+
+        associate(lon => this%vars_2d(this%var_indx(kVARS%longitude)%v)%data_2d)
+
+            ! Express the interior longitudes in BOTH standard conventions so the choice does
+            ! not depend on whichever convention the input file happened to use.
+            f180 = modulo(lon(this%its:this%ite, this%jts:this%jte) + 180.0, 360.0) - 180.0
+            f360 = modulo(lon(this%its:this%ite, this%jts:this%jte),         360.0)
+
+            lmin = [ minval(f180), minval(f360), minval(lon(this%its:this%ite, this%jts:this%jte)) ]
+            lmax = [ maxval(f180), maxval(f360), maxval(lon(this%its:this%ite, this%jts:this%jte)) ]
+        end associate
+
+        ! Reduce to a single global extent so every rank decides identically (MIN/MAX are
+        ! bit-reproducible across decompositions, unlike SUM/MEAN).
+        if (this%compute_comms /= MPI_COMM_NULL) then
+            call MPI_Allreduce(lmin, gmin, 3, MPI_REAL, MPI_MIN, this%compute_comms, ierr)
+            call MPI_Allreduce(lmax, gmax, 3, MPI_REAL, MPI_MAX, this%compute_comms, ierr)
+        else
+            gmin = lmin
+            gmax = lmax
+        endif
+
+        span180 = gmax(1) - gmin(1)
+        span360 = gmax(2) - gmin(2)
+
+        ! Auto resolves to a concrete convention: pick the convention in which the domain spans
+        ! the smaller longitude range (i.e. the one whose seam is not inside the domain).
+        if (lon_sys == kAUTO_LON) then
+            lon_sys = decide_longitude_system(span180, span360, gmin(3), gmax(3))
+            options%domain%longitude_system = lon_sys   ! cache so the forcing reuses the same choice
+
+            ! If the domain wraps past BOTH seams, no single convention is seam-free; warn so the
+            ! user can verify the result or pin longitude_system explicitly.
+            if (STD_OUT_PE .and. span180 > 350.0 .and. span360 > 350.0) then
+                write(*,*) "  WARNING: domain spans nearly all longitudes; no convention is seam-free. "// &
+                           "Verify the longitudes or set longitude_system explicitly."
+                flush(output_unit)
+            endif
+        endif
+
+        ! Will this convention actually move any domain longitudes? (gmin(3)/gmax(3) are raw.)
+        modified = (lon_sys == kDATELINE_CENTERED .and. gmin(3) <   0.0) .or. &
+                   (lon_sys == kPRIME_CENTERED    .and. gmax(3) > 180.0)
+
+        if (modified) then
+            ! Apply in place (full memory window incl. halos) so the output longitudes, the
+            ! interpolation grids, and the bounds passed to the forcing reader all agree.
+            call standardize_latlon(this%vars_2d(this%var_indx(kVARS%latitude)%v)%data_2d,   &
+                                    this%vars_2d(this%var_indx(kVARS%longitude)%v)%data_2d,  lon_sys)
+            call standardize_latlon(this%vars_2d(this%var_indx(kVARS%u_latitude)%v)%data_2d, &
+                                    this%vars_2d(this%var_indx(kVARS%u_longitude)%v)%data_2d, lon_sys)
+            call standardize_latlon(this%vars_2d(this%var_indx(kVARS%v_latitude)%v)%data_2d, &
+                                    this%vars_2d(this%var_indx(kVARS%v_longitude)%v)%data_2d, lon_sys)
+
+            if (STD_OUT_PE) then
+                write(*,*) "  NOTE: domain longitudes converted to "//longitude_system_name(lon_sys)// &
+                           " so the domain and forcing share a seam-free coordinate (longitude_system)"
+                flush(output_unit)
+            endif
+        endif
+
+    end subroutine reconcile_longitude_system
+
+
+    !> -------------------------------
     !! Setup a single Geographic structure given a latitude, longitude, and z array
     !!
     !! -------------------------------
@@ -1191,10 +1450,10 @@ contains
             if (allocated(geo%z)) deallocate(geo%z)
             allocate( geo%z, source=z)
         endif
-        ! This makes 2D variables out of lat/lon if they come in as 1D variables
-        ! This also puts the longitudes onto a 0-360 if they are -180-180 (important for Alaska)
-        ! Though if working in Europe the -180-180 grid is better ideally the optimal value should be checked.
-        ! and good luck if you want to work over the poles...
+        ! This makes 2D variables out of lat/lon if they come in as 1D variables.
+        ! The longitude convention was already resolved (and the domain longitudes already
+        ! reconciled) in reconcile_longitude_system, so re-applying it here only standardises
+        ! this geo copy
         call standardize_geo(geo, longitude_system)
 
     end subroutine
@@ -1251,6 +1510,9 @@ contains
         real :: x1, a, b, c, alpha, exp_alpha, x_lin
         integer :: nlevp1, jk
         logical :: auto_level_warnings
+
+        if(allocated(options%domain%dz_levels)) deallocate(options%domain%dz_levels)
+        allocate(options%domain%dz_levels(options%domain%nz))
 
         associate(                                                    &
             auto_level    => options%domain%auto_level,               &
@@ -1394,6 +1656,9 @@ contains
 
         real, allocatable :: dz(:)
 
+        ! Automatic level generation: computes dz_levels analytically when auto_level >= 1.
+        call auto_dz(options)
+
         associate(ims => this%ims,      ime => this%ime,                        &
             jms => this%jms,      jme => this%jme,                        &
             kms => this%kms,      kme => this%kme,                        &
@@ -1432,8 +1697,6 @@ contains
 
             allocate(dz(nz))
 
-            ! Automatic level generation: computes dz_levels analytically when auto_level >= 1.
-            call auto_dz(options)
             dz(1:nz) = dz_lev(1:nz)
 
 
@@ -1807,6 +2070,10 @@ contains
         integer :: i, j
 
         call read_core_variables(this, options)
+
+        ! Reconcile the longitude convention so the domain and its forcing share one
+        ! seam-free coordinate system before any of the geo grids are built.
+        call reconcile_longitude_system(this, options)
 
         !setup geo_u/v here, because their z arrays will be calculated in the setup methods below
         call setup_geo(this%geo_u,   this%vars_2d(this%var_indx(kVARS%u_latitude)%v)%data_2d,   this%vars_2d(this%var_indx(kVARS%u_longitude)%v)%data_2d, options%domain%longitude_system)
@@ -3049,15 +3316,14 @@ contains
                 call MPI_Allreduce(MPI_IN_PLACE, max_z_d, 1, MPI_REAL, MPI_MAX, this%compute_comms, ierr)
                 call MPI_Allreduce(MPI_IN_PLACE, max_z_f, 1, MPI_REAL, MPI_MAX, this%compute_comms, ierr)
                 if (STD_OUT_PE) then
-                    write(*,*) "ERROR: This nest's model top is higher than its forcing/parent-nest top."
+                    write(*,*) "WARNING: This nest's model top is higher than its forcing/parent-nest top."
                     write(*,*) "       nest_indx               = ", this%nest_indx
                     write(*,*) "       max child   top z (m)   = ", max_z_d
                     write(*,*) "       max forcing top z (m)   = ", max_z_f
+                    write(*,*) "       Extrapolating..."
                     write(*,*) "       Reduce nz or trim dz_levels for this nest, or raise the parent's"
                     write(*,*) "       model top so the child fits within it."
                 endif
-                call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
-                stop
             endif
         end if
         
@@ -3201,13 +3467,13 @@ contains
             forcing_dt_seconds = this%input_dt%seconds()
             this%forcing_elapsed = forcing_dt_seconds - dt_seconds
         endif
+        forcing_elapsed_local = this%forcing_elapsed
 
         if (dt_seconds <= 10.0) then
             write(*,*) "WARNING: In domain_obj::update_delta_fields, dt_seconds <= 10.0"
         endif
         
         ! Now iterate through the dictionary as long as there are more elements present
-        forcing_elapsed_local = this%forcing_elapsed
         do n = 1,size(this%forcing_hi)
             associate(forcing_hi => this%forcing_hi(n))
             !Update delta fields on the high-resolution forcing varaibles...
@@ -3543,7 +3809,7 @@ contains
                 ! if just updating, use the dqdt variable otherwise use the 3D variable
                 if (update_only) then
                     call interpolate_variable(this%forcing_hi(p)%dqdt_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
-                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth, is_fm_var=var_is_fm)
+                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, is_fm_var=var_is_fm)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind tendencies
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
                         call smooth_array(this%forcing_hi(p), windowsize=1, ydim=3, &
@@ -3557,7 +3823,7 @@ contains
                     endif
                 else
                     call interpolate_variable(this%forcing_hi(p)%data_3d, forcing%variables%var_list(input_idx)%var, forcing, this, &
-                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, nsmooth=this%nsmooth, is_fm_var=var_is_fm)
+                                    interpolate_agl_in=agl_interp, var_is_u=var_is_u, var_is_v=var_is_v, is_fm_var=var_is_fm)
                     ! Parallel-consistent post-interpolation smoothing of u/v wind fields
                     if ((var_is_u .or. var_is_v) .and. this%nsmooth > 0) then
                         call smooth_array(this%forcing_hi(p), windowsize=1, ydim=3, &
@@ -3730,7 +3996,7 @@ contains
     !! calling the appropriate interpolation routine (2D vs 3D) with the appropriate grid (mass, u, v)
     !!
     !! -------------------------------
-    subroutine interpolate_variable(var_data, input_data, forcing, dom, interpolate_agl_in, var_is_u, var_is_v, nsmooth, is_fm_var)
+    subroutine interpolate_variable(var_data, input_data, forcing, dom, interpolate_agl_in, var_is_u, var_is_v, is_fm_var)
         implicit none
         real,  allocatable, intent(inout) :: var_data(:,:,:)
         type(variable_t),   intent(inout) :: input_data
@@ -3738,7 +4004,6 @@ contains
         type(domain_t),     intent(in)    :: dom
         logical,            intent(in),   optional :: interpolate_agl_in
         logical,            intent(in),   optional :: var_is_u, var_is_v
-        integer,            intent(in),   optional :: nsmooth
         logical,            intent(in),   optional :: is_fm_var
 
         ! note that 3D variables have a different number of vertical levels, so they have to first be interpolated
@@ -3746,7 +4011,7 @@ contains
         real, allocatable :: temp_3d(:,:,:)
         logical :: interpolate_agl, uvar, vvar, fm_var
         integer :: nx, ny, nz, ims, ime, jms, jme
-        integer :: windowsize, z
+        integer :: z
 
         interpolate_agl=.False.
         if (present(interpolate_agl_in)) interpolate_agl = interpolate_agl_in
@@ -3754,8 +4019,6 @@ contains
         if (present(var_is_u)) uvar = var_is_u
         vvar = .False.
         if (present(var_is_v)) vvar = var_is_v
-        windowsize = 0
-        if (present(nsmooth)) windowsize = nsmooth
         fm_var = .False.
         if (present(is_fm_var)) fm_var = is_fm_var
 
@@ -3794,8 +4057,15 @@ contains
         ! Interpolate to the u staggered grid
         else if (uvar) then
 
-            ! One grid cell smoothing of original input data
-            if (windowsize > 0) call smooth_array(input_data%data_3d, windowsize=1, ydim=3)
+            ! NOTE: the legacy "one grid cell smoothing of the original input data"
+            ! that used to run here was removed. It smoothed the per-rank forcing
+            ! tile in place with no halo exchange, so cells near a tile boundary used
+            ! clamped (one-sided) stencils whose result depended on the domain
+            ! decomposition — breaking bit-for-bit MPI reproducibility whenever
+            ! smooth_wind_distance > 0. Wind smoothing is now done exclusively after
+            ! interpolation by the halo-aware smooth_array (smooth_array_var) in
+            ! interpolate_forcing (added in 88e04ca9 "decomposition-independent
+            ! smoothing"), which exchanges halos between passes.
             call geo_interp(temp_3d, input_data%data_3d, forcing%geo_u%geolut)
 
             call vinterp(var_data, temp_3d, forcing%geo_u%vert_lut)
@@ -3803,8 +4073,6 @@ contains
         ! Interpolate to the v staggered grid
         else if (vvar) then
 
-            ! One grid cell smoothing of original input data
-            if (windowsize > 0) call smooth_array(input_data%data_3d, windowsize=1, ydim=3)
             call geo_interp(temp_3d, input_data%data_3d, forcing%geo_v%geolut)
             
             call vinterp(var_data, temp_3d, forcing%geo_v%vert_lut)

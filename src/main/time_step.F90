@@ -1,13 +1,16 @@
 !> ----------------------------------------------------------------------------
-!!  Main time stepping module.
+!!  Main time stepping module implementation.
 !!  Calculates a stable time step (dt) and loops over physics calls
 !!  Also updates boundaries every time step.
+!!
+!!  Implementation submodule of time_step (time_step_h.F90): the heavy
+!!  physics-driver USEs live here so they do not bloat time_step.mod.
 !!
 !!  @author
 !!  Ethan Gutmann (gutmann@ucar.edu)
 !!
 !! ----------------------------------------------------------------------------
-module time_step
+submodule(time_step) time_step_implementation
     use iso_fortran_env, only : output_unit
     use mpi_f08, only: MPI_Allreduce, MPI_REAL, MPI_MIN
     use string,                     only : as_string
@@ -20,22 +23,17 @@ module time_step
     use radiation,                  only : rad, rad_apply_dtheta
     use snow_drift,                 only : snow_drift_apply_feedback
     use wind,                       only : balance_uvw, update_winds, update_wind_dqdt
-    use domain_interface,           only : domain_t
-    use options_interface,          only : options_t
     use debug_module,               only : domain_check
-    use time_object,                only : Time_type
     use time_delta_object,          only : time_delta_t
     use icar_constants,             only : STD_OUT_PE, kVARS
     use snow_drift,                 only : snow_drift_step
 
     implicit none
 
-    private
     real, parameter  :: DT_BIG = 36000.0
     real  :: future_dt_seconds = DT_BIG
     integer :: max_i, max_j, max_k
     real :: max_u, max_v, max_w
-    public :: step, compute_dt
 
 contains
 
@@ -52,16 +50,17 @@ contains
     !! @param v   [nx x nz x ny+1]  North South wind speed      [m/s]
     !! @param w   [nx x nz x ny]    vertical wind speed         [m/s]
     !! @param CFL [ scalar ]        CFL limit to use (e.g. 1.0)
+    !! @param max_mapfac [ scalar ]  Maximum map factor
     !! @return dt [ scalar ]        Maximum stable time step    [s]
     !!
     !!------------------------------------------------------------
-    function compute_dt(dx, u, v, w, rho, dz, ims, ime, kms, kme, jms, jme, its, ite, jts, jte, CFL, err_msg) result(dt)
+    module function compute_dt(dx, u, v, w, rho, dz, ims, ime, kms, kme, jms, jme, its, ite, jts, jte, CFL, max_mapfac, err_msg) result(dt)
         real,       intent(in)                   :: dx
         real,       intent(in), dimension(ims:ime+1,kms:kme,jms:jme) :: u 
         real,       intent(in), dimension(ims:ime,kms:kme,jms:jme+1) :: v
         real,       intent(in), dimension(ims:ime,kms:kme,jms:jme)   :: w, rho, dz
         integer,    intent(in)                   :: ims, ime, kms, kme, jms, jme, its, ite, jts, jte
-        real,       intent(in)                   :: CFL
+        real,       intent(in)                   :: CFL, max_mapfac
         character(len=*), intent(in), optional  :: err_msg
         
         ! output value
@@ -132,7 +131,11 @@ contains
         max_w = max(abs(w(max_i,max_k,max_j)), abs(w(max_i,max(1,max_k-1),max_j)))
         !$acc end kernels
 
-        dt = CFL / maxwind
+        ! Map factors: the true cell extent is dx/m, so the horizontal CFL
+        ! limit tightens by up to max(m). Conservative correction (also
+        ! scales the vertical contribution, erring small); max_mapfac is
+        ! exactly 1.0 when map factors are off.
+        dt = (CFL / maxwind) / max_mapfac
 
         ! If we have too small a time step throw an error
         ! something is probably wrong in the physics or input data
@@ -214,7 +217,7 @@ contains
                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, domain%its, domain%ite, domain%jts, domain%jte, &
-                        options%time%cfl_reduction_factor, &
+                        options%time%cfl_reduction_factor, domain%max_mapfac, &
                         err_msg="error computing dt for winds at the current time step")
         max_u_pres = max_u
         max_v_pres = max_v
@@ -227,7 +230,7 @@ contains
                         domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
                         domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
                         domain%ims, domain%ime, domain%kms, domain%kme, domain%jms, domain%jme, domain%its, domain%ite, domain%jts, domain%jte, &
-                        options%time%cfl_reduction_factor, &
+                        options%time%cfl_reduction_factor, domain%max_mapfac, &
                         err_msg="error computing dt for winds at the future input timestep")
 
         !Minimum dt is min(present_dt_seconds, future_dt_seconds). Then reduce this accross all compute processes
@@ -278,7 +281,7 @@ contains
     !! @param next_output   Next time to write an output file (in "model_time")
     !!
     !!------------------------------------------------------------
-    subroutine step(domain, end_time, options)
+    module subroutine step(domain, end_time, options)
         implicit none
         type(domain_t),     intent(inout)   :: domain
         type(Time_type),    intent(in)      :: end_time
@@ -473,4 +476,4 @@ contains
     end subroutine integrate_physics_tendencies
 
 
-end module time_step
+end submodule time_step_implementation

@@ -78,7 +78,7 @@ module boundary_interface
         type(options_t), optional, intent(in)    :: parent_options
     end subroutine init_boundary
 
-    module subroutine init_local(this, options, var_list, dim_list, var_indx, start_time, domain_lat, domain_lon)
+    module subroutine init_local(this, options, var_list, dim_list, var_indx, start_time, domain_lat, domain_lon, longitude_system)
         implicit none
         class(boundary_t),               intent(inout)  :: this
         type(forcing_options_type),      intent(inout)  :: options
@@ -88,9 +88,10 @@ module boundary_interface
         type(Time_type),                 intent(in)     :: start_time
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
+        integer,                         intent(in)     :: longitude_system
     end subroutine
 
-    module subroutine init_local_asnest(this, var_list, dim_list, var_indx, domain_lat, domain_lon, parent_options)
+    module subroutine init_local_asnest(this, var_list, dim_list, var_indx, domain_lat, domain_lon, parent_options, longitude_system)
         class(boundary_t),               intent(inout)  :: this
         character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
         type(dim_arrays_type),           intent(in)     :: dim_list (:)
@@ -98,6 +99,7 @@ module boundary_interface
         real, dimension(:,:),            intent(in)     :: domain_lat
         real, dimension(:,:),            intent(in)     :: domain_lon
         type(options_t),                 intent(in)     :: parent_options
+        integer,                         intent(in)     :: longitude_system
     end subroutine
     
     module subroutine setup_z(this, options)

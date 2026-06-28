@@ -36,7 +36,7 @@ cd build/
 make check
 ```
 
-tests are defined under the `tests/` folder. `test_driver.F90` manages the execution of the different test modules, which are defined as `test_XXXX.F90` (test-drive suites: `advect`, `snow_drift`, `control_flow`, `halo_exch`, `geo`, `time`, `utilities`). Run a single suite with `mpiexec -np 2 tests/HICAR-tester <suite>`. The ICAR-era standalone tests were salvaged into the `geo`/`time`/`utilities` suites in 2026-06
+tests are defined under the `tests/` folder. `test_driver.F90` manages the execution of the different test modules, which are defined as `test_XXXX.F90`. The runnable suite names (as passed to `HICAR-tester`) are: `advection`, `snow_drift`, `control_flow`, `halo_exch`, `geo`, `time`, `utilities` — note the advection suite is `advection`, though its source file is `test_advect.F90`. Run a single suite with `mpiexec -np 2 tests/HICAR-tester <suite>`, or run them all (with no argument) via `make check`.
 
 ## SNOWPACK C++ vs Fortran parity (developers)
 
@@ -89,17 +89,27 @@ bless Environment gate) is GitHub plumbing you don't need locally.
 |---|---|
 | full-test / cpu-debug | `HICAR_MODE=debug bash .github/scripts/hicar_install_utils.sh hicar_install`, then `cd build && mpiexec -np 4 tests/HICAR-tester`, `bash tests/Test_Cases/test_case_runner.sh . Standard`, `bash tests/test_reproducibility.sh . all` |
 | full-test / cpu-release | `HICAR_MODE=release ... hicar_install`, then `bash tests/Test_Cases/test_case_runner.sh . "Standard,Standard_restart,Nested,Nested_restart"` and `bash tests/test_regression.sh . build "Standard,Nested" --mode exact` (resolves the blessed commit via gh) |
-| snowpack-compare | build both exes (`HICAR_MODE=release HICAR_CMAKE_EXTRA="-DSNOWPACK=ON" ... hicar_install`; again with `-DSNOWPACK_FORTRAN=ON -DOPENACC=OFF`), then `bash tests/snowpack/test_snowpack_compare.sh . <cpp_exe> <fortran_exe>` |
+| snowpack-compare | build both exes (`HICAR_MODE=release HICAR_CMAKE_EXTRA="-DSNOWPACK_CPP=ON" ... hicar_install` for the C++ reference; again with `-DOPENACC=OFF` for the default native-Fortran port), then `bash tests/snowpack/test_snowpack_compare.sh . <cpp_exe> <fortran_exe>` |
 | gpu | self-hosted only; with NVHPC+GPU locally: `bash tests/compare_cpu_gpu.sh ...` |
 
 Using the same `hicar_install` entrypoint (with the same `HICAR_MODE` /
 `HICAR_CMAKE_EXTRA`) is what makes the local run faithful to CI — only the
 compiler/OS differ.
 
-Tools like `act` (nektos/act) can execute the workflow YAML itself in local
-Docker containers, but they are a poor fit for these suites: the jobs rebuild
-the full dependency stack inside an emulated ubuntu container (hours on macOS),
-and caches, artifacts, commit statuses, and Environment approval gates are not
-faithfully simulated. Reserve `act`/`actionlint` for checking workflow *wiring*;
-run the test scripts directly for everything else. To exercise real CI on a
-branch before opening a PR: `gh workflow run <workflow>.yml --ref <branch>`.
+### Reproducing the GH runner (Docker)
+
+To run
+in the runner's environment, use the **CI-repro image** — a faithful clone of the
+hosted CPU runner (`.github/docker/Dockerfile.ci-repro`):
+
+```bash
+# From the repo root. The image BUILD *is* the CI compile — if HICAR fails to
+# build on CI, it fails here too, in the same toolchain. Default = cpu-debug:
+docker build -f .github/docker/Dockerfile.ci-repro -t hicar-ci-repro .
+
+# Reproduce another lane's build via build args:
+docker build -f .github/docker/Dockerfile.ci-repro -t hicar-ci-repro-rel \
+  --build-arg HICAR_MODE=release .
+docker build -f .github/docker/Dockerfile.ci-repro -t hicar-ci-repro-cpp \
+  --build-arg HICAR_CMAKE_EXTRA=-DSNOWPACK_CPP=ON .
+```

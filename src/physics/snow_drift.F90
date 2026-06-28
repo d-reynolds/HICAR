@@ -329,8 +329,9 @@ contains
             call compute_threshold_ustar_snowpack(domain, options%sm%saltation_model)
         endif
 
-        ! saltation mass flux and concentration are computed by snowpack fortran driver
-#ifndef SNOWPACK_FORTRAN
+        ! saltation mass flux and concentration are computed by the native-Fortran
+        ! snowpack driver itself; only the C++ wrapper build needs this explicit call
+#ifdef SNOWPACK_CPP
         ! 3. Saltation concentration calculation
         call saltation_step(domain, dt, dx)
 #endif
@@ -760,7 +761,9 @@ contains
 
         ! Compute 3D fine-mesh wind Courant numbers (U_m_fm, V_m_fm, denom_fm)
         call adv_std_compute_wind_2d_fm(u_fm, v_fm, rho_fm, &
-            jaco_fm, jaco_u_fm, jaco_v_fm, dx, dt, &
+            jaco_fm, jaco_u_fm, jaco_v_fm, &
+            domain%mapfac_my_u, domain%mapfac_mx_v, domain%mapfac_mxy, &
+            dx, dt, &
             U_m_fm, V_m_fm, denom_fm, 1, snc_N_loc)
 
         if (options%adv%flux_corr == kFLUXCOR_MONO) then

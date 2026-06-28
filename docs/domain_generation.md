@@ -1,6 +1,6 @@
 # Generating Static Data
 
-HICAR relies on pre-computed static data to speed up some of it’s online calculations. To generate a HICAR domain file, an existing NetCDF file with lat, lon, DEM, landuse categories, and a land mask is needed. Additionally, a larger extent DEM of the same resolution is needed to generate parameters for terrain-shading of radiation. I.e., if you have a 50m resolution domain, a larger DEM with an extent ~20km beyond the boundaries of the target domain is also needed.
+HICAR relies on pre-computed static data to speed up some of it’s online calculations. To generate a HICAR domain file, an existing NetCDF file with lat, lon, and a DEM is required. Landuse categories and a land mask are optional — the land mask is auto-derived from landuse when provided, and HICAR otherwise defaults to an all-land domain. Additionally, a larger extent DEM of the same resolution is needed to generate parameters for terrain-shading of radiation. I.e., if you have a 50m resolution domain, a larger DEM with an extent ~20km beyond the boundaries of the target domain is also needed.
 
 Once you have these two NetCDF files, you can use a python script to generate the rest of the variables used by HICAR.
 
@@ -22,11 +22,16 @@ cd HORAYZON
 python -m pip install .
 ```
 
-Your python environment should now be complete. To generate the domain file, open helpers/domains/gen_HICAR_dom.py and edit the paths for the target domain, radiation domain, and output domain. It imports HICAR_Domain.py and ProjHelpers.py from the same directory (helpers/domains).
+Your python environment should now be complete. To generate the domain file, open
+`helpers/domains/gen_HICAR_dom.py` and edit the paths for the target domain,
+radiation domain, and output domain. `HICAR_Domain.py` and `ProjHelpers.py`, both
+contained in the `helpers/domains` directory, must be in the same directory as
+`gen_HICAR_dom.py`.
 
 Now run:
 
 ```bash
+cd helpers/domains
 python gen_HICAR_dom.py
 ```
 

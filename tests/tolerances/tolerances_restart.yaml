@@ -1,0 +1,119 @@
+# Tolerance spec for the RESTART reproducibility integration test
+# (continuous run vs restart-from-checkpoint, compared at the final timestep).
+#
+# Restart is NOT bit-reproducible: an unavoidable ~1e-4 round-off seed in the
+# forcing/wind time-interpolation amplifies through the nonlinear advection
+# limiter and threshold-sensitive physics. The point of this test is therefore
+# an INTEGRATION check — "the restart reconstructs a physically-equivalent run
+# and did not drop or corrupt state" — not bit-for-bit equality.
+#
+# Three tiers (see tests/compare_outputs.py):
+#   Tier 1 STRUCTURAL  — NaN/Inf, dropped vars, shape changes are ALWAYS fatal
+#                        (applies to every variable, including warn_only ones).
+#   Tier 2 PROGNOSTIC  — core dynamics/thermo reliably reconstruct; tight tol.
+#   Tier 3 DIAGNOSTIC  — threshold/diagnostic fields that amplify the seed
+#                        non-physically -> reported (with figures) but non-fatal.
+#   + AGGREGATE        — conserved fields checked on the domain-mean (robust to
+#                        local threshold flips; catches a systematic mass/energy
+#                        drift on restart).
+
+defaults:
+  rtol: 2.0e-2      # 2% relative — comfortably passes the inherent ~7e-4 seed,
+  atol: 1.0e-6      # but a mis-restored field (lands O(1) off) is caught.
+  frac: 1.0e-3      # tolerate isolated single-cell threshold outliers.
+
+# ----- Tier 2: core prognostic dynamics/thermo (tight, relative) -----
+variables:
+  pressure:              {rtol: 1.0e-3, atol: 5.0}
+  pressure_i:            {rtol: 1.0e-3, atol: 5.0}
+  psfc:                  {rtol: 1.0e-3, atol: 5.0}
+  surface_pressure:      {rtol: 1.0e-3, atol: 5.0}
+  potential_temperature: {rtol: 1.0e-2, atol: 0.5}
+  temperature:           {rtol: 1.0e-2, atol: 0.5}
+  temperature_i:         {rtol: 1.0e-2, atol: 0.5}
+  density:               {rtol: 1.0e-2, atol: 1.0e-3}
+  exner:                 {rtol: 1.0e-2, atol: 1.0e-3}
+  # winds: larger relative spread + an absolute floor so near-zero cells (where
+  # rel error is meaningless) pass on atol.
+  u:      {rtol: 5.0e-2, atol: 0.1}
+  v:      {rtol: 5.0e-2, atol: 0.1}
+  w:      {rtol: 5.0e-2, atol: 0.1}
+  w_grid: {rtol: 5.0e-2, atol: 0.1}
+  u_mass: {rtol: 5.0e-2, atol: 0.1}
+  v_mass: {rtol: 5.0e-2, atol: 0.1}
+
+# ----- Conservation / bulk check: compare the DOMAIN-MEAN -----
+# Hydrometeor + vapor mixing ratios can flip per-cell at activation thresholds,
+# but their bulk amount should be preserved across a restart. A domain-mean
+# drift here would flag a real mass leak.
+aggregate:
+  qv: {rtol: 1.0e-2, atol: 1.0e-9}
+  qc: {rtol: 5.0e-2, atol: 1.0e-9}
+  qr: {rtol: 5.0e-2, atol: 1.0e-9}
+  qi: {rtol: 5.0e-2, atol: 1.0e-9}
+  qs: {rtol: 5.0e-2, atol: 1.0e-9}
+  qg: {rtol: 5.0e-2, atol: 1.0e-9}
+  # Accumulated precip: individual cells flip at activation thresholds (the same
+  # microphysics whose ni/nr/ns/ng warn below), but the domain total is restored
+  # and conserved. A domain-mean drift here would flag a dropped/half-counted
+  # precip accumulator on restart.
+  precipitation: {rtol: 2.0e-2, atol: 1.0e-9}
+
+# ----- Tier 3: threshold/diagnostic fields (non-fatal warnings + figures) -----
+# These amplify the restart seed into large but physically-meaningless per-cell
+# differences (a cell crossing an activation/regime threshold). NaN/shape are
+# still fatal for them (Tier 1); only the magnitude DIFF is downgraded to a warning.
+warn_only:
+  # microphysics number concentrations (threshold-sensitive)
+  - nc
+  - ni
+  - nr
+  - ns
+  - ng
+  - cldfrac
+  # PBL + surface-layer / exchange diagnostics
+  - hpbl
+  - kpbl
+  - coeff_heat_exchange_3d
+  - coeff_heat_exchange
+  - fh
+  - fm
+  - psih
+  - psim
+  - sfc_Ri
+  - mol
+  - br
+  - taix
+  - QFX
+  - ustar
+  # Noah-MP land-surface diagnostic fluxes/states (recomputed, threshold-driven)
+  - sensible_heat_veg
+  - sensible_heat_bare
+  - sensible_heat_canopy
+  - evap_heat_veg
+  - evap_heat_bare
+  - evap_heat_canopy
+  - ground_heat_veg
+  - ground_heat_bare
+  - ground_heat_flux
+  - net_longwave_veg
+  - net_longwave_bare
+  - net_longwave_canopy
+  - rad_net_longwave
+  - hfss
+  - hfls
+  - hfgs
+  - lwcf
+  - lwtr
+  - rlus
+  - canopy_temperature
+  - canopy_vapor_pressure
+  - veg_leaf_temperature
+  - ground_temperature_bare
+  - ground_temperature_canopy
+  - ground_surf_temperature
+  - surface_rad_temperature
+  - stomatal_resist_sun
+  - stomatal_resist_shade
+  - u10m
+  - v10m

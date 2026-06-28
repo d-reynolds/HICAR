@@ -21,7 +21,7 @@
 #     --blessed-commit SHA  use this commit as the reference (else auto-resolve the
 #                           most recent hicar-regression-blessed ancestor via gh)
 #     --mode exact|tolerance   default exact
-#     --tolerance-spec PATH     spec for tolerance mode (default tests/tolerances.yaml)
+#     --tolerance-spec PATH     spec for tolerance mode (default tests/tolerances/tolerances.yaml)
 #     --bless              instead of comparing, post hicar-regression-blessed=success
 #                          to HEAD (needs gh + statuses:write)
 # =============================================================================
@@ -36,7 +36,7 @@ hicar_repo=$(cd "$1" && pwd); shift
 BUILD_DIR=$(cd "$1" && pwd); shift
 CASES="$1"; shift
 MODE="exact"
-TOL_SPEC="$hicar_repo/tests/tolerances.yaml"
+TOL_SPEC="$hicar_repo/tests/tolerances/tolerances.yaml"
 BLESS=false
 BLESSED_COMMIT=""
 while [ $# -gt 0 ]; do
@@ -51,6 +51,11 @@ done
 
 COMPARE="$hicar_repo/tests/compare_outputs.py"
 TC="$hicar_repo/tests/Test_Cases"
+
+# set_var <nml_file> <name> <value> <group>: set a namelist variable by name,
+# inserting it into &<group> if absent (replaces the old `sed -i` edits). See
+# helpers/example_namelists/set_nml_var.py.
+set_var() { "${PYTHON:-python3}" "$hicar_repo/helpers/example_namelists/set_nml_var.py" "$1" "$2" "$3" --group "$4" --insert || exit 1; }
 
 # The regression reference is the most recent commit carrying a
 # `hicar-regression-blessed=success` commit status (see resolve_blessed_commit.sh
@@ -165,9 +170,8 @@ for raw in "${CASE_ARR[@]}"; do
       nml="Blessed_${case_name}.nml"
       "$OLD_EXE" --gen-nml "$nml"
       bash "nml_gen_scripts/${case_name}.sh" "$nml"
-      sed -i'.bak' "s|output_folder = .*|output_folder = '../${bless_dir}/'|" "$nml"
-      sed -i'.bak' "s|restart_folder = .*|restart_folder = '../restart/Blessed_${case_name}/'|" "$nml"
-      rm -f "${nml}.bak"
+      set_var "$nml" output_folder  "'../${bless_dir}/'"                 output
+      set_var "$nml" restart_folder "'../restart/Blessed_${case_name}/'" restart
       echo -e "Regenerating blessed ${BLUE}${case_name}${NC} with ${np} ranks..."
       "$mpiexec_path" -np "$np" "$OLD_EXE" "$nml" 1>"Blessed_${case_name}.out" 2>"Blessed_${case_name}.err" || {
           echo -e "${RED}Blessed run failed for ${case_name}; last stderr:${NC}"; tail -n 20 "Blessed_${case_name}.err"; exit 1; }

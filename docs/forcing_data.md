@@ -61,7 +61,7 @@ lonvar        = Longitude on mass (P/T/etc.) grid         (degrees)
 [lwdown_var]  = Longwave down at the surface              (W/m^2)
 [shvar]       = Sensible heat flux from the surface       (W/m^2)
 [lhvar]       = Latent heat flux from the surface         (W/m^2)
-[pbl_var]     = Specified height of PBL                   (m)
+[pblhvar]     = Specified height of PBL                   (m)
 ```
 
 ## Variable data structure
