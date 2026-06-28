@@ -18,7 +18,7 @@ if [ $# -lt 3 ]; then
     echo "Usage: $0 <hicar_repo> <cpu_exe> <gpu_exe> [--tolerance-spec PATH]"; exit 1
 fi
 hicar_repo=$(cd "$1" && pwd); CPU_EXE="$2"; GPU_EXE="$3"; shift 3
-TOL_SPEC="$hicar_repo/tests/tolerances.yaml"
+TOL_SPEC="$hicar_repo/tests/tolerances/tolerances_gpu_cpu.yaml"
 while [ $# -gt 0 ]; do
     case "$1" in
         --tolerance-spec) TOL_SPEC="$2"; shift 2;;
@@ -57,6 +57,8 @@ cd "$hicar_repo/tests/Test_Cases"
 # separately in the CPU full-test).
 np=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l | tr -d ' ')
 [ "${np:-0}" -lt 1 ] && np=1
+# number of total ranks for the run is num gpu * 2, to get one IO process per GPU
+np=$((np * 2))
 export OMP_NUM_THREADS=1
 
 mpiexec_path=""

@@ -152,7 +152,7 @@ jobs:
   #    Runs on a GitHub-hosted runner, not the GPU box.
   sign-gpu:
     needs: gpu-tests
-    if: needs.gpu-tests.result == 'success'
+    if: always() && needs.gpu-tests.result == 'success'needs.gpu-tests.result == 'success'
     runs-on: ubuntu-22.04
     permissions:
       statuses: write

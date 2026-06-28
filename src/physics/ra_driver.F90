@@ -858,7 +858,7 @@ contains
         real, allocatable:: t_1d(:), p_1d(:), Dz_1d(:), qv_1d(:), qc_1d(:), qi_1d(:), qs_1d(:), cf_1d(:)
         real, allocatable :: qi(:,:,:), qc(:,:,:), qs(:,:,:), cldfra(:,:,:), re_c(:,:,:), re_i(:,:,:), re_s(:,:,:)
 
-        real :: gridkm, ra_dt, hour_frac, air_mass_lay, cld_frc
+        real :: gridkm, ra_dt, hour_frac, air_mass_lay, cld_frc, cf_col
         real :: relmax, relmin, reimax, reimin
         real(real64) :: date_seconds, julian_day
         integer :: i, k, j, col_indx,sim_month
@@ -1206,7 +1206,7 @@ contains
                         enddo
                         !$acc parallel loop gang collapse(2) present(qv_dom, pressure, temperature, &
                         !$acc                    dz_interface, land_mask, cloud_fraction, qi, qc, qs, cldfra) &
-                        !$acc                    private(p_1d, t_1d, Dz_1d, qv_1d, qc_1d, qi_1d, qs_1d, cf_1d)
+                        !$acc                    private(p_1d, t_1d, Dz_1d, qv_1d, qc_1d, qi_1d, qs_1d, cf_1d, cf_col)
                         DO j = jts,jte
                             DO i = its,ite
                                 !$acc loop
@@ -1228,11 +1228,13 @@ contains
                                               real(land_mask(i,j)), &
                                               gridkm, 1.5, kms, kme,        &
                                               modify_qvapor=.false., use_multilayer=.False.)
-                                !$acc loop
+                                cf_col = 0.0
+                                !$acc loop reduction(max:cf_col)
                                 DO k = kts,kte
                                     cldfra(i,k,j) = cf_1d(k)
-                                    cloud_fraction(i,j) = max(cloud_fraction(i,j), cldfra(i,k,j))
+                                    cf_col = max(cf_col, cf_1d(k))
                                 ENDDO
+                                cloud_fraction(i,j) = cf_col
                             ENDDO
                         ENDDO
                     END IF

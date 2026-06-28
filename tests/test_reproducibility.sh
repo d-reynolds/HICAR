@@ -592,11 +592,11 @@ if [ "$test_mode" == "restart" ] || [ "$test_mode" == "all" ]; then
             # is an INTEGRATION test: structural integrity (NaN/shape/dropped vars) is
             # fatal for all vars; core prognostics use a tight relative tolerance;
             # conserved masses are checked on the domain-mean; and threshold/diagnostic
-            # fields are reported (with figures) but non-fatal. See tolerances_restart.yaml.
+            # fields are reported (with figures) but non-fatal. See tolerances/tolerances_restart.yaml.
             ${python_exe} ${compare_script} \
                 "${hicar_repo}/tests/Test_Cases/output/Repro_Restart_continuous_backup/${OUTPUT_FILENAME}" \
                 "${hicar_repo}/tests/Test_Cases/output/Repro_Restart/${OUTPUT_FILENAME}" \
-                --tolerance-spec "${hicar_repo}/tests/tolerances_restart.yaml" \
+                --tolerance-spec "${hicar_repo}/tests/tolerances/tolerances_restart.yaml" \
                 --last-timestep-only \
                 --figures-dir "${hicar_repo}/tests/Test_Cases/figures/restart"
             if [ $? -eq 0 ]; then

@@ -5,7 +5,7 @@ This is the single comparison engine used by all HICAR test lanes:
 
   * exact      — bit-for-bit (CPU regression vs a CPU baseline on a fixed toolchain)
   * tolerance  — per-variable relative+absolute tolerances (CPU<->GPU, gnu<->nvfortran),
-                 driven by a YAML spec (see tests/tolerances.yaml)
+                 driven by a YAML spec (see tests/tolerances/)
 
 It is deliberately strict about the things that matter for "the model won't crash and
 behaves as expected":
@@ -28,7 +28,7 @@ Common invocations:
     compare_outputs.py baseline.nc candidate.nc --mode exact
 
     # per-variable tolerance for the GPU lane
-    compare_outputs.py cpu_ref.nc gpu.nc --tolerance-spec tests/tolerances.yaml \
+    compare_outputs.py cpu_ref.nc gpu.nc --tolerance-spec tests/tolerances/tolerances.yaml \
         --github-annotations --report-json report.json
 """
 import argparse
@@ -315,7 +315,7 @@ def main():
     p.add_argument("--tolerance", type=float, default=None,
                    help="Legacy global absolute tolerance (atol). 0.0 = exact match.")
     p.add_argument("--tolerance-spec", default=None,
-                   help="YAML file of per-variable rtol/atol (see tests/tolerances.yaml)")
+                   help="YAML file of per-variable rtol/atol (see tests/tolerances/)")
     p.add_argument("--default-rtol", type=float, default=0.0)
     p.add_argument("--default-atol", type=float, default=0.0)
     p.add_argument("--last-timestep-only", action="store_true")

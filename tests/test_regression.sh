@@ -21,7 +21,7 @@
 #     --blessed-commit SHA  use this commit as the reference (else auto-resolve the
 #                           most recent hicar-regression-blessed ancestor via gh)
 #     --mode exact|tolerance   default exact
-#     --tolerance-spec PATH     spec for tolerance mode (default tests/tolerances.yaml)
+#     --tolerance-spec PATH     spec for tolerance mode (default tests/tolerances/tolerances.yaml)
 #     --bless              instead of comparing, post hicar-regression-blessed=success
 #                          to HEAD (needs gh + statuses:write)
 # =============================================================================
@@ -36,7 +36,7 @@ hicar_repo=$(cd "$1" && pwd); shift
 BUILD_DIR=$(cd "$1" && pwd); shift
 CASES="$1"; shift
 MODE="exact"
-TOL_SPEC="$hicar_repo/tests/tolerances.yaml"
+TOL_SPEC="$hicar_repo/tests/tolerances/tolerances.yaml"
 BLESS=false
 BLESSED_COMMIT=""
 while [ $# -gt 0 ]; do

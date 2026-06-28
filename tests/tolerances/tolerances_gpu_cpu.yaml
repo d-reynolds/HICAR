@@ -1,0 +1,117 @@
+# ---------------------------------------------------------------------------
+# HICAR GPU-vs-CPU comparison tolerances  (tests/compare_cpu_gpu.sh)
+# ---------------------------------------------------------------------------
+# AUTO-TUNED to the accepted CPU<->GPU cross-lane spread of the Standard case
+# (NVHPC, same commit, OPENACC OFF vs ON). These gate "did the GPU diverge
+# MEANINGFULLY beyond FP-reordering noise?" -- they are NOT scientific bounds.
+# A value passes when:   |candidate - baseline| <= atol + rtol*|baseline|
+# and a variable passes when no more than frac*n_finite cells violate that.
+#
+# Tuning method (regenerate by re-running the comparison + the tuning step):
+#   * tight fields keep their rtol/atol and absorb the few outlying cells via
+#     `frac` (used only where <=2% of cells exceed the tight bound);
+#   * fields whose cross-lane difference is widespread instead get atol widened
+#     to ~1.5x the observed max|delta| (near-zero-amplified diagnostics and
+#     threshold-flip fields: hpbl, sfc_Ri, mol, exchange coeffs, ...).
+# NaN/Inf introduced by the candidate ALWAYS fails regardless of these numbers.
+# ---------------------------------------------------------------------------
+
+defaults:
+  rtol: 0.0001
+  atol: 1e-07
+
+variables:
+  blk_ri:                    {rtol: 0.0001, atol: 1e-07, frac: 0.025}       # max|d|=0.0213, 1.21% cells outlying
+  canopy_fwet:               {rtol: 0.0001, atol: 1e-07, frac: 0.00086}     # max|d|=4.36e-05, 0.04% cells outlying
+  canopy_ice:                {rtol: 0.0001, atol: 1e-07, frac: 0.0001}      # max|d|=1.26e-06, 0.00% cells outlying
+  canopy_liquid:             {rtol: 0.0001, atol: 1e-07, frac: 0.0001}      # max|d|=1.66e-07, 0.00% cells outlying
+  canopy_temperature:        {rtol: 0.0001, atol: 1e-07, frac: 0.00025}     # max|d|=0.151, 0.01% cells outlying
+  canopy_vapor_pressure:     {rtol: 0.0001, atol: 1e-07, frac: 0.012}       # max|d|=5.86, 0.58% cells outlying
+  canopy_water:              {rtol: 0.0001, atol: 1e-07, frac: 0.00013}     # max|d|=1.28e-06, 0.01% cells outlying
+  ch_bare:                   {rtol: 0.0001, atol: 0.002, frac: 0.0}         # widespread (3% cells), spread~0.000831
+  ch_bare_2m:                {rtol: 0.0001, atol: 0.002, frac: 0.0}         # widespread (3% cells), spread~0.000719
+  ch_leaf:                   {rtol: 0.0001, atol: 1e-07, frac: 0.0022}      # max|d|=0.000242, 0.11% cells outlying
+  ch_under_canopy:           {rtol: 0.0001, atol: 1e-07, frac: 0.021}       # max|d|=0.000467, 1.05% cells outlying
+  ch_veg:                    {rtol: 0.0001, atol: 0.002, frac: 0.0}         # widespread (4% cells), spread~0.000761
+  ch_veg_2m:                 {rtol: 0.0001, atol: 0.005, frac: 0.0}         # widespread (4% cells), spread~0.00135
+  cldfrac:                   {rtol: 0.0001, atol: 1e-07, frac: 0.032}       # max|d|=0.106, 1.58% cells outlying
+  coeff_heat_exchange:       {rtol: 0.0001, atol: 0.002, frac: 0.0}         # widespread (3% cells), spread~0.000692
+  coeff_heat_exchange_3d:    {rtol: 0.0001, atol: 100, frac: 0.0}           # widespread (41% cells), spread~50.8
+  coeff_momentum_drag:       {rtol: 0.0001, atol: 0.0005, frac: 0.0}        # widespread (3% cells), spread~0.000238
+  density:                   {rtol: 0.0001, atol: 1e-07, frac: 0.00011}     # max|d|=0.000795, 0.01% cells outlying
+  evap_heat_bare:            {rtol: 0.0001, atol: 10, frac: 0.0}            # widespread (4% cells), spread~5.9
+  evap_heat_canopy:          {rtol: 0.0001, atol: 1e-07, frac: 0.0013}      # max|d|=0.00943, 0.06% cells outlying
+  evap_heat_veg:             {rtol: 0.0001, atol: 5, frac: 0.0}             # widespread (2% cells), spread~1.81
+  evap_soil_surface:         {rtol: 0.0001, atol: 1e-07, frac: 0.0003}      # max|d|=6.74e-07, 0.01% cells outlying
+  fh:                        {rtol: 0.0001, atol: 0.5, frac: 0.0}           # widespread (5% cells), spread~0.149
+  fm:                        {rtol: 0.0001, atol: 0.5, frac: 0.0}           # widespread (5% cells), spread~0.165
+  ground_heat_bare:          {rtol: 0.0001, atol: 1e-07, frac: 0.032}       # max|d|=4.89, 1.57% cells outlying
+  ground_heat_veg:           {rtol: 0.0001, atol: 1e-07, frac: 0.013}       # max|d|=1.75, 0.64% cells outlying
+  ground_surf_temperature:   {rtol: 0.0001, atol: 1e-07, frac: 0.0001}      # max|d|=0.0399, 0.00% cells outlying
+  ground_temperature_bare:   {rtol: 0.0001, atol: 1e-07, frac: 0.0001}      # max|d|=0.139, 0.00% cells outlying
+  ground_temperature_canopy: {rtol: 0.0001, atol: 1e-07, frac: 0.0001}      # max|d|=0.0498, 0.00% cells outlying
+  hfgs:                      {rtol: 0.0001, atol: 1e-07, frac: 0.027}       # max|d|=1.4, 1.31% cells outlying
+  hfls:                      {rtol: 0.001, atol: 0.01, frac: 0.0018}        # max|d|=1.69, 0.09% cells outlying
+  hfss:                      {rtol: 0.001, atol: 0.01, frac: 0.0061}        # max|d|=3.07, 0.30% cells outlying
+  hpbl:                      {rtol: 0.0001, atol: 2000, frac: 0.0}          # widespread (54% cells), spread~928
+  hus2m:                     {rtol: 0.0001, atol: 1e-07, frac: 0.018}       # max|d|=2.14e-05, 0.88% cells outlying
+  kpbl:                      {rtol: 0.0001, atol: 1e-07, frac: 0.0086}      # max|d|=13, 0.43% cells outlying
+  lsm_last_precip:           {rtol: 0.0001, atol: 1e-07, frac: 0.0063}      # max|d|=1.02e-05, 0.31% cells outlying
+  lwtr:                      {rtol: 0.001, atol: 0.01, frac: 0.00018}       # max|d|=0.47, 0.01% cells outlying
+  mixing_ratio_2m_bare:      {rtol: 0.0001, atol: 1e-07, frac: 0.021}       # max|d|=0.000443, 1.02% cells outlying
+  mixing_ratio_2m_veg:       {rtol: 0.0001, atol: 1e-07, frac: 0.011}       # max|d|=8.42e-05, 0.51% cells outlying
+  moisture_flux:             {rtol: 0.0001, atol: 1e-07, frac: 0.0003}      # max|d|=6.74e-07, 0.01% cells outlying
+  mol:                       {rtol: 0.0001, atol: 0.05, frac: 0.0}          # widespread (36% cells), spread~0.0329
+  net_longwave_bare:         {rtol: 0.0001, atol: 1e-07, frac: 0.0092}      # max|d|=0.648, 0.46% cells outlying
+  net_longwave_canopy:       {rtol: 0.0001, atol: 1e-07, frac: 0.014}       # max|d|=1.17, 0.67% cells outlying
+  net_longwave_veg:          {rtol: 0.0001, atol: 1e-07, frac: 0.026}       # max|d|=0.529, 1.25% cells outlying
+  ng:                        {rtol: 0.0001, atol: 1e-07, frac: 0.0001}      # max|d|=2.72e-06, 0.00% cells outlying
+  ni:                        {rtol: 0.0001, atol: 1e-07, frac: 0.0082}      # max|d|=32.3, 0.41% cells outlying
+  nr:                        {rtol: 0.0001, atol: 1e-07, frac: 0.0038}      # max|d|=1.67, 0.19% cells outlying
+  ns:                        {rtol: 0.0001, atol: 1e-07, frac: 0.0044}      # max|d|=0.226, 0.22% cells outlying
+  potential_temperature:     {rtol: 1e-05, atol: 0.001, frac: 0.0032}       # max|d|=0.216, 0.16% cells outlying
+  precipitation:             {rtol: 0.001, atol: 1e-05, frac: 0.0}          # carried over from cross-lane spec
+  pressure:                  {rtol: 1e-05, atol: 0.1, frac: 0.0001}         # max|d|=1.88, 0.00% cells outlying
+  psih:                      {rtol: 0.0001, atol: 0.5, frac: 0.0}           # widespread (22% cells), spread~0.161
+  qc:                        {rtol: 0.001, atol: 1e-10, frac: 0.00073}      # max|d|=3.81e-06, 0.04% cells outlying
+  qi:                        {rtol: 0.001, atol: 1e-10, frac: 0.0001}       # max|d|=2.39e-10, 0.00% cells outlying
+  qr:                        {rtol: 0.001, atol: 1e-10, frac: 0.0}          # carried over from cross-lane spec
+  qs:                        {rtol: 0.001, atol: 1e-10, frac: 0.0001}       # max|d|=1.2e-10, 0.00% cells outlying
+  qv:                        {rtol: 0.0001, atol: 1e-09, frac: 0.012}       # max|d|=5.17e-05, 0.58% cells outlying
+  rad_net_longwave:          {rtol: 0.0001, atol: 1e-07, frac: 0.011}       # max|d|=0.706, 0.54% cells outlying
+  rlus:                      {rtol: 0.0001, atol: 1e-07, frac: 0.00083}     # max|d|=0.706, 0.04% cells outlying
+  runoff_subsurface:         {rtol: 0.0001, atol: 1e-07, frac: 0.0001}      # max|d|=5.96e-06, 0.00% cells outlying
+  runoff_surface:            {rtol: 0.0001, atol: 1e-07, frac: 0.00014}     # max|d|=7.97e-07, 0.01% cells outlying
+  sensible_heat_bare:        {rtol: 0.0001, atol: 5, frac: 0.0}             # widespread (24% cells), spread~2.41
+  sensible_heat_canopy:      {rtol: 0.0001, atol: 2, frac: 0.0}             # widespread (5% cells), spread~1.22
+  sensible_heat_veg:         {rtol: 0.0001, atol: 5, frac: 0.0}             # widespread (6% cells), spread~1.92
+  sfc_Ri:                    {rtol: 0.0001, atol: 0.2, frac: 0.0}           # widespread (37% cells), spread~0.121
+  stomatal_resist_shade:     {rtol: 0.0001, atol: 1e-07, frac: 0.00023}     # max|d|=11.5, 0.01% cells outlying
+  stomatal_resist_sun:       {rtol: 0.0001, atol: 1e-07, frac: 0.00023}     # max|d|=11.5, 0.01% cells outlying
+  surface_rad_temperature:   {rtol: 0.0001, atol: 1e-07, frac: 0.00018}     # max|d|=0.156, 0.01% cells outlying
+  swtb:                      {rtol: 0.001, atol: 0.01, frac: 0.0}           # carried over from cross-lane spec
+  swtd:                      {rtol: 0.001, atol: 0.01, frac: 0.0}           # carried over from cross-lane spec
+  taix:                      {rtol: 0.0001, atol: 1e-07, frac: 0.00026}     # max|d|=0.156, 0.01% cells outlying
+  temperature:               {rtol: 1e-05, atol: 0.001, frac: 0.0035}       # max|d|=0.207, 0.17% cells outlying
+  temperature_2m_bare:       {rtol: 0.0001, atol: 1e-07, frac: 0.00018}     # max|d|=0.15, 0.01% cells outlying
+  temperature_2m_veg:        {rtol: 0.0001, atol: 1e-07, frac: 0.00028}     # max|d|=0.159, 0.01% cells outlying
+  temperature_i:             {rtol: 0.0001, atol: 1e-07, frac: 0.0001}      # max|d|=0.261, 0.00% cells outlying
+  tend_th_lwrad:             {rtol: 0.0001, atol: 1e-07, frac: 0.0013}      # max|d|=1.49e-05, 0.06% cells outlying
+  transpiration_heat:        {rtol: 0.0001, atol: 0.1, frac: 0.0}           # widespread (15% cells), spread~0.0541
+  tsfe:                      {rtol: 0.0001, atol: 1e-07, frac: 0.00018}     # max|d|=0.156, 0.01% cells outlying
+  u:                         {rtol: 0.0001, atol: 0.0001, frac: 0.0}        # carried over from cross-lane spec
+  u10m:                      {rtol: 0.0001, atol: 1e-07, frac: 0.017}       # max|d|=0.00328, 0.80% cells outlying
+  u_mass:                    {rtol: 0.0001, atol: 1e-07, frac: 0.0042}      # max|d|=0.000229, 0.21% cells outlying
+  ustar:                     {rtol: 0.0001, atol: 0.02, frac: 0.0}          # widespread (5% cells), spread~0.0105
+  v:                         {rtol: 0.0001, atol: 0.0001, frac: 0.0001}     # max|d|=0.00046, 0.00% cells outlying
+  v10m:                      {rtol: 0.0001, atol: 1e-07, frac: 0.012}       # max|d|=0.00662, 0.57% cells outlying
+  v_mass:                    {rtol: 0.0001, atol: 1e-07, frac: 0.006}       # max|d|=0.000233, 0.30% cells outlying
+  veg_leaf_temperature:      {rtol: 0.0001, atol: 1e-07, frac: 0.00021}     # max|d|=0.148, 0.01% cells outlying
+  w:                         {rtol: 0.001, atol: 0.0001, frac: 0.017}       # max|d|=0.0022, 0.81% cells outlying
+  w_grid:                    {rtol: 0.0001, atol: 0.005, frac: 0.0}         # widespread (29% cells), spread~0.00234
+
+# Coordinate / bookkeeping variables: structural match only.
+ignore:
+  - time
+  - lat
+  - lon

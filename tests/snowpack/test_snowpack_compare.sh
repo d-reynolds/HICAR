@@ -11,7 +11,7 @@
 #
 # Both are CPU/gfortran builds reading the SAME seeded domain through the SAME
 # namelist, so any output difference is the snow implementation. Outputs are
-# compared over ALL variables against tests/snowpack/tolerances_snowpack.yaml.
+# compared over ALL variables against tests/tolerances/tolerances_snowpack.yaml.
 #
 # Usage:
 #   test_snowpack_compare.sh <hicar_repo> <cpp_exe> <fortran_exe> [np]
@@ -217,7 +217,7 @@ input_dir="${hicar_repo}/tests/Test_Cases/input"
 domains_dir="${hicar_repo}/tests/Test_Cases/domains"
 nmlgen_dir="${input_dir}/nml_gen_scripts"
 compare_script="${hicar_repo}/tests/compare_outputs.py"
-tol_spec="${hicar_repo}/tests/snowpack/tolerances_snowpack.yaml"
+tol_spec="${hicar_repo}/tests/tolerances/tolerances_snowpack.yaml"
 seeder="${hicar_repo}/tests/snowpack/make_snowpack_init.py"
 seeded_domain="${domains_dir}/Gaudergrat_250m_snowpack.nc"
 

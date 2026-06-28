@@ -1023,8 +1023,33 @@ contains
         associate(u_dqdt => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
                   v_dqdt => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
                   w_dqdt => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
-        us = u_dqdt; vs = v_dqdt; ws = w_dqdt
-        !$acc enter data copyin(us, vs, ws)
+        !$acc enter data create(us, vs, ws)
+        !$acc parallel default(present)
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime+1
+                    us(i,k,j) = u_dqdt(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme+1
+            do k = kms, kme
+                do i = ims, ime
+                    vs(i,k,j) = v_dqdt(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    ws(i,k,j) = w_dqdt(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc end parallel
 
         max_leak = 0.0
         do cc = 0, 2
