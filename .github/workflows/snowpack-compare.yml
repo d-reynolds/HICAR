@@ -7,19 +7,15 @@
 # A 3 h Standard run seeded with a 14-layer / 1 m snowpack is compared against
 # tests/tolerances/tolerances_snowpack.yaml. See tests/snowpack/test_snowpack_compare.sh.
 #
-# Triggers: PRs touching the snow drivers, nightly, and manual (with optional bless).
+# Triggers: every PR into main (the gate — no path filter), push to main (the
+# fresh post-merge run), nightly, and manual (with optional bless).
 name: SNOWPACK C++ vs Fortran
 
 on:
   pull_request:
-    branches: [main, develop]
-    paths:
-      - 'src/physics/sm_SNOWPACK.F90'
-      - 'src/physics/sm_driver.F90'
-      - 'cmake/FindSNOWPACK.cmake'
-      - 'tests/snowpack/**'
-      - 'tests/Test_Cases/input/nml_gen_scripts/SNOWPACK_Compare.sh'
-      - '.github/workflows/snowpack-compare.yml'
+    branches: [main]          # gate: run on EVERY PR into main, on the test-merge
+  push:
+    branches: [main]          # fresh post-merge parity run that signs main's HEAD
   schedule:
     - cron: '0 3 * * *'   # 03:00 UTC nightly
   workflow_dispatch:
@@ -47,7 +43,7 @@ permissions:
 
 jobs:
   # On a nightly, skip if main is unchanged since the last completed run.
-  # PRs (path-filtered) and manual dispatch always run.
+  # PRs into main, push to main, and manual dispatch always run.
   changed:
     runs-on: ubuntu-22.04
     outputs:
@@ -58,7 +54,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "Event '${{ github.event_name }}' is a PR/manual trigger — running."
+            echo "Event '${{ github.event_name }}' is a PR/push/manual trigger — running."
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi

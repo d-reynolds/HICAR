@@ -9,9 +9,9 @@
 # SCOPE: CPU debug, HICAR-tester only (integration cases are too slow under
 # valgrind; the GPU build can't run under it at all). ~10-50x slower than native,
 # so it sits behind the full-test gate. Runs nightly, on manual dispatch, and after
-# a full-test pass on a commit with an open PR to main (posts the required
-# `valgrind` status).
-name: Valgrind memcheck (nightly)
+# a full-test PASS that was either a PR into main (signs the PR HEAD) or a post-merge
+# push to main (signs main's HEAD) — posting the required `valgrind` status.
+name: Valgrind memcheck
 
 on:
   # Auto-run after the CPU full-test; the `changed` gate filters to a pass on a
@@ -26,7 +26,6 @@ on:
 permissions:
   contents: read
   actions: read         # the `changed` gate queries previous runs
-  pull-requests: read   # detect an open PR to main (workflow_run lane)
 
 concurrency:
   # Per-commit for the workflow_run lane (a newer develop push must not cancel an
@@ -36,7 +35,8 @@ concurrency:
 
 jobs:
   # Decide whether to run, and on which SHA:
-  #   workflow_run -> only a PASSED full-test on a branch with an open PR to main
+  #   workflow_run -> a PASSED full-test that was a PR into main (sign PR HEAD) or a
+  #                   post-merge push to main (sign main HEAD); develop pushes skipped
   #   schedule     -> skip if main is unchanged since the last completed run
   #   manual       -> always
   changed:
@@ -55,20 +55,20 @@ jobs:
 
           if [ "$event" = "workflow_run" ]; then
             concl="${{ github.event.workflow_run.conclusion }}"
+            wf_event="${{ github.event.workflow_run.event }}"
             head_branch="${{ github.event.workflow_run.head_branch }}"
-            echo "full-test conclusion=$concl head=$head_branch"
+            echo "full-test conclusion=$concl trigger=$wf_event head=$head_branch"
             if [ "$concl" != "success" ]; then
               echo "full-test did not pass — skipping."
               echo "should_run=false" >> "$GITHUB_OUTPUT"; exit 0
             fi
-            n=$(gh pr list --repo "${{ github.repository }}" \
-                  --base main --head "$head_branch" --state open \
-                  --json number --jq 'length' 2>/dev/null || echo 0)
-            if [ "${n:-0}" -ge 1 ]; then
-              echo "open PR to main for '$head_branch' — running valgrind."
+            # full-test's pull_request trigger is main-only, so any PR-triggered
+            # full-test IS a main-PR gate. Also run after a post-merge push to main.
+            if [ "$wf_event" = "pull_request" ] || { [ "$wf_event" = "push" ] && [ "$head_branch" = "main" ]; }; then
+              echo "full-test passed on a main PR / post-merge main — running valgrind."
               echo "should_run=true" >> "$GITHUB_OUTPUT"
             else
-              echo "no open PR to main for '$head_branch' — skipping."
+              echo "full-test was a develop push (no main gate) — skipping valgrind."
               echo "should_run=false" >> "$GITHUB_OUTPUT"
             fi
             exit 0

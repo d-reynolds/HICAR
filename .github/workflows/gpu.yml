@@ -1,8 +1,14 @@
 # GPU test suite (NVFortran, self-hosted).
 #
-# SECURITY: the self-hosted GPU runner never runs untrusted PR code — triggers are
-# only the nightly schedule (run on main) and manual dispatch, no push/pull_request.
-# develop is GPU-tested by the nightly after it merges to main.
+# SECURITY: the self-hosted GPU runner is NEVER triggered automatically by push or
+# pull_request — otherwise anyone with write access could put code on a branch, open
+# a PR (or have it run post-merge), and execute it on the box. It runs ONLY on:
+#   - the nightly schedule (trusted, already-merged main), and
+#   - manual workflow_dispatch by an org maintainer.
+# To make the required gpu-check pass on a PR into main, a maintainer reviews the PR
+# and dispatches this workflow on the PR's HEAD branch
+# (`gh workflow run gpu.yml --ref <head>`); sign-gpu then posts gpu-check=success on
+# github.sha (= the PR head), which is where main's ruleset evaluates it.
 #
 # FLOW:
 #   0. changed       — nightly only: skip if main is unchanged since the last run.
@@ -15,7 +21,7 @@ name: GPU test suite (NVFortran)
 
 on:
   schedule:
-    - cron: '0 4 * * *'   # 04:00 UTC
+    - cron: '0 4 * * *'   # 04:00 UTC nightly (trusted main only)
   workflow_dispatch:
 
 permissions:
@@ -40,7 +46,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "Event '${{ github.event_name }}' is a manual/explicit trigger — running."
+            echo "Event '${{ github.event_name }}' is a manual dispatch — running."
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -147,9 +153,9 @@ jobs:
             tests/figures/**
           if-no-files-found: ignore
 
-  # 4. Post gpu-check=success (required by main's ruleset). No pull_request trigger,
-  #    so the SHA resolves to github.sha — the dispatched branch HEAD (= PR head).
-  #    Runs on a GitHub-hosted runner, not the GPU box.
+  # 4. Post gpu-check=success (required by main's ruleset). No PR/push trigger, so the
+  #    SHA resolves to github.sha — the dispatched branch HEAD (= the PR head when a
+  #    maintainer dispatches on the PR's head branch). Runs on a hosted runner, not the GPU box.
   sign-gpu:
     needs: gpu-tests
     if: always() && needs.gpu-tests.result == 'success'
