@@ -16,14 +16,15 @@ This will list the different user options available:
                                    --all prints out information for all namelist variables.
      --check-nml:                  Check the namelist file for errors without running the model.
      --gen-nml:                    Generate a namelist file with default values.
-     --out-vars [keywords]:        List all output variables which are related to the space-separated list of keywords.
+     --out-vars [keywords]:        List all output variables matching all of the space-separated keywords 
+     (the result is their intersection).
 
      namelist_file:                The name of the namelist file to use.
 
      Example to generate a namelist with default values:                ./HICAR --gen-nml namelist_file.nml
      Example to check namelist:                                         ./HICAR --check-nml namelist_file.nml
      Example to run model:                                              ./HICAR namelist_file.nml
-     Example to list all output variables related to wind or snow:      ./HICAR --out-vars wind snow
+     Example to list all output variables related to wind:              ./HICAR --out-vars wind
      Example to learn about a namelist variable:                        ./HICAR -v mp
      Example to generate namelist variable documentation:               ./HICAR -v --all > namelist_doc.txt
 ```
@@ -38,7 +39,7 @@ In this way, the documentation for the model should stay tied to the version whi
 
 ## Nested Runs
 
-HICAR also supports one-way nesting of domains. The rules of nesting are that each domain can only have one parent nest, and the forcing data provided to a run must encompass all of the domains. One can also setup multple "nesting chains", where multiple domains are nested within a single parent nest. Nesting is controlled via the `nests` and `parent_nest` options in the `&general` section of the namelist. "Nests" tells HICAR how many domains to run, and `parent_nest` specifies which domain is the parent nest of a given domain. When multiple domains are specified, the user must explicitly provide the path to the initial_conditions_file for each domain as an ordered list of strings. This is done via the `initial_conditions_file` option in the `&domain` section of the namelist. Additionally, the `dx` option in the `&domain` section must be specified for each domain.
+HICAR also supports one-way nesting of domains. The rules of nesting are that each domain can only have one parent nest, and the forcing data provided to a run must encompass all of the domains. One can also setup multple "nesting chains", where multiple domains are nested within a single parent nest. Nesting is controlled via the `nests` and `parent_nest` options in the `&general` section of the namelist. "Nests" tells HICAR how many domains to run, and `parent_nest` specifies which domain is the parent nest of a given domain. When multiple domains are specified, the user must explicitly provide the path to the init_conditions_file for each domain as an ordered list of strings. This is done via the `init_conditions_file` option in the `&domain` section of the namelist. Additionally, the `dx` option in the `&domain` section must be specified for each domain.
 
 For example, to run with 3 nests, the following options could be set:
 
@@ -49,7 +50,7 @@ For example, to run with 3 nests, the following options could be set:
     ! Note that each domain has the domain id corresponding to its position in this list.
     ! For example, '../path/to/file1.nc' will have id=1, '../path/to/file2.nc' will have id=2
     ! And so on...
-    initial_conditions_file = '../path/to/file1.nc', '../path/to/file2.nc', '../path/to/file3.nc'
+    init_conditions_file = '../path/to/file1.nc', '../path/to/file2.nc', '../path/to/file3.nc'
 
     ! Set the horizontal resolution for each of these domains
     dx = 1000.0, 500.0, 100.0
@@ -76,4 +77,4 @@ For example, to run with 3 nests, the following options could be set:
 /
 ```
 
-The user can also provide different namelist options for each domain by specifying the desired options as an ordered list, similar to the example above with `initial_conditions_file`. If a single option is specified by the user, it is applied to all domains in the run. If no option is specified, then the model-default value is used (see default namelist, mentioned above). Most all namelist options support this convention. Namelist options marked with a "(-)" in their description only support a single value, and cannot differ among the different domains. Namelist options marked with a "(*)" in their description must be explicitly set for all domains.
+The user can also provide different namelist options for each domain by specifying the desired options as an ordered list, similar to the example above with `init_conditions_file`. If a single option is specified by the user, it is applied to all domains in the run. If no option is specified, then the model-default value is used (see default namelist, mentioned above). Most all namelist options support this convention. Namelist options marked with a "(-)" in their description only support a single value, and cannot differ among the different domains. Namelist options marked with a "(*)" in their description must be explicitly set for all domains.

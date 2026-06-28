@@ -374,7 +374,12 @@ set(BUILD_SHARED_LIBS OFF)
 # the accel kernels are unaffected.) The add_subdirectory that creates the
 # rte-rrtmgp targets runs inside FetchContent_MakeAvailable, so strip around it.
 set(_hicar_saved_fortran_flags "${CMAKE_Fortran_FLAGS}")
-string(REPLACE "-fopenmp" "" CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS}")
+
+if (COMPILER STREQUAL "gnu")
+	string(REPLACE "-fopenmp" "" CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS}")
+elseif (COMPILER STREQUAL "nvfortran")
+	string(REPLACE "-mp" "" CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS}")
+endif()
 
 FetchContent_MakeAvailable(rte-rrtmgp)
 	

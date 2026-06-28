@@ -140,7 +140,8 @@ contains
             write(*,*) "                                  --all prints out information for all namelist variables."
             write(*,*) "    --check-nml:                  Check the namelist file for errors without running the model."
             write(*,*) "    --gen-nml:                    Generate a namelist file with default values."
-            write(*,*) "    --out-vars [keywords]:        List all output variables which are related to the space-separated list of keywords."
+            write(*,*) "    --out-vars [keywords]:        List all output variables matching all of the space-separated keywords"
+            write(*,*) "                                  (the result is their intersection)."
             write(*,*)
             write(*,*) "    namelist_file:                The name of the namelist file to use."
             write(*,*)

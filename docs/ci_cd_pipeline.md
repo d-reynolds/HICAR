@@ -160,7 +160,7 @@ comparison**, with three stacked controls:
 
 **Evidence archive.** Every comparison run writes a machine-readable
 per-variable stats report (`parity_report.json`: max|abs|/max|rel|/violation
-counts for ALL 282 variables, passing ones included), the standard spatial
+counts for all variables common to both output files, passing ones included — the exact count depends on the run's `output_vars` and is reported at runtime as `n_compared`), the standard spatial
 difference maps (`diffmaps/`), and a provenance stamp into
 `tests/figures/snowpack_compare/` (uploaded as a workflow artifact, ≤90 d).
 **Blessing additionally publishes these as a permanent GitHub release**

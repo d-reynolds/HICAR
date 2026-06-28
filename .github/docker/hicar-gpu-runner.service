@@ -1,0 +1,27 @@
+# systemd unit to keep the HICAR GPU CI runner alive (fresh container per job).
+#
+# Install on the GPU box:
+#   1. Edit WorkingDirectory / ExecStart / User below to match your checkout.
+#   2. sudo cp hicar-gpu-runner.service /etc/systemd/system/
+#   3. sudo systemctl daemon-reload && sudo systemctl enable --now hicar-gpu-runner
+#   4. journalctl -u hicar-gpu-runner -f      # watch it register + pick up jobs
+#
+# The runner deregisters itself when stopped (ephemeral + entrypoint cleanup trap).
+[Unit]
+Description=HICAR GPU CI self-hosted runner (fresh container per job)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+# CHANGE these three to your environment:
+WorkingDirectory=/path/to/HICAR/dir/.github/docker
+ExecStart=/path/to/HICAR/dir/.github/docker/run-runner.sh
+User=youruser
+Restart=always
+RestartSec=10
+# Give in-flight jobs a chance to finish on stop before the container is killed.
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

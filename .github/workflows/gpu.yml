@@ -143,8 +143,6 @@ jobs:
         with:
           name: gpu-diagnostics
           path: |
-            tests/Test_Cases/input/*.err
-            tests/Test_Cases/input/*.out
             tests/gpu_cpu_report.json
             tests/figures/**
           if-no-files-found: ignore

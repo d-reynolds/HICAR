@@ -39,7 +39,7 @@ recommended to also provide the hydrometeor fields. See
 
 Yes. HICAR carries the same WRF-derived physics as ICAR, generally in their
 **full** form (the *dynamics* are what is simplified, not the physics). Available
-options include cumulus (Tiedtke, Kain-Fritsch, BMJ, NSAS), the full YSU PBL
+options include cumulus (Tiedtke, NSAS, BMJ), the full YSU PBL
 scheme, the Noah-MP land-surface model, RRTMG/RRTMGP radiation, and a range of
 microphysics schemes (Thompson, Morrison, WSM, ISHMAEL, simple). The active
 schemes are selected in the `&physics` namelist.

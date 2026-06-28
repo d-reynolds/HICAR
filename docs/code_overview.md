@@ -36,8 +36,8 @@ type can do, read the `_h`; for *how* it does it, read the `_obj`.
   switch.
 - **`time_step.F90`** — `step()` integrates a single nest forward over one
   forcing interval, sub-stepping under the advection CFL limit and calling the
-  physics drivers (advection, microphysics, PBL, radiation, land surface,
-  cumulus) in sequence.
+  physics drivers in execution order: radiation, surface layer, land surface,
+  PBL, cumulus/convection, advection, snow drift, then microphysics.
 - **`init.F90`** — model and option initialization (`init_model`,
   `init_options`, `split_processes`).
 
@@ -82,7 +82,7 @@ Physics files follow a **prefix naming convention**, and each category has a
 | `pbl_*`, `pbl_driver.F90` | Planetary boundary layer (YSU, simple, diagnostic) |
 | `ra_*`, `ra_driver.F90` | Radiation (RRTMG, RRTMGP, simple) |
 | `lsm_driver.F90`, Noah-MP (`noahmp/`) | Land surface |
-| `cu_*`, `cu_driver.F90` | Cumulus (Tiedtke, Kain-Fritsch, BMJ, NSAS) |
+| `cu_*`, `cu_driver.F90` | Cumulus (Tiedtke, NSAS, BMJ) |
 | `sfc_*`, `sfc_driver.F90` | Surface-layer scheme |
 
 **Dynamics / wind solvers.** Unlike a full NWP model, HICAR's "dynamics" are the
@@ -117,8 +117,8 @@ to I/O (see [Running](running.md)):
 - **`default_output_metadata.F90`** — the `get_varmeta` function: the single
   source of truth mapping each `kVARS` index to its output name, units,
   dimensions, and valid range.
-- **`io_routines.F90`**, **`lt_lut_io.F90`** (linear-theory look-up table),
-  **`time_io.F90`** — supporting read/write helpers.
+- **`io_routines.F90`** and **`lt_lut_io.F90`** (linear-theory look-up table) —
+  supporting read/write helpers.
 
 ## `utilities/`
 
@@ -136,9 +136,9 @@ namelist parsing (`namelist_utilities.F90`), array helpers
 
 Component tests live under `tests/` as [test-drive] suites: `test_driver.F90`
 dispatches to the individual `test_<name>.F90` files. The runnable suite names are
-`advection`, `snow_drift`, `control_flow`, `halo_exch`, `geo`, `time`, and
-`utilities` (note the advection suite is `advection`, though its file is
-`test_advect.F90`). Run them all with `make check`, or a single suite with
+`advection`, `snow_drift`, `wind_iterative`, `control_flow`, `halo_exch`, `geo`,
+`time`, and `utilities` (note the advection suite is `advection`, though its file
+is `test_advect.F90`). Run them all with `make check`, or a single suite with
 `mpiexec -np 2 tests/HICAR-tester <suite>`.
 See [Testing](testing.md) for local runs and
 [CI/CD pipeline](ci_cd_pipeline.md) for how they fit into the automated gates.
