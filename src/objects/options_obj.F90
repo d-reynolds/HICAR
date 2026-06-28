@@ -1,0 +1,3322 @@
+submodule(options_interface) options_implementation
+
+    use icar_constants
+    use mod_wrf_constants,          only : piconst
+    use io_routines,                only : io_newunit, check_variable_present, check_file_exists
+    use time_delta_object,          only : time_delta_t
+    use time_object,                only : Time_type
+    use string,                     only : str
+    use model_tracking,             only : print_model_diffs
+    use output_metadata,            only : get_varname, get_varindx, get_varmeta
+    use namelist_utils,             only : set_nml_var, set_nml_var_default, set_namelist, write_nml_file_end, &
+                                           translate_numeric_mapping, find_invalid_nml_vars
+    use iso_fortran_env
+    use meta_data_interface,        only : meta_data_t
+    implicit none
+
+
+contains
+
+
+    !> ----------------------------------------------------------------------------
+    !!  Read all namelists from the options file specified on the command line
+    !!
+    !!  Reads the commandline (or uses default icar_options.nml filename)
+    !!  Checks that the version of the options file matches the version of the code
+    !!  Reads each namelist successively, all options are stored in supplied options object
+    !!
+    !! ----------------------------------------------------------------------------
+
+    !> -------------------------------
+    !!  Initialize an options object using just the default namelist values, issuing no warnings
+    !!  or errors. This is used for testing purposes only.
+    !!
+    !! --------------------------------
+    module subroutine init_test(this)
+        implicit none
+        class(options_t),   intent(inout)  :: this
+
+        this%domain%dx = 250.0
+
+        call general_namelist(         "",   this%general, 1, read_nml=.False.)
+        call restart_namelist(         "",   this, 1, read_nml=.False.)
+        call domain_namelist(          "",   this%domain, 1, read_nml=.False.)
+        call forcing_namelist(         "",   this, 1, read_nml=.False.)
+        call physics_namelist(         "",   this%physics, 1, read_nml=.False.)
+        call time_parameters_namelist( "",   this%time, 1, read_nml=.False.)
+        call lt_parameters_namelist(   "",   this%lt, 1, read_nml=.False.)
+        call mp_parameters_namelist(   "",   this%mp, 1, read_nml=.False.)
+        call adv_parameters_namelist(  "",   this%adv, 1, read_nml=.False.)
+        call sm_parameters_namelist(   "",   this%sm, 1, read_nml=.False.)
+        call lsm_parameters_namelist(  "",   this%lsm, 1, read_nml=.False.)
+        call cu_parameters_namelist(   "",   this%cu, 1, read_nml=.False.)
+        call rad_parameters_namelist(  "",   this%rad, 1, read_nml=.False.)
+        call pbl_parameters_namelist(  "",   this%pbl, 1, read_nml=.False.)
+        call sfc_parameters_namelist(  "",   this%sfc, 1, read_nml=.False.)
+        call wind_namelist(            "",   this%wind, 1, read_nml=.False.)
+        call output_namelist(          "",   this%output, 1, read_nml=.False.)
+
+        call default_var_requests(this)
+
+    end subroutine init_test
+
+    !> -------------------------------
+    !! Initialize an options object using a namelist file
+    !!
+    !!
+    !! -------------------------------
+    module subroutine init_namelist(this, namelist_file, n_indx, info_only, gen_nml)
+        implicit none
+        class(options_t),   intent(inout)  :: this
+        character(len=*),   intent(in)     :: namelist_file
+        integer,            intent(in)     :: n_indx
+        logical,            intent(in)     :: info_only, gen_nml
+
+        integer :: i
+        logical :: exists
+
+        ! check if namelist_file exists
+        inquire(file=trim(namelist_file), exist=exists)
+        if (exists) then
+            if (gen_nml) then
+                if (STD_OUT_PE) write(*,*) 'Default namelist file already exists'
+                if (STD_OUT_PE) write(*,*) 'Default namelist file not overwritten'
+                stop
+            endif
+        else
+            if (.not.(gen_nml .or. info_only)) then
+                if (STD_OUT_PE) write(*,*) 'ERROR: namelist file: ',trim(namelist_file),' does not exist'
+                stop
+            endif
+        endif
+
+        this%nest_indx = n_indx
+        if (STD_OUT_PE .and. n_indx==1 .and. .not.(info_only .or. gen_nml)) write(*,*) "  Using options file = ", trim(namelist_file)
+        if (gen_nml) call set_namelist(namelist_file)
+        call general_namelist(         namelist_file,   this%general, n_indx, info_only=info_only, gen_nml=gen_nml)
+        call restart_namelist(         namelist_file,   this, n_indx, info_only=info_only, gen_nml=gen_nml)
+        call domain_namelist(          namelist_file,   this%domain, n_indx, info_only=info_only, gen_nml=gen_nml)
+        call forcing_namelist(         namelist_file,   this, n_indx, info_only=info_only, gen_nml=gen_nml)
+        call physics_namelist(         namelist_file,   this%physics, n_indx, info_only=info_only, gen_nml=gen_nml)
+        call time_parameters_namelist( namelist_file,   this%time, n_indx, info_only=info_only, gen_nml=gen_nml)
+        call lt_parameters_namelist(   namelist_file,   this%lt, n_indx, read_nml=this%general%use_lt_options, info_only=info_only, gen_nml=gen_nml)
+        call mp_parameters_namelist(   namelist_file,   this%mp, n_indx, read_nml=this%general%use_mp_options, info_only=info_only, gen_nml=gen_nml)
+        call adv_parameters_namelist(  namelist_file,   this%adv, n_indx, read_nml=this%general%use_adv_options, info_only=info_only, gen_nml=gen_nml)
+        call sm_parameters_namelist(   namelist_file,   this%sm, n_indx, read_nml=this%general%use_sm_options, info_only=info_only, gen_nml=gen_nml)
+        call lsm_parameters_namelist(  namelist_file,   this%lsm, n_indx, read_nml=this%general%use_lsm_options, info_only=info_only, gen_nml=gen_nml)
+        call cu_parameters_namelist(   namelist_file,   this%cu, n_indx, read_nml=this%general%use_cu_options, info_only=info_only, gen_nml=gen_nml)
+        call rad_parameters_namelist(  namelist_file,   this%rad, n_indx, read_nml=this%general%use_rad_options, info_only=info_only, gen_nml=gen_nml)
+        call pbl_parameters_namelist(  namelist_file,   this%pbl, n_indx, read_nml=this%general%use_pbl_options, info_only=info_only, gen_nml=gen_nml)
+        call sfc_parameters_namelist(  namelist_file,   this%sfc, n_indx, read_nml=this%general%use_sfc_options, info_only=info_only, gen_nml=gen_nml)
+        call wind_namelist(            namelist_file,   this%wind, n_indx, read_nml=this%general%use_wind_options, info_only=info_only, gen_nml=gen_nml)
+        call output_namelist(          namelist_file,   this%output, n_indx, info_only=info_only, gen_nml=gen_nml)
+
+        ! If this run was just done to output the namelist options, stop now
+        if (info_only .or. gen_nml) then
+            if (gen_nml) then
+                if (STD_OUT_PE) write(*,*) 'Default namelist written to file: ', trim(namelist_file)
+                call write_nml_file_end()
+            endif
+            stop
+        endif
+
+        call default_var_requests(this)
+
+        if (n_indx == 1) call version_check(this%general)
+
+    end subroutine init_namelist
+
+
+    !> -------------------------------
+    !! Checks options in the options data structure for consistency
+    !!
+    !! Stops or prints a large warning depending on warning level requested and error found
+    !!
+    !! -------------------------------
+    module subroutine verify_options(this)
+        ! Minimal error checking on option settings
+        implicit none
+        class(options_t), intent(inout)::this
+
+        type(meta_data_t) :: tmp_meta
+        integer :: i
+        logical :: output_zvar = .False.
+        ! Check that static domain file exists
+        if (trim(this%domain%init_conditions_file) /= '') then
+            call check_file_exists(trim(this%domain%init_conditions_file), message='A static domain file does not exist.')
+        endif
+
+        ! Check that the output and restart folders exists
+        if (trim(this%output%output_folder) /= '') then
+            call check_file_exists(trim(this%output%output_folder), message='Output folder does not exist.')
+        endif
+        if (trim(this%restart%restart_folder) /= '') then
+            call check_file_exists(trim(this%restart%restart_folder), message='Restart folder does not exist.')
+        endif
+
+        ! Check that auto_level options are consistent
+        if (this%domain%auto_level > 0) then
+            if (this%domain%auto_level == 1 .and. (this%domain%stretch_fac <= 0.5 .or. this%domain%stretch_fac > 1.0)) then
+                write(*,*) "  WARNING WARNING WARNING"
+                write(*,*) "  WARNING When using auto_level = 1, stretch_fac should be 0.5 < stretch_fac < 1.0 but is currently ", this%domain%stretch_fac
+                write(*,*) "  WARNING WARNING WARNING"
+                stop
+            else if (this%domain%auto_level == 2 .and. (this%domain%stretch_fac > 1.0)) then
+                write(*,*) "  WARNING WARNING WARNING"
+                write(*,*) "  WARNING When using auto_level = 2, stretch_fac should be 0.0001 < stretch_fac < 1.0 but is currently ", this%domain%stretch_fac
+                write(*,*) "  WARNING WARNING WARNING"
+                stop
+            endif
+        endif
+
+        !clean output var list
+        do i=1, size(this%output%vars_for_output)
+            if ((this%output%vars_for_output(i)+this%vars_for_restart(i) > 0) .and. (this%vars_to_allocate(i) <= 0)) then
+                !if (STD_OUT_PE) write(*,*) 'variable ',trim(get_varname(this%vars_to_allocate(i))),' requested for output/restart, but was not allocated by one of the modules'
+                if (this%output%vars_for_output(i) > 0) this%output%vars_for_output(i) = 0
+                if (this%vars_for_restart(i) > 0) this%vars_for_restart(i) = 0
+            endif
+            !see if we have any 3d variables requested, if so we will need to output z levels
+            if (this%output%vars_for_output(i)+this%vars_for_restart(i) > 0) then
+                tmp_meta = get_varmeta(i)
+                ! Also clean entries that have no metadata defined (no output name) or are not 2d or 3d
+                if (tmp_meta%name == "" .or. .not.(tmp_meta%two_d .or. tmp_meta%three_d) &
+                    .or. .not. tmp_meta%output) then
+                    this%output%vars_for_output(i) = 0
+                    this%vars_for_restart(i) = 0
+                    cycle
+                endif
+                if (tmp_meta%three_d) output_zvar = .True.
+            endif
+        enddo
+        ! Force the output of lat/lon, since these should always be present with output data
+        this%output%vars_for_output(kVARS%latitude) = 1
+        this%output%vars_for_output(kVARS%longitude) = 1
+        if (output_zvar) this%output%vars_for_output(kVARS%z) = 1
+
+        if (this%mp%top_mp_level < 0) this%mp%top_mp_level = this%domain%nz + this%mp%top_mp_level
+
+        ! In read wind options, we set update_dt to be the FREQUENCY, not the actual dt. Compute the actual dt here
+        call this%wind%update_dt%set(seconds=this%forcing%input_dt%seconds()/this%wind%update_dt%seconds())
+
+        !Perform checks
+        if (this%wind%smooth_wind_distance.eq.(-9999)) then
+            this%wind%smooth_wind_distance=this%domain%dx*2
+            if (STD_OUT_PE) write(*,*) "  Default smoothing distance = dx*2 = ", this%wind%smooth_wind_distance
+        elseif (this%wind%smooth_wind_distance<0) then
+            write(*,*) "  Wind smoothing must be a positive number"
+            write(*,*) "  this%wind%smooth_wind_distance = ",this%wind%smooth_wind_distance
+            this%wind%smooth_wind_distance = this%domain%dx*2
+        endif
+
+        !If user does not define this option, then let's Do The Right Thing
+        if (this%lsm%nmp_opt_sfc == -1) then
+            !If user has not turned on the surface layer scheme, then we set this to the recommended default value of 1
+            if (this%physics%surfacelayer == 0) then
+                this%lsm%nmp_opt_sfc = 1
+            !If user has turned on the surface layer scheme, then let's opt to use the surface layer scheme's surface exchange coefficients
+            else if (this%physics%surfacelayer == 1) then
+                this%lsm%nmp_opt_sfc = 3
+            endif
+        endif
+
+        if (.not.(this%physics%radiation == kRA_RRTMG)) this%pbl%ysu_topdown_pblmix = 0
+
+        ! Change z length of snow arrays here, since we need to change their size for the output arrays, which are set in
+        ! output_options_namelist
+        if (this%physics%snowmodel==kSM_FSM .or. this%physics%snowmodel==kSM_SNOWPACK) then
+            kSNOW_GRID_Z = this%sm%sm_nsnow_max
+            kSNOWSOIL_GRID_Z = kSNOW_GRID_Z+kSOIL_GRID_Z
+        endif
+
+        if (this%physics%snowmodel==kSM_FSM) then
+            if (this%sm%suspension_layer == 1 .and. this%sm%fsm_sntran > 0) then
+                if (STD_OUT_PE) write(*,*) " "
+                if (STD_OUT_PE) write(*,*) "WARNING: The CRYOWRF-style blowing snow drift model is not currently compatible with the FSM's SNOWTRAN scheme"
+                if (STD_OUT_PE) write(*,*) "WARNING: Assuming that you would prefer the suspension layer scheme, and setting sntran to 0"
+                this%sm%fsm_sntran = 0
+            endif
+        endif
+
+        if (this%sm%suspension_layer == 1) then
+            kFM_GRID_Z = this%sm%suspension_fine_mesh_levels
+        endif
+
+#ifdef SNOWPACK_CPP
+        if (this%sm%saltation_model == kSALTATION_DOORSCHOT) then
+            if (STD_OUT_PE) write(*,*) "  "
+            if (STD_OUT_PE) write(*,*) "  ATTENTION: The Doorschot saltation model is only compatible with the native Fortran SNOWPACK port"
+            if (STD_OUT_PE) write(*,*) "  ATTENTION: and is not currently compatible with the SNOWPACK CPP wrapper implementation. "
+            if (STD_OUT_PE) write(*,*) "  ATTENTION: setting saltation_model to default (sorensen) to avoid errors. "
+            this%sm%saltation_model = kSALTATION_SORENSEN
+        endif
+#endif
+
+        ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
+        if ((this%physics%landsurface>0).and.(this%physics%boundarylayer==0)) then
+            if (STD_OUT_PE) write(*,*) "  "
+            if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
+            if (STD_OUT_PE) write(*,*) "  WARNING, Using surfaces fluxes (lsm>0) without a PBL scheme may overheat the surface and CRASH the model."
+            if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
+        endif
+
+        ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
+        if ((this%physics%surfacelayer==0).and.(this%physics%boundarylayer>0)) then
+            if (STD_OUT_PE) write(*,*) "  "
+            if (STD_OUT_PE) write(*,*) "  ERROR, a surface layer scheme is required when using a PBL scheme,"
+            if (STD_OUT_PE) write(*,*) "  ERROR, set sfc > 0 in the namelist."
+            stop "  ERROR, a surface layer scheme is required when using a PBL scheme"
+        endif
+        ! if using a real LSM, feedback will probably keep hot-air from getting even hotter, so not likely a problem
+        if ((this%physics%surfacelayer==0).and. &
+            ((this%physics%watersurface==kWATER_SIMPLE).or.(this%physics%watersurface==kWATER_FLAKE))) then
+            if (STD_OUT_PE) write(*,*) "  "
+            if (STD_OUT_PE) write(*,*) "  ERROR, a surface layer scheme is required for the simple or FLake open-water schemes,"
+            if (STD_OUT_PE) write(*,*) "  ERROR, set sfc > 0 in the namelist."
+            stop "  ERROR, a surface layer scheme is required when using the simple or FLake open-water scheme"
+        endif
+
+        ! prior to v 0.9.3 this was assumed, so throw a warning now just in case.
+        if ((this%forcing%z_is_geopotential .eqv. .False.).and. &
+            (this%forcing%zvar=="PH")) then
+            if (STD_OUT_PE) write(*,*) "  "
+            if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
+            if (STD_OUT_PE) write(*,*) "  WARNING z variable is not assumed to be geopotential height when it is 'PH'."
+            if (STD_OUT_PE) write(*,*) "  WARNING If z is geopotential, set z_is_geopotential=True in the namelist."
+            if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
+        endif
+        
+        !! MJ added
+        if ((this%rad%terrain_shading).and.(this%physics%radiation==0)) then
+            if (STD_OUT_PE) write(*,*) "  "
+            if (STD_OUT_PE) write(*,*) "  STOP STOP STOP"
+            if (STD_OUT_PE) write(*,*) "  STOP, Running terrain_shading=.True. cannot not be used with rad=0"
+            if (STD_OUT_PE) write(*,*) "  STOP STOP STOP"
+            stop
+        endif
+        
+        if(this%adv%h_order == 1 .and. this%adv%cz_diff_order > 0) then
+            if (STD_OUT_PE) write(*,*) "  -------------------------------- WARNING --------------------------------"
+            if (STD_OUT_PE) write(*,*) "  Constant-z diffusion (cz_diff_order > 0) is not supported with h_order=1"
+            if (STD_OUT_PE) write(*,*) "  -------------------------------- WARNING --------------------------------"
+            stop
+        endif
+
+        if (this%time%RK3) then
+            if (this%adv%h_order == 1) then
+                if (STD_OUT_PE) write(*,*) "  ----------------- WARNING -----------------"
+                if (STD_OUT_PE) write(*,*) "  RK3 time stepping is not supported with h_order=1"
+                if (STD_OUT_PE) write(*,*) "  ----------------- WARNING -----------------"
+                stop
+            endif
+            if (max(this%adv%h_order,this%adv%v_order)==5 .and. this%time%cfl_reduction_factor > 1.4) then
+                if (STD_OUT_PE) write(*,*) "  CFL reduction factor should be less than 1.4 when horder or vorder = 5, limiting to 1.4"
+                this%time%cfl_reduction_factor = min(1.4,this%time%cfl_reduction_factor)
+            elseif (max(this%adv%h_order,this%adv%v_order)==3 .and. this%time%cfl_reduction_factor > 1.6) then
+                if (STD_OUT_PE) write(*,*) "  CFL reduction factor should be less than 1.6 when horder or vorder = 3, limiting to 1.6"
+                this%time%cfl_reduction_factor = min(1.6,this%time%cfl_reduction_factor)
+            endif
+        else
+            if (this%time%cfl_reduction_factor > 1.0) then   
+                if (STD_OUT_PE) write(*,*) "  CFL reduction factor should be less than 1.0 when RK3=.False., limiting to 1.0"
+                this%time%cfl_reduction_factor = min(1.0,this%time%cfl_reduction_factor)
+            endif
+        endif
+        
+        if (this%wind%alpha_const > 0) then
+            if (this%wind%alpha_const > 1.0) then
+                if (STD_OUT_PE) write(*,*) "  Alpha currently limited to values between 0.01 and 1.0, setting to 1.0"
+                this%wind%alpha_const = 1.0
+            else if (this%wind%alpha_const < 0.01) then
+                if (STD_OUT_PE) write(*,*) "  Alpha currently limited to values between 0.01 and 1.0, setting to 0.01"
+                this%wind%alpha_const = 0.01
+            endif
+        endif
+        
+        ! should warn user if lsm is run without radiation
+        if ((this%physics%landsurface>kLSM_BASIC .or. this%physics%snowmodel>0).and.(this%physics%radiation==0)) then
+            if (STD_OUT_PE) write(*,*) "  "
+            if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
+            if (STD_OUT_PE) write(*,*) "  WARNING, Using land surface model without radiation input does not make sense."
+            if (STD_OUT_PE) write(*,*) "  WARNING WARNING WARNING"
+        endif
+
+        if (this%physics%landsurface>0 .or. this%physics%snowmodel>0) then
+            this%sfc%isfflx = 0
+            this%sfc%scm_force_flux = 1
+        endif
+        
+        ! we will want to allow splitting of snow and rainfall if we have a snowmodel active
+        ! so deactivate NoahMP's automatic partitioning
+        if (this%physics%snowmodel>0) then
+            this%lsm%nmp_opt_snf = 4
+        endif
+
+        ! check if the last entry in dz_levels is zero, which would indicate that nz is larger than the number
+        ! of entries in dz_levels, or that the user passed bad data
+        if (this%domain%nz > 1) then
+            if ( (this%domain%dz_levels(this%domain%nz) == 0) .and. (this%domain%auto_level == 0) ) then
+                if (STD_OUT_PE) write(*,*) "  nz is larger than the number of entries in dz_levels, or the last entry in dz_levels is zero."
+                stop
+            endif
+        endif
+
+        ! check if start time is before end time
+        if (this%general%start_time >= this%general%end_time) then
+            if (STD_OUT_PE) write(*,*) "  Start time must be before end time"
+            stop
+        endif
+        ! Restart-time bounds checks apply ONLY when a restart is actually requested.
+        ! When restart is off, restart_namelist() returns early WITHOUT initialising
+        ! restart_time (see "if (.not. options%restart%restart) return"), so reading
+        ! it here would be an uninitialised access — its garbage value is platform-
+        ! dependent and spuriously tripped "Restart time must be before end time" on
+        ! some builds (e.g. the snowpack-compare run, which sets no restart_date).
+        if (this%restart%restart) then
+            if (this%restart%restart_time >= this%general%end_time) then
+                if (STD_OUT_PE) write(*,*) "  Restart time must be before end time"
+                stop
+            endif
+
+            ! check if restart_time is between start and end time
+            if (this%restart%restart_time < this%general%start_time) then
+                if (STD_OUT_PE) write(*,*) "  Restart time is before start time for nest ", this%nest_indx
+                if (STD_OUT_PE) write(*,*) "  Setting restart to .False."
+                this%restart%restart = .false.
+                this%restart%restart_time = this%general%start_time
+            endif
+        endif
+
+        ! Check if supporting files exist, if they are needed by physics modules
+        if (this%physics%landsurface==kLSM_NOAHMP) then
+            if (STD_OUT_PE) write(*,*) '  NoahMP LSM turned on, checking for supporting files...'
+            call check_file_exists('NoahmpTable.TBL', message='NoahmpTable.TBL file does not exist. This should be in the same directory as the namelist.')
+        endif
+        if (this%physics%radiation==kRA_RRTMG) then
+            if (STD_OUT_PE) write(*,*) '  RRTMG radiation turned on, checking for supporting files...'
+            call check_file_exists('rrtmg_support/forrefo_1.nc', message='At least one of the RRTMG supporting files does not exist. These files should be in a folder "rrtmg_support" placed in the same directory as the namelist.')
+        endif
+        if (this%physics%microphysics==kMP_ISHMAEL) then
+            if (STD_OUT_PE) write(*,*) '  ISHMAEL microphysics turned on, checking for supporting files...'
+            call check_file_exists('mp_support/ishmael_gamma_tab.nc', message='At least one of the ISHMAEL supporting files does not exist. These files should be in a folder "mp_support" placed in the same directory as the namelist.')
+        endif
+
+        if (trim(this%lsm%LU_Categories)=="USGS") then
+            if((this%physics%watersurface==kWATER_LAKE) .AND. (STD_OUT_PE)) then
+                write(*,*) "  WARNING: Lake model selected (water=2), but USGS LU-categories has no lake category"
+            endif
+            if((this%physics%watersurface==kWATER_FLAKE) .AND. (STD_OUT_PE)) then
+                write(*,*) "  WARNING: FLake model selected (water=3), but USGS LU-categories has no lake category"
+            endif
+        elseif (trim(this%lsm%LU_Categories)=="NLCD40") then
+            if(this%physics%watersurface==kWATER_LAKE) write(*,*) "  WARNING: Lake model selected (water=2), but NLCD40 LU-categories has no lake category"
+            if(this%physics%watersurface==kWATER_FLAKE) write(*,*) "  WARNING: FLake model selected (water=3), but NLCD40 LU-categories has no lake category"
+        endif
+
+        ! There needs to be a unique domain file for each nest. Additionally, dx needs to be set for each nest. Check for these here.
+        if (trim(this%domain%init_conditions_file)=="") then
+            if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            if (STD_OUT_PE) write(*,*) "  Error: 'init_conditions_file' must be set in the domain namelist for each nest"
+            if (STD_OUT_PE) write(*,*) "  Error: missing for nest: ", this%nest_indx
+            if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            stop
+        endif
+
+        if (this%domain%dx<=0) then
+            if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            if (STD_OUT_PE) write(*,*) "  Error: 'dx' must be set in the domain namelist for each nest"
+            if (STD_OUT_PE) write(*,*) "  Error: missing for nest: ", this%nest_indx
+            if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            stop
+        endif
+
+
+        ! -------------------------------------
+        ! Restart Checks
+        ! -------------------------------------
+        ! Check that the restart interval is a multiple of the input interval
+
+    end subroutine verify_options
+
+    !> -------------------------------
+    !! Read physics options to use from a namelist file
+    !!
+    !! -------------------------------
+    subroutine physics_namelist(filename, phys_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),intent(in)     :: filename
+        type(physics_type), intent(inout) :: phys_options
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: read_nml, info_only, gen_nml
+        integer :: name_unit, rc, nml_scratch
+        !variables to be used in the namelist
+        character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: pbl, lsm, mp, sfc, sm, water, rad, conv, adv, wind
+        logical :: print_info, gennml, read_namelist
+        !define the namelist
+        namelist /physics/ pbl, lsm, sfc, sm, water, mp, rad, conv, adv, wind
+        CHARACTER(LEN=200) :: error_msg
+
+        read_namelist = .True.
+        if (present(read_nml)) read_namelist = read_nml
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(pbl, 'pbl', print_info, gennml)
+        call set_nml_var_default(lsm, 'lsm', print_info, gennml)
+        call set_nml_var_default(sfc, 'sfc', print_info, gennml)
+        call set_nml_var_default(sm, 'sm', print_info, gennml)
+        call set_nml_var_default(water, 'water', print_info, gennml)
+        call set_nml_var_default(mp, 'mp', print_info, gennml)
+        call set_nml_var_default(rad, 'rad', print_info, gennml)
+        call set_nml_var_default(conv, 'conv', print_info, gennml)
+        call set_nml_var_default(adv, 'adv', print_info, gennml)
+        call set_nml_var_default(wind, 'wind', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        !read the namelist
+        if (read_namelist) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=physics,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=physics)
+                rewind(nml_scratch)
+                call print_nml_error('physics', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+        endif
+
+        !store options
+        call set_nml_var(phys_options%boundarylayer, pbl(n_indx), 'pbl', pbl(1))
+        call set_nml_var(phys_options%landsurface, lsm(n_indx), 'lsm', lsm(1))
+        call set_nml_var(phys_options%surfacelayer, sfc(n_indx), 'sfc', sfc(1))
+        call set_nml_var(phys_options%snowmodel, sm(n_indx), 'sm', sm(1))
+        call set_nml_var(phys_options%watersurface, water(n_indx), 'water', water(1))
+        call set_nml_var(phys_options%microphysics, mp(n_indx), 'mp',mp(1))
+        call set_nml_var(phys_options%radiation, rad(n_indx), 'rad', rad(1))
+        call set_nml_var(phys_options%convection, conv(n_indx), 'conv', conv(1))
+        call set_nml_var(phys_options%advection, adv(n_indx), 'adv', adv(1))
+        call set_nml_var(phys_options%windtype, wind(n_indx), 'wind', wind(1))
+
+    end subroutine physics_namelist
+
+
+    !> -------------------------------
+    !! Check that a required input variable is present
+    !!
+    !! If not present, halt the program
+    !!
+    !! -------------------------------
+    subroutine require_var(inputvar, var_name, message)
+        implicit none
+        character(len=*), intent(in) :: inputvar
+        character(len=*), intent(in) :: var_name
+        character(len=*), optional, intent(in) :: message
+
+        if (trim(inputvar)=="") then
+            if (STD_OUT_PE) write(*,*) "  Variable: ",trim(var_name), " is required."
+            if (STD_OUT_PE .and. present(message)) write(*,*) "  Variable: ",trim(var_name), " ",trim(message)
+            stop
+        endif
+
+    end subroutine require_var
+
+    !> -------------------------------
+    !! Initialize the variable names to be written to standard output
+    !!
+    !! Reads the output_list namelist
+    !!
+    !! -------------------------------
+    subroutine output_namelist(filename, output_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),             intent(in)    :: filename
+        type(output_options_type), intent(inout) :: output_options
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: read_nml, info_only, gen_nml
+
+        integer :: name_unit, rc, i, j, status, var_indx, nml_scratch
+        integer :: frames_per_outfile(kMAX_NESTS)
+        real    :: outputinterval(kMAX_NESTS)
+        logical :: file_exists, print_info, gennml, read_namelist
+
+        ! Local variables
+        character(len=kMAX_FILE_LENGTH) :: output_folder(kMAX_NESTS)
+        character(len=kMAX_NAME_LENGTH) :: output_vars(kMAX_STORAGE_VARS, kMAX_NESTS)
+        
+        namelist /output/ output_vars, outputinterval, frames_per_outfile, output_folder
+        CHARACTER(LEN=200) :: error_msg
+
+        read_namelist = .True.
+        if (present(read_nml)) read_namelist = read_nml
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(outputinterval, 'outputinterval', print_info, gennml)
+        call set_nml_var_default(frames_per_outfile, 'frames_per_outfile', print_info, gennml)
+        call set_nml_var_default(output_folder, 'output_folder', print_info, gennml)
+        call set_nml_var_default(output_vars, 'output_vars', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        if (read_namelist) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=output,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=output)
+                rewind(nml_scratch)
+                call print_nml_error('output', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+        endif
+        if (ALL(output_vars(:,n_indx)==kCHAR_NO_VAL)) then
+            if (.not.read_namelist) then
+                ! Test/mock mode: no namelist file, so skip output_vars requirement
+                return
+            endif
+            if (STD_OUT_PE) write(*,*) "  WARNING: output_vars not specified in namelist for domain: ", n_indx
+            if (n_indx == 1) then
+                stop 'output_vars must be specified in namelist for at least the first domain'
+            else
+                if (STD_OUT_PE) write(*,*) "  WARNING: Copying over the values from the first domain"
+            endif
+            output_vars(:,n_indx) = output_vars(:,1)
+        endif
+
+        if (trim(output_vars(1, n_indx)) == 'all') then
+            output_options%vars_for_output(:) = 1
+        else
+            do j=1, kMAX_STORAGE_VARS
+                if (trim(output_vars(j, n_indx)) /= "" .and. trim(output_vars(j, n_indx)) /= kCHAR_NO_VAL ) then
+
+                    !get the var index for this output variable name
+                    var_indx = get_varindx(trim(output_vars(j, n_indx)))
+                    if (var_indx <= kMAX_STORAGE_VARS) call add_to_varlist(output_options%vars_for_output, [var_indx])
+                endif
+            enddo
+        endif        
+
+        call set_nml_var(output_options%output_folder, output_folder(n_indx), 'output_folder', output_folder(1))
+        call set_nml_var(output_options%outputinterval, outputinterval(n_indx), 'outputinterval', outputinterval(1))
+        call output_options%output_dt%set(seconds=output_options%outputinterval)
+        call set_nml_var(output_options%frames_per_outfile, frames_per_outfile(n_indx), 'frames_per_outfile', frames_per_outfile(1))
+
+    end subroutine output_namelist
+
+    !> -------------------------------
+    !! Initialize the variable names to be written to standard output
+    !!
+    !! Reads the restart_list namelist
+    !!
+    !! -------------------------------
+    subroutine restart_namelist(filename, options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),intent(in)    :: filename
+        type(options_t), intent(inout) :: options
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: read_nml, info_only, gen_nml
+
+        integer :: name_unit, rc, nml_scratch
+        integer    :: restartinterval(kMAX_NESTS)
+
+        logical :: file_exists, read_namelist, print_info, gennml, override_check(kMAX_NESTS), restart_run(kMAX_NESTS)
+
+        ! Local variables
+        character(len=kMAX_FILE_LENGTH) :: restart_folder(kMAX_NESTS)
+        character(len=kMAX_FILE_LENGTH) :: restart_date(kMAX_NESTS)    ! date to restart
+
+        namelist /restart/  restartinterval, restart_folder, restart_date, restart_run, override_check
+        CHARACTER(LEN=200) :: error_msg
+
+        read_namelist = .True.
+        if (present(read_nml)) read_namelist = read_nml
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(restartinterval, 'restartinterval', print_info, gennml)
+        call set_nml_var_default(restart_folder, 'restart_folder', print_info, gennml)
+        call set_nml_var_default(restart_date, 'restart_date', print_info, gennml)
+        call set_nml_var_default(restart_run, 'restart_run', print_info, gennml)
+        call set_nml_var_default(override_check, 'override_check', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        if (read_namelist) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=restart,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=restart)
+                rewind(nml_scratch)
+                call print_nml_error('restart', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+        endif
+        ! Restart interval for this particular nest must be set to be the number of output intervals for this nest
+        ! which results in the same restart timestep for the first nest
+        call set_nml_var(options%restart%restart_count, restartinterval(n_indx), 'restartinterval', restartinterval(1))
+        call set_nml_var(options%restart%restart_folder, restart_folder(n_indx), 'restart_folder', restart_folder(1))
+        call set_nml_var(options%restart%restart, restart_run(n_indx), 'restart_run', restart_run(1))
+        call set_nml_var(options%restart%override_check, override_check(n_indx), 'override_check', override_check(1))
+        
+        !If the user did not ask for a restart run, leave the function now
+        if (.not.(options%restart%restart)) return
+        
+        ! calculate the modified julian day for th restart date given
+        call options%restart%restart_time%init(options%general%calendar)
+        if (restart_date(1)=="") then
+            if (STD_OUT_PE) write(*,*) "  ERROR: restart_date must be specified in the namelist"
+            stop
+        else
+            call options%restart%restart_time%set(restart_date(1))
+        endif
+        
+        
+    end subroutine restart_namelist
+
+    !> -------------------------------
+    !! Initialize the variable names to be read
+    !!
+    !! Reads the var_list namelist
+    !!
+    !! -------------------------------
+    subroutine forcing_namelist(filename, options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),     intent(in)    :: filename
+        type(options_t),      intent(inout) :: options
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: read_nml, info_only, gen_nml
+
+        integer :: name_unit, rc, i, j, nfiles, nml_scratch
+        logical :: compute_p, print_info, read_namelist, gennml
+        logical, dimension(kMAX_NESTS) :: limit_rh, z_is_geopotential,&
+                   time_varying_z, t_is_potential, qv_is_spec_humidity, &
+                   qv_is_relative_humidity, relax_filters
+        real, dimension(kMAX_NESTS)    :: t_offset, p_multiplier, inputinterval
+        character(len=kMAX_FILE_LENGTH) :: forcing_file_list
+        character(len=kMAX_FILE_LENGTH), allocatable :: boundary_files(:)
+
+        character(len=kMAX_NAME_LENGTH) :: latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar,zvar,  &
+                                        pvar,pbvar,phbvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,            &
+                                        qncvar,qnivar,qnrvar,qngvar,qnsvar,hgtvar,shvar,lhvar,pblhvar,  &
+                                        i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
+                                        qs_fmvar, ns_fmvar, &
+                                        psvar, pslvar, swdown_var, lwdown_var, sst_var, time_var
+
+        namelist /forcing/ forcing_file_list, inputinterval, t_offset, p_multiplier, limit_rh, z_is_geopotential, time_varying_z, &
+                            t_is_potential, qv_is_relative_humidity, qv_is_spec_humidity, relax_filters, &
+                            pvar,pbvar,phbvar,tvar,qvvar,qcvar,qivar,qrvar,qgvar,qsvar,qncvar,qnivar,qnrvar,qngvar,qnsvar,&
+                            i2mvar, i3mvar, i2nvar, i3nvar, i1avar, i2avar, i3avar, i1cvar, i2cvar, i3cvar, &
+                            qs_fmvar, ns_fmvar, &
+                            hgtvar,shvar,lhvar,pblhvar,   &
+                            latvar,lonvar,uvar,ulat,ulon,vvar,vlat,vlon,wvar,zvar, &
+                            psvar, pslvar, swdown_var, lwdown_var, sst_var, time_var
+        CHARACTER(LEN=200) :: error_msg
+
+        read_namelist = .True.
+        if (present(read_nml)) read_namelist = read_nml
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.    
+        if (present(gen_nml)) gennml = gen_nml
+
+        ! Default values for forcing options
+        allocate(boundary_files(MAX_NUMBER_FILES))
+
+        call set_nml_var_default(forcing_file_list, 'forcing_file_list', print_info, gennml)
+        call set_nml_var_default(t_offset, 't_offset', print_info, gennml)
+        call set_nml_var_default(p_multiplier, 'p_multiplier', print_info, gennml)
+        call set_nml_var_default(inputinterval, 'inputinterval', print_info, gennml)
+        call set_nml_var_default(limit_rh, 'limit_rh', print_info, gennml)
+        call set_nml_var_default(z_is_geopotential, 'z_is_geopotential', print_info, gennml)
+        call set_nml_var_default(time_varying_z, 'time_varying_z', print_info, gennml)
+        call set_nml_var_default(t_is_potential, 't_is_potential', print_info, gennml)
+        call set_nml_var_default(qv_is_relative_humidity, 'qv_is_relative_humidity', print_info, gennml)
+        call set_nml_var_default(qv_is_spec_humidity, 'qv_is_spec_humidity', print_info, gennml)
+        call set_nml_var_default(relax_filters, 'relax_filters', print_info, gennml)
+        call set_nml_var_default(latvar, 'latvar', print_info, gennml)
+        call set_nml_var_default(lonvar, 'lonvar', print_info, gennml)
+        call set_nml_var_default(hgtvar, 'hgtvar', print_info, gennml)
+        call set_nml_var_default(zvar, 'zvar', print_info, gennml)
+        call set_nml_var_default(uvar, 'uvar', print_info, gennml)
+        call set_nml_var_default(ulat, 'ulat', print_info, gennml)
+        call set_nml_var_default(ulon, 'ulon', print_info, gennml)
+        call set_nml_var_default(vvar, 'vvar', print_info, gennml)
+        call set_nml_var_default(vlat, 'vlat', print_info, gennml)
+        call set_nml_var_default(vlon, 'vlon', print_info, gennml)
+        call set_nml_var_default(wvar, 'wvar', print_info, gennml)
+        call set_nml_var_default(pslvar, 'pslvar', print_info, gennml)
+        call set_nml_var_default(psvar, 'psvar', print_info, gennml)
+        call set_nml_var_default(pvar, 'pvar', print_info, gennml)
+        call set_nml_var_default(pbvar, 'pbvar', print_info, gennml)
+        call set_nml_var_default(phbvar, 'phbvar', print_info, gennml)
+        call set_nml_var_default(tvar, 'tvar', print_info, gennml)
+        call set_nml_var_default(qvvar, 'qvvar', print_info, gennml)
+        call set_nml_var_default(qcvar, 'qcvar', print_info, gennml)
+        call set_nml_var_default(qivar, 'qivar', print_info, gennml)
+        call set_nml_var_default(qrvar, 'qrvar', print_info, gennml)
+        call set_nml_var_default(qsvar, 'qsvar', print_info, gennml)
+        call set_nml_var_default(qgvar, 'qgvar', print_info, gennml)
+        call set_nml_var_default(i2mvar, 'i2mvar', print_info, gennml)
+        call set_nml_var_default(i3mvar, 'i3mvar', print_info, gennml)
+        call set_nml_var_default(qncvar, 'qncvar', print_info, gennml)
+        call set_nml_var_default(qnivar, 'qnivar', print_info, gennml)
+        call set_nml_var_default(qnrvar, 'qnrvar', print_info, gennml)
+        call set_nml_var_default(qnsvar, 'qnsvar', print_info, gennml)
+        call set_nml_var_default(qngvar, 'qngvar', print_info, gennml)
+        call set_nml_var_default(i2nvar, 'i2nvar', print_info, gennml)
+        call set_nml_var_default(i3nvar, 'i3nvar', print_info, gennml)
+        call set_nml_var_default(i1avar, 'i1avar', print_info, gennml)
+        call set_nml_var_default(i2avar, 'i2avar', print_info, gennml)
+        call set_nml_var_default(i3avar, 'i3avar', print_info, gennml)
+        call set_nml_var_default(i1cvar, 'i1cvar', print_info, gennml)
+        call set_nml_var_default(i2cvar, 'i2cvar', print_info, gennml)
+        call set_nml_var_default(i3cvar, 'i3cvar', print_info, gennml)
+        call set_nml_var_default(qs_fmvar, 'qs_fmvar', print_info, gennml)
+        call set_nml_var_default(ns_fmvar, 'ns_fmvar', print_info, gennml)
+        call set_nml_var_default(shvar, 'shvar', print_info, gennml)
+        call set_nml_var_default(lhvar, 'lhvar', print_info, gennml)
+        call set_nml_var_default(swdown_var, 'swdown_var', print_info, gennml)
+        call set_nml_var_default(lwdown_var, 'lwdown_var', print_info, gennml)
+        call set_nml_var_default(sst_var, 'sst_var', print_info, gennml)
+        call set_nml_var_default(pblhvar, 'pblhvar', print_info, gennml)
+        call set_nml_var_default(time_var, 'time_var', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        if (read_namelist) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=forcing,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=forcing)
+                rewind(nml_scratch)
+                call print_nml_error('forcing', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+        endif
+
+        call set_nml_var(options%forcing%t_offset, t_offset(n_indx), 't_offset', t_offset(1))
+        call set_nml_var(options%forcing%p_multiplier, p_multiplier(n_indx), 'p_multiplier', p_multiplier(1))
+        call set_nml_var(options%forcing%limit_rh, limit_rh(n_indx), 'limit_rh', limit_rh(1))
+        call set_nml_var(options%forcing%z_is_geopotential, z_is_geopotential(n_indx), 'z_is_geopotential', z_is_geopotential(1))
+        call set_nml_var(options%forcing%time_varying_z, time_varying_z(n_indx), 'time_varying_z', time_varying_z(1))
+        call set_nml_var(options%forcing%t_is_potential, t_is_potential(n_indx), 't_is_potential', t_is_potential(1))
+        call set_nml_var(options%forcing%qv_is_relative_humidity, qv_is_relative_humidity(n_indx), 'qv_is_relative_humidity', qv_is_relative_humidity(1))
+        call set_nml_var(options%forcing%qv_is_spec_humidity, qv_is_spec_humidity(n_indx), 'qv_is_spec_humidity', qv_is_spec_humidity(1))
+        call set_nml_var(options%forcing%relax_filters, relax_filters(n_indx), 'relax_filters', relax_filters(1))
+        call set_nml_var(options%forcing%inputinterval, inputinterval(n_indx), 'inputinterval', inputinterval(1))
+
+        call options%forcing%input_dt%set(seconds=options%forcing%inputinterval)
+
+        if (.not.(read_namelist) .or. options%general%parent_nest > 0) return
+        
+        call require_var(lonvar, "Longitude")
+        call require_var(latvar, "Latitude")
+        call require_var(uvar, "U winds")
+        call require_var(vvar, "V winds")
+        call require_var(tvar, "Temperature")
+        call require_var(qvvar, "Water Vapor Mixing Ratio")
+        call require_var(time_var, "Time")
+
+        if (pvar == "") then
+            if (pslvar == "") then
+                call require_var(psvar, "Surface Pressure")
+                call require_var(hgtvar, "Surface Height")
+            else
+                call require_var(pslvar, "Sea Level Pressure")
+            endif
+        else
+            call require_var(pvar, "Pressure")
+        endif
+
+        if (zvar == "") then
+            if (pslvar == "") then
+                call require_var(psvar, "Surface Pressure")
+                call require_var(hgtvar, "Terrain Height")
+            else
+                call require_var(pslvar, "Sea Level Pressure")
+            endif
+        else
+            call require_var(zvar, "Verticle Level Height")
+        endif
+
+
+        call check_file_exists(forcing_file_list, message="Forcing file list does not exist.")
+
+        nfiles = read_forcing_file_names(forcing_file_list, boundary_files)
+
+        if (nfiles==0) then
+            stop "No boundary conditions files specified."
+        endif
+
+        allocate(options%forcing%boundary_files(nfiles))
+        options%forcing%boundary_files(1:nfiles) = boundary_files(1:nfiles)
+        deallocate(boundary_files)
+
+        ! time var must be set here, without the set_nml_var call, for dimension checking
+        ! in later set_nml_var calls to function properly
+        options%forcing%time_var = time_var
+
+        ! NOTE: water vapor must be the first of the forcing variables read
+        options%forcing%vars_to_read(:) = ""
+        options%forcing%dim_list(:)%num_dims = 0
+        i = 1
+        call set_nml_var(options%forcing%qvvar, qvvar, 'qvvar', options%forcing, i)
+        call set_nml_var(options%forcing%tvar, tvar, 'tvar', options%forcing, i)
+        call set_nml_var(options%forcing%pbvar, pbvar, 'pbvar', options%forcing, i)
+        call set_nml_var(options%forcing%phbvar, phbvar, 'phbvar', options%forcing, i)
+        call set_nml_var(options%forcing%latvar, latvar, 'latvar', options%forcing)
+        call set_nml_var(options%forcing%lonvar, lonvar, 'lonvar', options%forcing)
+        call set_nml_var(options%forcing%hgtvar, hgtvar, 'hgtvar', options%forcing, i)
+        call set_nml_var(options%forcing%uvar, uvar, 'uvar', options%forcing, i)
+        call set_nml_var(options%forcing%ulat, ulat, 'ulat', options%forcing)
+        call set_nml_var(options%forcing%ulon, ulon, 'ulon', options%forcing)
+        call set_nml_var(options%forcing%vvar, vvar, 'vvar', options%forcing, i)
+        call set_nml_var(options%forcing%vlat, vlat, 'vlat', options%forcing)
+        call set_nml_var(options%forcing%vlon, vlon, 'vlon', options%forcing)
+        call set_nml_var(options%forcing%wvar, wvar, 'wvar', options%forcing, i)
+        call set_nml_var(options%forcing%pslvar, pslvar, 'pslvar', options%forcing, i)
+        call set_nml_var(options%forcing%psvar, psvar, 'psvar', options%forcing, i)
+        call set_nml_var(options%forcing%qcvar, qcvar, 'qcvar', options%forcing, i)
+        call set_nml_var(options%forcing%qivar, qivar, 'qivar', options%forcing, i)
+        call set_nml_var(options%forcing%qrvar, qrvar, 'qrvar', options%forcing, i)
+        call set_nml_var(options%forcing%qgvar, qgvar, 'qgvar', options%forcing, i)
+        call set_nml_var(options%forcing%qsvar, qsvar, 'qsvar', options%forcing, i)
+        call set_nml_var(options%forcing%qncvar, qncvar, 'qncvar', options%forcing, i)
+        call set_nml_var(options%forcing%qnivar, qnivar, 'qnivar', options%forcing, i)
+        call set_nml_var(options%forcing%qnrvar, qnrvar, 'qnrvar', options%forcing, i)
+        call set_nml_var(options%forcing%qngvar, qngvar, 'qngvar', options%forcing, i)
+        call set_nml_var(options%forcing%qnsvar, qnsvar, 'qnsvar', options%forcing, i)
+        call set_nml_var(options%forcing%i2mvar, i2mvar, 'i2mvar', options%forcing, i)
+        call set_nml_var(options%forcing%i3mvar, i3mvar, 'i3mvar', options%forcing, i)
+        call set_nml_var(options%forcing%i2nvar, i2nvar, 'i2nvar', options%forcing, i)
+        call set_nml_var(options%forcing%i3nvar, i3nvar, 'i3nvar', options%forcing, i)
+        call set_nml_var(options%forcing%i1avar, i1avar, 'i1avar', options%forcing, i)
+        call set_nml_var(options%forcing%i2avar, i2avar, 'i2avar', options%forcing, i)
+        call set_nml_var(options%forcing%i3avar, i3avar, 'i3avar', options%forcing, i)
+        call set_nml_var(options%forcing%i1cvar, i1cvar, 'i1cvar', options%forcing, i)
+        call set_nml_var(options%forcing%i2cvar, i2cvar, 'i2cvar', options%forcing, i)
+        call set_nml_var(options%forcing%i3cvar, i3cvar, 'i3cvar', options%forcing, i)
+        call set_nml_var(options%forcing%qs_fmvar, qs_fmvar, 'qs_fmvar', options%forcing, i)
+        call set_nml_var(options%forcing%ns_fmvar, ns_fmvar, 'ns_fmvar', options%forcing, i)
+        call set_nml_var(options%forcing%shvar, shvar, 'shvar', options%forcing, i)
+        call set_nml_var(options%forcing%lhvar, lhvar, 'lhvar', options%forcing, i)
+        call set_nml_var(options%forcing%swdown_var, swdown_var, 'swdown_var', options%forcing, i)
+        call set_nml_var(options%forcing%lwdown_var, lwdown_var, 'lwdown_var', options%forcing, i)
+        call set_nml_var(options%forcing%sst_var, sst_var, 'sst_var', options%forcing, i)
+        call set_nml_var(options%forcing%pblhvar, pblhvar, 'pblhvar', options%forcing, i)
+
+        compute_p = .False.
+        if ((pvar=="") .and. ((pslvar/="") .or. (psvar/=""))) compute_p = .True.
+        if (compute_p) then
+            if ((pslvar == "").and.(hgtvar == "")) then
+                write(*,*) "  ERROR: if surface pressure is used to compute air pressure, then surface height must be specified"
+                error stop
+            endif
+        endif
+
+        options%forcing%compute_z = .False.
+        if ((zvar=="") .and. ((pslvar/="") .or. (psvar/=""))) options%forcing%compute_z = .True.
+        if (options%forcing%compute_z) then
+            if (pvar=="") then
+                if (STD_OUT_PE) write(*,*) "  ERROR: either pressure (pvar) or atmospheric level height (zvar) must be specified"
+                error stop
+            endif
+        endif
+        ! vertical coordinate
+        ! if (options%forcing%time_varying_z) then
+        if (options%forcing%compute_z) then
+            zvar = "height_computed"
+            options%forcing%zvar        = zvar; options%forcing%vars_to_read(i) = zvar;    i = i + 1
+        else
+            call set_nml_var(options%forcing%zvar, zvar, 'zvar', options%forcing, i)
+        endif
+
+
+        if (compute_p) then
+            pvar = "air_pressure_computed"
+            options%forcing%pvar        = pvar  ; options%forcing%vars_to_read(i) = pvar;   i = i + 1
+        else
+            call set_nml_var(options%forcing%pvar, pvar, 'pvar', options%forcing, i)
+        endif
+
+
+    end subroutine forcing_namelist
+
+
+    !> -------------------------------
+    !! Initialize the main parameter options
+    !!
+    !! Reads parameters for the ICAR simulation
+    !! These include setting flags that request other namelists be read
+    !!
+    !! -------------------------------
+    subroutine general_namelist(filename, gen_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),             intent(in)    :: filename
+        type(general_options_type), intent(inout) :: gen_options
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: read_nml, info_only, gen_nml
+
+        integer :: name_unit, rc, count, i, nml_scratch
+        integer, dimension(kMAX_NESTS) :: parent_nest, nests
+        logical :: read_namelist, print_info, gennml
+
+        ! parameters to read
+        logical, dimension(kMAX_NESTS) :: interactive, debug, &
+                                            use_mp_options, use_lt_options, use_adv_options, use_lsm_options, &
+                                            use_cu_options, use_rad_options, use_pbl_options, use_sfc_options, &
+                                            use_wind_options, use_sm_options
+
+        character(len=kMAX_FILE_LENGTH), dimension(kMAX_NESTS) :: start_date, end_date, calendar, version, comment
+        character(len=kMAX_NAME_LENGTH)                        :: start_date_checked, end_date_checked
+        namelist /general/    debug, interactive, calendar,          &
+                              version, comment,                 &
+                              start_date, end_date, &
+                              nests, parent_nest, &
+                              use_mp_options,     &
+                              use_lt_options,     &
+                              use_lsm_options,    &
+                              use_sm_options,     &
+                              use_adv_options,    &
+                              use_cu_options,     &
+                              use_rad_options,    &
+                              use_sfc_options,    &
+                              use_wind_options,   &
+                              use_pbl_options
+        CHARACTER(LEN=200) :: error_msg
+
+        read_namelist = .True.
+        if (present(read_nml)) read_namelist = read_nml
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(version, 'version', print_info, gennml)
+        call set_nml_var_default(comment, 'comment', print_info, gennml)
+        call set_nml_var_default(debug, 'debug', print_info, gennml)
+        call set_nml_var_default(interactive, 'interactive', print_info, gennml)
+        call set_nml_var_default(calendar, 'calendar', print_info, gennml)
+        call set_nml_var_default(start_date, 'start_date', print_info, gennml)
+        call set_nml_var_default(end_date, 'end_date', print_info, gennml)
+        call set_nml_var_default(nests, 'nests', print_info, gennml)
+        call set_nml_var_default(parent_nest, 'parent_nest', print_info, gennml)
+        call set_nml_var_default(use_mp_options, 'use_mp_options', print_info, gennml)
+        call set_nml_var_default(use_lt_options, 'use_lt_options', print_info, gennml)
+        call set_nml_var_default(use_adv_options, 'use_adv_options', print_info, gennml)
+        call set_nml_var_default(use_cu_options, 'use_cu_options', print_info, gennml)
+        call set_nml_var_default(use_lsm_options, 'use_lsm_options', print_info, gennml)
+        call set_nml_var_default(use_sm_options, 'use_sm_options', print_info, gennml)
+        call set_nml_var_default(use_rad_options, 'use_rad_options', print_info, gennml)
+        call set_nml_var_default(use_pbl_options, 'use_pbl_options', print_info, gennml)
+        call set_nml_var_default(use_sfc_options, 'use_sfc_options', print_info, gennml)
+        call set_nml_var_default(use_wind_options, 'use_wind_options', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        if (read_namelist) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=general,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=general)
+                rewind(nml_scratch)
+                call print_nml_error('general', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+        endif
+
+        call set_nml_var(gen_options%calendar, calendar(n_indx), 'calendar', calendar(1))
+        call set_nml_var(gen_options%version, version(n_indx), 'version', version(1))
+        call set_nml_var(gen_options%comment, comment(n_indx), 'comment', comment(1))
+        call set_nml_var(gen_options%debug, debug(n_indx), 'debug', debug(1))
+        call set_nml_var(gen_options%interactive, interactive(n_indx), 'interactive', interactive(1)) 
+        call set_nml_var(gen_options%nests, nests(n_indx), 'nests',  nests(1))
+        call set_nml_var(gen_options%use_mp_options, use_mp_options(n_indx), 'use_mp_options', use_mp_options(1))
+        call set_nml_var(gen_options%use_lt_options, use_lt_options(n_indx), 'use_lt_options', use_lt_options(1))
+        call set_nml_var(gen_options%use_adv_options, use_adv_options(n_indx), 'use_adv_options', use_adv_options(1))
+        call set_nml_var(gen_options%use_lsm_options, use_lsm_options(n_indx), 'use_lsm_options', use_lsm_options(1))
+        call set_nml_var(gen_options%use_sm_options, use_sm_options(n_indx), 'use_sm_options', use_sm_options(1))
+        call set_nml_var(gen_options%use_cu_options, use_cu_options(n_indx), 'use_cu_options', use_cu_options(1))
+        call set_nml_var(gen_options%use_rad_options, use_rad_options(n_indx), 'use_rad_options', use_rad_options(1))
+        call set_nml_var(gen_options%use_pbl_options, use_pbl_options(n_indx), 'use_pbl_options', use_pbl_options(1))
+        call set_nml_var(gen_options%use_sfc_options, use_sfc_options(n_indx), 'use_sfc_options', use_sfc_options(1))
+        call set_nml_var(gen_options%use_wind_options, use_wind_options(n_indx), 'use_wind_options', use_wind_options(1))
+        call set_nml_var(start_date_checked, start_date(n_indx), 'start_date', start_date(1))
+        call set_nml_var(end_date_checked, end_date(n_indx), 'end_date', end_date(1))
+
+        kDEFAULT_CALENDAR = gen_options%calendar
+
+        if (.not.(read_namelist)) return
+
+        if (trim(start_date_checked)/="") then
+            call gen_options%start_time%init(gen_options%calendar)
+            call gen_options%start_time%set(start_date_checked)
+        else
+            stop 'start date must be supplied in namelist'
+        endif
+        if (trim(end_date_checked)/="") then
+            call gen_options%end_time%init(gen_options%calendar)
+            call gen_options%end_time%set(end_date_checked)
+        else
+            stop 'end date must be supplied in namelist'
+        endif
+
+        if (parent_nest(n_indx) >= n_indx) then
+            if (STD_OUT_PE) write(*,*) "  ERROR for nest ", n_indx, ": parent nest must be less than or equal to the current nest"
+            if (STD_OUT_PE) write(*,*) "  ERROR for nest ", n_indx, ": parent nest is ", parent_nest(n_indx)
+            stop
+        else
+            call set_nml_var(gen_options%parent_nest, parent_nest(n_indx), 'parent_nest')
+        endif
+
+        count = 0
+        do i = 1, gen_options%nests
+            if (parent_nest(i) == n_indx) count = count + 1
+        end do
+
+        allocate(gen_options%child_nests(count))
+        if (count == 0) return
+
+        count = 0
+        do i = 1, gen_options%nests
+            if (parent_nest(i) == n_indx) then
+                count = count + 1
+                gen_options%child_nests(count) = i
+            endif
+        end do
+
+
+        ! options are updated when complete
+    end subroutine general_namelist
+
+
+    !> -------------------------------
+    !! Set up model levels, either read from a namelist, or from a default set of values
+    !!
+    !! Reads the z_info namelist or sets default values
+    !!
+    !! -------------------------------
+    subroutine domain_namelist(filename, domain_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),             intent(in)    :: filename
+        type(domain_options_type), intent(inout) :: domain_options
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: read_nml, info_only, gen_nml
+
+        integer :: name_unit, rc, this_level, nml_scratch
+        logical :: read_namelist, print_info, gennml
+
+        real, dimension(MAXLEVELS, kMAX_NESTS) :: dz_levels
+        logical, dimension(kMAX_NESTS) :: sleve, use_agl_height, use_map_factors
+
+        real, dimension(kMAX_NESTS) :: dx, flat_z_height, decay_rate_L_topo, decay_rate_S_topo, sleve_n, agl_cap, max_agl_height, height_lowest_level, model_top_height, stretch_fac
+        real, dimension(kMAX_NESTS) :: init_surf_temp, init_sst
+        integer, dimension(kMAX_NESTS) :: nz, longitude_system, terrain_smooth_windowsize, terrain_smooth_cycles, auto_level
+
+        character(len=kMAX_FILE_LENGTH) :: init_conditions_file(kMAX_NESTS)
+
+        character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: landvar,lakedepthvar,hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
+                                        snowh_var, soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var, soil_deept_var,           &
+                                        vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var,  &
+                                        sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_angle_var, &
+                                        aspect_angle_var, shd_var, surface_temp_var, &  !!MJ added
+                                        snowpack_nlayers_var, snowpack_deposition_var, &
+                                        snowpack_vfi_var, snowpack_vfw_var, snowpack_vfa_var, &
+                                        snowpack_vfs_var, snowpack_vfwp_var, snowpack_ds_var, &
+                                        snowpack_tsnow_var, snowpack_tsnow_i_var, &
+                                        snowpack_rg_var, snowpack_rb_var, snowpack_dd_var, snowpack_sp_var, &
+                                        snowpack_mk_var, snowpack_cdot_var, snowpack_snow_stress_var, snowpack_n3_var
+
+        namelist /domain/ dx, nz, longitude_system, init_conditions_file, &
+                            landvar,lakedepthvar, snowh_var, agl_cap, use_agl_height, use_map_factors, &
+                            hgt_hi,lat_hi,lon_hi,ulat_hi,ulon_hi,vlat_hi,vlon_hi,           &
+                            soiltype_var, cropcategory_var, soil_t_var,soil_vwc_var,swe_var,soil_deept_var,           &
+                            vegtype_var,vegfrac_var, vegfracmax_var, albedo_var, lai_var,  &
+                            sinalpha_var, cosalpha_var, svf_var, hlm_var, slope_angle_var, aspect_angle_var, shd_var, & !! MJ added
+                            surface_temp_var, init_surf_temp, init_sst, &
+                            snowpack_nlayers_var, snowpack_deposition_var, &
+                            snowpack_vfi_var, snowpack_vfw_var, snowpack_vfa_var, &
+                            snowpack_vfs_var, snowpack_vfwp_var, snowpack_ds_var, &
+                            snowpack_tsnow_var, snowpack_tsnow_i_var, &
+                            snowpack_rg_var, snowpack_rb_var, snowpack_dd_var, snowpack_sp_var, &
+                            snowpack_mk_var, snowpack_cdot_var, snowpack_snow_stress_var, snowpack_n3_var, &
+                            dz_levels, flat_z_height, sleve, terrain_smooth_windowsize, terrain_smooth_cycles, decay_rate_L_topo, decay_rate_S_topo, sleve_n, &
+                            auto_level, height_lowest_level, model_top_height, stretch_fac !! MS added
+        CHARACTER(LEN=200) :: error_msg
+
+        read_namelist = .True.
+        if (present(read_nml)) read_namelist = read_nml
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(init_conditions_file, 'init_conditions_file', print_info, gennml)
+        call set_nml_var_default(dx, 'dx', print_info, gennml)
+        call set_nml_var_default(longitude_system, 'longitude_system', print_info, gennml)
+        call set_nml_var_default(nz, 'nz', print_info, gennml)
+        call set_nml_var_default(flat_z_height, 'flat_z_height', print_info, gennml)
+        call set_nml_var_default(sleve, 'sleve', print_info, gennml)
+        call set_nml_var_default(terrain_smooth_windowsize, 'terrain_smooth_windowsize', print_info, gennml)
+        call set_nml_var_default(terrain_smooth_cycles, 'terrain_smooth_cycles', print_info, gennml)
+        call set_nml_var_default(decay_rate_L_topo, 'decay_rate_L_topo', print_info, gennml)
+        call set_nml_var_default(decay_rate_S_topo, 'decay_rate_S_topo', print_info, gennml)
+        call set_nml_var_default(sleve_n, 'sleve_n', print_info, gennml)
+        call set_nml_var_default(use_agl_height, 'use_agl_height', print_info, gennml)
+        call set_nml_var_default(use_map_factors, 'use_map_factors', print_info, gennml)
+        call set_nml_var_default(agl_cap, 'agl_cap', print_info, gennml)
+
+        call set_nml_var_default(dz_levels, 'dz_levels', print_info, gennml)
+        call set_nml_var_default(auto_level, 'auto_level', print_info, gennml)
+        call set_nml_var_default(height_lowest_level, 'height_lowest_level', print_info, gennml)
+        call set_nml_var_default(model_top_height, 'model_top_height', print_info, gennml)
+        call set_nml_var_default(stretch_fac, 'stretch_fac', print_info, gennml)
+
+        call set_nml_var_default(hgt_hi, 'hgt_hi', print_info, gennml)
+        call set_nml_var_default(landvar, 'landvar', print_info, gennml)
+        call set_nml_var_default(lakedepthvar, 'lakedepthvar', print_info, gennml)
+        call set_nml_var_default(lat_hi, 'lat_hi', print_info, gennml)
+        call set_nml_var_default(lon_hi, 'lon_hi', print_info, gennml)
+        call set_nml_var_default(ulat_hi, 'ulat_hi', print_info, gennml)
+        call set_nml_var_default(ulon_hi, 'ulon_hi', print_info, gennml)
+        call set_nml_var_default(vlat_hi, 'vlat_hi', print_info, gennml)
+        call set_nml_var_default(vlon_hi, 'vlon_hi', print_info, gennml)
+        call set_nml_var_default(soiltype_var, 'soiltype_var', print_info, gennml)
+        call set_nml_var_default(cropcategory_var, 'cropcategory_var', print_info, gennml)
+        call set_nml_var_default(soil_t_var, 'soil_t_var', print_info, gennml)
+        call set_nml_var_default(soil_vwc_var, 'soil_vwc_var', print_info, gennml)
+        call set_nml_var_default(swe_var, 'swe_var', print_info, gennml)
+        call set_nml_var_default(snowh_var, 'snowh_var', print_info, gennml)
+        call set_nml_var_default(soil_deept_var, 'soil_deept_var', print_info, gennml)
+        call set_nml_var_default(vegtype_var, 'vegtype_var', print_info, gennml)
+        call set_nml_var_default(vegfrac_var, 'vegfrac_var', print_info, gennml)
+        call set_nml_var_default(vegfracmax_var, 'vegfracmax_var', print_info, gennml)
+        call set_nml_var_default(albedo_var, 'albedo_var', print_info, gennml)
+        call set_nml_var_default(lai_var, 'lai_var', print_info, gennml)
+        call set_nml_var_default(sinalpha_var, 'sinalpha_var', print_info, gennml)
+        call set_nml_var_default(cosalpha_var, 'cosalpha_var', print_info, gennml)
+        call set_nml_var_default(surface_temp_var, 'surface_temp_var', print_info, gennml)
+
+        call set_nml_var_default(svf_var, 'svf_var', print_info, gennml)
+        call set_nml_var_default(hlm_var, 'hlm_var', print_info, gennml)
+        call set_nml_var_default(slope_angle_var, 'slope_angle_var', print_info, gennml)
+        call set_nml_var_default(aspect_angle_var, 'aspect_angle_var', print_info, gennml)
+        call set_nml_var_default(shd_var, 'shd_var', print_info, gennml)
+
+        call set_nml_var_default(snowpack_nlayers_var, 'snowpack_nlayers_var', print_info, gennml)
+        call set_nml_var_default(snowpack_deposition_var, 'snowpack_deposition_var', print_info, gennml)
+        call set_nml_var_default(snowpack_vfi_var, 'snowpack_vfi_var', print_info, gennml)
+        call set_nml_var_default(snowpack_vfw_var, 'snowpack_vfw_var', print_info, gennml)
+        call set_nml_var_default(snowpack_vfa_var, 'snowpack_vfa_var', print_info, gennml)
+        call set_nml_var_default(snowpack_vfs_var, 'snowpack_vfs_var', print_info, gennml)
+        call set_nml_var_default(snowpack_vfwp_var, 'snowpack_vfwp_var', print_info, gennml)
+        call set_nml_var_default(snowpack_ds_var, 'snowpack_ds_var', print_info, gennml)
+        call set_nml_var_default(snowpack_tsnow_var, 'snowpack_tsnow_var', print_info, gennml)
+        call set_nml_var_default(snowpack_tsnow_i_var, 'snowpack_tsnow_i_var', print_info, gennml)
+        call set_nml_var_default(snowpack_rg_var, 'snowpack_rg_var', print_info, gennml)
+        call set_nml_var_default(snowpack_rb_var, 'snowpack_rb_var', print_info, gennml)
+        call set_nml_var_default(snowpack_dd_var, 'snowpack_dd_var', print_info, gennml)
+        call set_nml_var_default(snowpack_sp_var, 'snowpack_sp_var', print_info, gennml)
+        call set_nml_var_default(snowpack_mk_var, 'snowpack_mk_var', print_info, gennml)
+        call set_nml_var_default(snowpack_cdot_var, 'snowpack_cdot_var', print_info, gennml)
+        call set_nml_var_default(snowpack_snow_stress_var, 'snowpack_snow_stress_var', print_info, gennml)
+        call set_nml_var_default(snowpack_n3_var, 'snowpack_n3_var', print_info, gennml)
+
+        call set_nml_var_default(init_surf_temp, 'init_surf_temp', print_info, gennml)
+        call set_nml_var_default(init_sst, 'init_sst', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        if (read_namelist) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=domain,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=domain)
+                rewind(nml_scratch)
+                call print_nml_error('domain', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+            ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
+            sleve(n_indx) = sleve(1)
+            use_agl_height(n_indx) = use_agl_height(1)
+            use_map_factors(n_indx) = use_map_factors(1)
+            ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
+
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=domain)
+            close(name_unit)
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'domain' namelist"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     stop
+            ! endif
+        endif
+
+
+        call set_nml_var(domain_options%nz, nz(n_indx), 'nz', nz(1))
+        call set_nml_var(domain_options%longitude_system, longitude_system(n_indx), 'longitude_system', longitude_system(1))
+        call set_nml_var(domain_options%flat_z_height, flat_z_height(n_indx), 'flat_z_height', flat_z_height(1))
+        call set_nml_var(domain_options%sleve, sleve(n_indx), 'sleve', sleve(1))
+        call set_nml_var(domain_options%terrain_smooth_windowsize, terrain_smooth_windowsize(n_indx), 'terrain_smooth_windowsize', terrain_smooth_windowsize(1))
+        call set_nml_var(domain_options%terrain_smooth_cycles, terrain_smooth_cycles(n_indx), 'terrain_smooth_cycles', terrain_smooth_cycles(1))
+        call set_nml_var(domain_options%decay_rate_L_topo, decay_rate_L_topo(n_indx), 'decay_rate_L_topo', decay_rate_L_topo(1))
+        call set_nml_var(domain_options%decay_rate_S_topo, decay_rate_S_topo(n_indx), 'decay_rate_S_topo', decay_rate_S_topo(1))
+        call set_nml_var(domain_options%sleve_n, sleve_n(n_indx), 'sleve_n', sleve_n(1))
+        call set_nml_var(domain_options%use_agl_height, use_agl_height(n_indx), 'use_agl_height', use_agl_height(1))
+        call set_nml_var(domain_options%use_map_factors, use_map_factors(n_indx), 'use_map_factors', use_map_factors(1))
+        call set_nml_var(domain_options%agl_cap, agl_cap(n_indx), 'agl_cap', agl_cap(1))
+
+        call set_nml_var(domain_options%auto_level, auto_level(n_indx), 'auto_level', auto_level(1))
+        call set_nml_var(domain_options%height_lowest_level, height_lowest_level(n_indx), 'height_lowest_level', height_lowest_level(1))
+        call set_nml_var(domain_options%model_top_height, model_top_height(n_indx), 'model_top_height', model_top_height(1))
+        call set_nml_var(domain_options%stretch_fac, stretch_fac(n_indx), 'stretch_fac', stretch_fac(1))
+
+
+        allocate(domain_options%dz_levels(domain_options%nz))
+        
+        ! These two variables are required to be set. See if they have been set. If we read the namelist, stop and warn the user. If we
+        ! didn't read the  namelist, this is by design (probably a test), so continue.
+        
+        if (trim(init_conditions_file(n_indx)) /= kCHAR_NO_VAL) then
+            call set_nml_var(domain_options%init_conditions_file, init_conditions_file(n_indx), 'init_conditions_file', init_conditions_file(1))
+        else if (read_namelist) then
+            if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            if (STD_OUT_PE) write(*,*) "  Error: init_conditions_file for nest ",n_indx, " not set in namelist"
+            if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            stop
+        endif
+
+        if (dx(n_indx) /= kREAL_NO_VAL) then
+            call set_nml_var(domain_options%dx, dx(n_indx), 'dx', dx(1))
+        else if (read_namelist) then
+            if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            if (STD_OUT_PE) write(*,*) "  Error: dx for nest ",n_indx, " not set in namelist"
+            if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            stop
+        endif
+        ! NOTE: hgt_hi has to be the first of the variables read
+        call set_nml_var(domain_options%hgt_hi, hgt_hi(n_indx), 'hgt_hi',domain_options, hgt_hi(1))
+        call set_nml_var(domain_options%landvar, landvar(n_indx), 'landvar',domain_options, landvar(1))
+        call set_nml_var(domain_options%lakedepthvar, lakedepthvar(n_indx), 'lakedepthvar',domain_options, lakedepthvar(1))
+        call set_nml_var(domain_options%lat_hi, lat_hi(n_indx), 'lat_hi',domain_options, lat_hi(1))
+        call set_nml_var(domain_options%lon_hi, lon_hi(n_indx), 'lon_hi',domain_options, lon_hi(1))
+        call set_nml_var(domain_options%ulat_hi, ulat_hi(n_indx), 'ulat_hi',domain_options, ulat_hi(1))
+        call set_nml_var(domain_options%ulon_hi, ulon_hi(n_indx), 'ulon_hi',domain_options, ulon_hi(1))
+        call set_nml_var(domain_options%vlat_hi, vlat_hi(n_indx), 'vlat_hi',domain_options, vlat_hi(1))
+        call set_nml_var(domain_options%vlon_hi, vlon_hi(n_indx), 'vlon_hi',domain_options, vlon_hi(1))
+        call set_nml_var(domain_options%soiltype_var, soiltype_var(n_indx), 'soiltype_var',domain_options, soiltype_var(1))
+        call set_nml_var(domain_options%cropcategory_var, cropcategory_var(n_indx), 'cropcategory_var',domain_options, cropcategory_var(1))
+        call set_nml_var(domain_options%soil_t_var, soil_t_var(n_indx), 'soil_t_var',domain_options, soil_t_var(1))
+        call set_nml_var(domain_options%soil_vwc_var, soil_vwc_var(n_indx), 'soil_vwc_var',domain_options, soil_vwc_var(1))
+        call set_nml_var(domain_options%swe_var, swe_var(n_indx), 'swe_var',domain_options, swe_var(1))
+        call set_nml_var(domain_options%snowh_var, snowh_var(n_indx), 'snowh_var',domain_options, snowh_var(1))
+        call set_nml_var(domain_options%soil_deept_var, soil_deept_var(n_indx), 'soil_deept_var',domain_options, soil_deept_var(1))
+        call set_nml_var(domain_options%vegtype_var, vegtype_var(n_indx), 'vegtype_var',domain_options, vegtype_var(1))
+        call set_nml_var(domain_options%vegfrac_var, vegfrac_var(n_indx), 'vegfrac_var',domain_options, vegfrac_var(1))
+        call set_nml_var(domain_options%vegfracmax_var, vegfracmax_var(n_indx), 'vegfracmax_var',domain_options, vegfracmax_var(1))
+        call set_nml_var(domain_options%albedo_var, albedo_var(n_indx), 'albedo_var',domain_options, albedo_var(1))
+        call set_nml_var(domain_options%lai_var, lai_var(n_indx), 'lai_var',domain_options, lai_var(1))
+        call set_nml_var(domain_options%sinalpha_var, sinalpha_var(n_indx), 'sinalpha_var',domain_options, sinalpha_var(1))
+        call set_nml_var(domain_options%cosalpha_var, cosalpha_var(n_indx), 'cosalpha_var',domain_options, cosalpha_var(1))
+        call set_nml_var(domain_options%surface_temp_var, surface_temp_var(n_indx), 'surface_temp_var',domain_options, surface_temp_var(1))
+
+        call set_nml_var(domain_options%svf_var, svf_var(n_indx), 'svf_var',domain_options, svf_var(1))
+        call set_nml_var(domain_options%hlm_var, hlm_var(n_indx), 'hlm_var',domain_options, hlm_var(1))
+        call set_nml_var(domain_options%slope_angle_var, slope_angle_var(n_indx), 'slope_angle_var',domain_options, slope_angle_var(1))
+        call set_nml_var(domain_options%aspect_angle_var, aspect_angle_var(n_indx), 'aspect_angle_var',domain_options, aspect_angle_var(1))
+        call set_nml_var(domain_options%shd_var, shd_var(n_indx), 'shd_var',domain_options, shd_var(1))
+
+        call set_nml_var(domain_options%snowpack_nlayers_var, snowpack_nlayers_var(n_indx), 'snowpack_nlayers_var',domain_options, snowpack_nlayers_var(1))
+        call set_nml_var(domain_options%snowpack_deposition_var, snowpack_deposition_var(n_indx), 'snowpack_deposition_var',domain_options, snowpack_deposition_var(1))
+        call set_nml_var(domain_options%snowpack_vfi_var, snowpack_vfi_var(n_indx), 'snowpack_vfi_var',domain_options, snowpack_vfi_var(1))
+        call set_nml_var(domain_options%snowpack_vfw_var, snowpack_vfw_var(n_indx), 'snowpack_vfw_var',domain_options, snowpack_vfw_var(1))
+        call set_nml_var(domain_options%snowpack_vfa_var, snowpack_vfa_var(n_indx), 'snowpack_vfa_var',domain_options, snowpack_vfa_var(1))
+        call set_nml_var(domain_options%snowpack_vfs_var, snowpack_vfs_var(n_indx), 'snowpack_vfs_var',domain_options, snowpack_vfs_var(1))
+        call set_nml_var(domain_options%snowpack_vfwp_var, snowpack_vfwp_var(n_indx), 'snowpack_vfwp_var',domain_options, snowpack_vfwp_var(1))
+        call set_nml_var(domain_options%snowpack_ds_var, snowpack_ds_var(n_indx), 'snowpack_ds_var',domain_options, snowpack_ds_var(1))
+        call set_nml_var(domain_options%snowpack_tsnow_var, snowpack_tsnow_var(n_indx), 'snowpack_tsnow_var',domain_options, snowpack_tsnow_var(1))
+        call set_nml_var(domain_options%snowpack_tsnow_i_var, snowpack_tsnow_i_var(n_indx), 'snowpack_tsnow_i_var',domain_options, snowpack_tsnow_i_var(1))
+        call set_nml_var(domain_options%snowpack_rg_var, snowpack_rg_var(n_indx), 'snowpack_rg_var',domain_options, snowpack_rg_var(1))
+        call set_nml_var(domain_options%snowpack_rb_var, snowpack_rb_var(n_indx), 'snowpack_rb_var',domain_options, snowpack_rb_var(1))
+        call set_nml_var(domain_options%snowpack_dd_var, snowpack_dd_var(n_indx), 'snowpack_dd_var',domain_options, snowpack_dd_var(1))
+        call set_nml_var(domain_options%snowpack_sp_var, snowpack_sp_var(n_indx), 'snowpack_sp_var',domain_options, snowpack_sp_var(1))
+        call set_nml_var(domain_options%snowpack_mk_var, snowpack_mk_var(n_indx), 'snowpack_mk_var',domain_options, snowpack_mk_var(1))
+        call set_nml_var(domain_options%snowpack_cdot_var, snowpack_cdot_var(n_indx), 'snowpack_cdot_var',domain_options, snowpack_cdot_var(1))
+        call set_nml_var(domain_options%snowpack_snow_stress_var, snowpack_snow_stress_var(n_indx), 'snowpack_snow_stress_var',domain_options, snowpack_snow_stress_var(1))
+        call set_nml_var(domain_options%snowpack_n3_var, snowpack_n3_var(n_indx), 'snowpack_n3_var',domain_options, snowpack_n3_var(1))
+
+        call set_nml_var(domain_options%init_surf_temp, init_surf_temp(n_indx), 'init_surf_temp', init_surf_temp(1))
+        call set_nml_var(domain_options%init_sst, init_sst(n_indx), 'init_sst', init_sst(1))
+
+        if (.not.(read_namelist)) return
+        
+        ! if nz wasn't specified in the namelist, we assume a HUGE number of levels
+        ! so now we have to figure out what the actual number of levels read was
+        if (ALL(dz_levels(:,n_indx)==kREAL_NO_VAL) .and. ( ( (sleve(n_indx) .eqv. .True.) .and. (domain_options%auto_level==0) ) .or. (sleve(n_indx) .eqv. .False.) ) ) then
+            if (STD_OUT_PE) write(*,*) "  WARNING: dz_levels not specified in namelist for domain: ", n_indx
+            if (n_indx == 1) then
+                stop 'dz_levels must be specified in namelist for at least the first domain'
+            else
+                if (STD_OUT_PE) write(*,*) "  WARNING: Copying over the values from the first domain"
+            endif
+            dz_levels(:,n_indx) = dz_levels(:,1)
+        endif
+        if ((domain_options%nz==MAXLEVELS) .and. (domain_options%auto_level == 0)) then
+            do this_level=1,MAXLEVELS-1
+                if (dz_levels(this_level+1,n_indx)<=0) then
+                    domain_options%nz=this_level
+                    exit
+                endif
+            end do
+            domain_options%nz=this_level
+        endif
+
+        call set_nml_var(domain_options%dz_levels(1:domain_options%nz), dz_levels(1:domain_options%nz,n_indx), 'dz_levels')
+
+        ! dx and init_conditions_file are required, check that they are set
+        call require_var(domain_options%init_conditions_file, "Initial Conditions file")
+        if (domain_options%dx <= 0) then
+            if (STD_OUT_PE) write(*,*) "  ERROR: dx must be specified in namelist"
+            if (STD_OUT_PE) write(*,*) "  ERROR: dx not specified for domain: ", n_indx
+            stop
+        endif
+
+
+        call require_var(domain_options%lat_hi, "High-res Lat")
+        call require_var(domain_options%lon_hi, "High-res Lon")
+        call require_var(domain_options%hgt_hi, "High-res HGT")
+
+    end subroutine domain_namelist
+
+
+    !> -------------------------------
+    !! Initialize the microphysics options
+    !!
+    !! Reads the mp_parameters namelist or sets default values
+    !!
+    !! -------------------------------
+    subroutine mp_parameters_namelist(mp_filename, mp_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),   intent(in)    :: mp_filename
+        type(mp_options_type), intent(inout) :: mp_options
+        logical, intent(in) :: read_nml
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: info_only, gen_nml
+
+        logical :: print_info, gennml
+        integer :: name_unit, rc, nml_scratch
+
+        real, dimension(kMAX_NESTS)    :: Nt_c, TNO, am_s, rho_g, av_s, bv_s, fv_s, av_g, bv_g, av_i, &
+                                          Ef_si, Ef_rs, Ef_rg, Ef_ri, C_cubes, C_sqrd, mu_r, t_adjust
+        logical, dimension(kMAX_NESTS) :: Ef_rw_l, EF_sw_l
+        integer :: top_mp_level(kMAX_NESTS)
+        real    :: update_interval_mp(kMAX_NESTS)
+
+        namelist /mp_parameters/ Nt_c, TNO, am_s, rho_g, av_s, bv_s, fv_s, av_g, bv_g, av_i,    &   ! thompson microphysics parameters
+                                Ef_si, Ef_rs, Ef_rg, Ef_ri,                                     &   ! thompson microphysics parameters
+                                C_cubes, C_sqrd, mu_r, Ef_rw_l, Ef_sw_l, t_adjust,              &   ! thompson microphysics parameters
+                                top_mp_level, update_interval_mp
+        CHARACTER(LEN=200) :: error_msg
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(Nt_c, 'Nt_c', print_info, gennml)
+        call set_nml_var_default(TNO, 'TNO', print_info, gennml)
+        call set_nml_var_default(am_s, 'am_s', print_info, gennml)
+        call set_nml_var_default(rho_g, 'rho_g', print_info, gennml)
+        call set_nml_var_default(av_s, 'av_s', print_info, gennml)
+        call set_nml_var_default(bv_s, 'bv_s', print_info, gennml)
+        call set_nml_var_default(fv_s, 'fv_s', print_info, gennml)
+        call set_nml_var_default(av_g, 'av_g', print_info, gennml)
+        call set_nml_var_default(bv_g, 'bv_g', print_info, gennml)
+        call set_nml_var_default(av_i, 'av_i', print_info, gennml)
+        call set_nml_var_default(Ef_si, 'Ef_si', print_info, gennml)
+        call set_nml_var_default(Ef_rs, 'Ef_rs', print_info, gennml)
+        call set_nml_var_default(Ef_rg, 'Ef_rg', print_info, gennml)
+        call set_nml_var_default(Ef_ri, 'Ef_ri', print_info, gennml)
+        call set_nml_var_default(C_cubes, 'C_cubes', print_info, gennml)
+        call set_nml_var_default(C_sqrd, 'C_sqrd', print_info, gennml)
+        call set_nml_var_default(mu_r, 'mu_r', print_info, gennml)
+        call set_nml_var_default(t_adjust, 't_adjust', print_info, gennml)
+        call set_nml_var_default(Ef_rw_l, 'Ef_rw_l', print_info, gennml)
+        call set_nml_var_default(Ef_sw_l, 'Ef_sw_l', print_info, gennml)
+        call set_nml_var_default(top_mp_level, 'top_mp_level', print_info, gennml)
+        call set_nml_var_default(update_interval_mp, 'update_interval_mp', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        ! read in the namelist
+        if (read_nml) then
+            open(io_newunit(name_unit), file=mp_filename)
+            read(name_unit,iostat=rc,nml=mp_parameters,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=mp_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('mp_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=mp_filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+            ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
+            Ef_rw_l(n_indx) = Ef_rw_l(1)
+            Ef_sw_l(n_indx) = Ef_sw_l(1)
+            ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
+            ! read in the namelist
+            open(io_newunit(name_unit), file=mp_filename)
+            read(name_unit,iostat=rc, nml=mp_parameters)
+            close(name_unit)
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'mp_parameters' namelist, continuing with defaults"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            ! endif
+        endif
+
+        call set_nml_var(mp_options%Nt_c, Nt_c(n_indx), 'Nt_c', Nt_c(1))
+        call set_nml_var(mp_options%TNO, TNO(n_indx), 'TNO', TNO(1))
+        call set_nml_var(mp_options%am_s, am_s(n_indx), 'am_s', am_s(1))
+        call set_nml_var(mp_options%rho_g, rho_g(n_indx), 'rho_g', rho_g(1))
+        call set_nml_var(mp_options%av_s, av_s(n_indx), 'av_s', av_s(1))
+        call set_nml_var(mp_options%bv_s, bv_s(n_indx), 'bv_s', bv_s(1))
+        call set_nml_var(mp_options%fv_s, fv_s(n_indx), 'fv_s', fv_s(1))
+
+        call set_nml_var(mp_options%av_g, av_g(n_indx), 'av_g', av_g(1))
+        call set_nml_var(mp_options%bv_g, bv_g(n_indx), 'bv_g', bv_g(1))
+        call set_nml_var(mp_options%av_i, av_i(n_indx), 'av_i', av_i(1))
+        call set_nml_var(mp_options%Ef_si, Ef_si(n_indx), 'Ef_si', Ef_si(1))
+        call set_nml_var(mp_options%Ef_rs, Ef_rs(n_indx), 'Ef_rs', Ef_rs(1))
+        call set_nml_var(mp_options%Ef_rg, Ef_rg(n_indx), 'Ef_rg', Ef_rg(1))
+        call set_nml_var(mp_options%Ef_ri, Ef_ri(n_indx), 'Ef_ri', Ef_ri(1))
+        call set_nml_var(mp_options%mu_r, mu_r(n_indx), 'mu_r', mu_r(1))
+        call set_nml_var(mp_options%t_adjust, t_adjust(n_indx), 't_adjust', t_adjust(1))
+        call set_nml_var(mp_options%C_cubes, C_cubes(n_indx), 'C_cubes', C_cubes(1))
+        call set_nml_var(mp_options%C_sqrd, C_sqrd(n_indx), 'C_sqrd', C_sqrd(1))
+        call set_nml_var(mp_options%Ef_rw_l, Ef_rw_l(n_indx), 'Ef_rw_l', Ef_rw_l(1))
+        call set_nml_var(mp_options%Ef_sw_l, Ef_sw_l(n_indx), 'Ef_sw_l', Ef_sw_l(1))
+
+        call set_nml_var(mp_options%update_interval, update_interval_mp(n_indx), 'update_interval_mp', update_interval_mp(1))
+        call set_nml_var(mp_options%top_mp_level, top_mp_level(n_indx), 'top_mp_level', top_mp_level(1))
+
+    end subroutine mp_parameters_namelist
+
+
+    !> -------------------------------
+    !! Initialize the Linear Theory options
+    !!
+    !! Reads the lt_parameters namelist or sets default values
+    !!
+    !! -------------------------------
+    subroutine lt_parameters_namelist(filename, lt_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),   intent(in)   :: filename
+        type(lt_options_type), intent(inout) :: lt_options
+        logical, intent(in) :: read_nml
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: info_only, gen_nml
+
+        integer :: name_unit, rc, nml_scratch
+        logical :: print_info, gennml
+
+        integer :: vert_smooth(kMAX_NESTS)
+        logical :: variable_N(kMAX_NESTS)           ! Compute the Brunt Vaisala Frequency (N^2) every time step
+        logical :: smooth_nsq(kMAX_NESTS)               ! Smooth the Calculated N^2 over vert_smooth vertical levels
+        integer :: buffer(kMAX_NESTS)                   ! number of grid cells to buffer around the domain MUST be >=1
+        integer :: stability_window_size(kMAX_NESTS)    ! window to average nsq over
+        real    :: max_stability(kMAX_NESTS)            ! limits on the calculated Brunt Vaisala Frequency
+        real    :: min_stability(kMAX_NESTS)            ! these may need to be a little narrower.
+        real    :: linear_contribution(kMAX_NESTS)      ! multiplier on uhat,vhat before adding to u,v
+        real    :: linear_update_fraction(kMAX_NESTS)   ! controls the rate at which the linearfield updates (should be calculated as f(in_dt))
+
+        real    :: N_squared(kMAX_NESTS)                ! static Brunt Vaisala Frequency (N^2) to use
+        logical :: remove_lowres_linear(kMAX_NESTS)     ! attempt to remove the linear mountain wave from the forcing low res model
+        real    :: rm_N_squared(kMAX_NESTS)             ! static Brunt Vaisala Frequency (N^2) to use in removing linear wind field
+        real    :: rm_linear_contribution(kMAX_NESTS)   ! fractional contribution of linear perturbation to wind field to remove from the low-res field
+
+        ! Look up table generation parameters
+        real, dimension(kMAX_NESTS)    :: dirmax, dirmin
+        real, dimension(kMAX_NESTS)    :: spdmax, spdmin
+        real, dimension(kMAX_NESTS)    :: nsqmax, nsqmin
+        integer, dimension(kMAX_NESTS) :: n_dir_values, n_nsq_values, n_spd_values
+        real, dimension(kMAX_NESTS)    :: minimum_layer_size       ! Minimum vertical step to permit when computing LUT.
+                                            ! If model layers are thicker, substepping will be used.
+
+        ! parameters to control reading from or writing an LUT file
+        logical, dimension(kMAX_NESTS) :: read_LUT, write_LUT
+        character(len=kMAX_FILE_LENGTH), dimension(kMAX_NESTS) :: u_LUT_Filename, v_LUT_Filename, LUT_Filename
+        logical :: overwrite_lt_lut(kMAX_NESTS)
+        CHARACTER(LEN=200) :: error_msg
+
+        ! define the namelist
+        namelist /lt_parameters/ variable_N, smooth_nsq, buffer, stability_window_size, max_stability, min_stability, &
+                                 linear_contribution, linear_update_fraction, N_squared, vert_smooth, &
+                                 remove_lowres_linear, rm_N_squared, rm_linear_contribution, &
+                                 minimum_layer_size, &
+                                 dirmax, dirmin, spdmax, spdmin, nsqmax, nsqmin, n_dir_values, n_nsq_values, n_spd_values, &
+                                 read_LUT, write_LUT, u_LUT_Filename, v_LUT_Filename, overwrite_lt_lut, LUT_Filename
+
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(variable_N, 'variable_N', print_info, gennml)
+        call set_nml_var_default(smooth_nsq, 'smooth_nsq', print_info, gennml)
+        call set_nml_var_default(buffer, 'buffer', print_info, gennml)
+        call set_nml_var_default(stability_window_size, 'stability_window_size', print_info, gennml)
+        call set_nml_var_default(max_stability, 'max_stability', print_info, gennml)
+        call set_nml_var_default(min_stability, 'min_stability', print_info, gennml)
+        call set_nml_var_default(vert_smooth, 'vert_smooth', print_info, gennml)
+        call set_nml_var_default(N_squared, 'N_squared', print_info, gennml)
+        call set_nml_var_default(linear_contribution, 'linear_contribution', print_info, gennml)
+        call set_nml_var_default(remove_lowres_linear, 'remove_lowres_linear', print_info, gennml)
+        call set_nml_var_default(rm_N_squared, 'rm_N_squared', print_info, gennml)
+        call set_nml_var_default(rm_linear_contribution, 'rm_linear_contribution', print_info, gennml)
+        call set_nml_var_default(linear_update_fraction, 'linear_update_fraction', print_info, gennml)
+        call set_nml_var_default(dirmax, 'dirmax', print_info, gennml)
+        call set_nml_var_default(dirmin, 'dirmin', print_info, gennml)
+        call set_nml_var_default(spdmax, 'spdmax', print_info, gennml)
+        call set_nml_var_default(spdmin, 'spdmin', print_info, gennml)
+        call set_nml_var_default(nsqmax, 'nsqmax', print_info, gennml)
+        call set_nml_var_default(nsqmin, 'nsqmin', print_info, gennml)
+        call set_nml_var_default(n_dir_values, 'n_dir_values', print_info, gennml)
+        call set_nml_var_default(n_nsq_values, 'n_nsq_values', print_info, gennml)
+        call set_nml_var_default(n_spd_values, 'n_spd_values', print_info, gennml)
+        call set_nml_var_default(minimum_layer_size, 'minimum_layer_size', print_info, gennml)
+        call set_nml_var_default(read_LUT, 'read_LUT', print_info, gennml)
+        call set_nml_var_default(write_LUT, 'write_LUT', print_info, gennml)
+        call set_nml_var_default(u_LUT_Filename, 'u_LUT_Filename', print_info, gennml)
+        call set_nml_var_default(v_LUT_Filename, 'v_LUT_Filename', print_info, gennml)
+        call set_nml_var_default(LUT_Filename, 'LUT_Filename', print_info, gennml)
+        call set_nml_var_default(overwrite_lt_lut, 'overwrite_lt_lut', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        ! read the namelist options
+        if (read_nml) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=lt_parameters,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=lt_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('lt_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+            ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
+            variable_N(n_indx) = variable_N(1)
+            smooth_nsq(n_indx) = smooth_nsq(1)
+            remove_lowres_linear(n_indx) = remove_lowres_linear(1)
+            read_LUT(n_indx) = read_LUT(1)
+            write_LUT(n_indx) = write_LUT(1)
+            overwrite_lt_lut(n_indx) = overwrite_lt_lut(1)
+            ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
+            ! read the namelist options
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=lt_parameters)
+            close(name_unit)
+        endif
+
+        call set_nml_var(lt_options%variable_N, variable_N(n_indx), 'variable_N', variable_N(1))
+        call set_nml_var(lt_options%smooth_nsq, smooth_nsq(n_indx), 'smooth_nsq', smooth_nsq(1))
+        call set_nml_var(lt_options%buffer, buffer(n_indx), 'buffer', buffer(1))
+        call set_nml_var(lt_options%stability_window_size, stability_window_size(n_indx), 'stability_window_size', stability_window_size(1))
+        call set_nml_var(lt_options%max_stability, max_stability(n_indx), 'max_stability', max_stability(1))
+        call set_nml_var(lt_options%min_stability, min_stability(n_indx), 'min_stability', min_stability(1))
+        call set_nml_var(lt_options%vert_smooth, vert_smooth(n_indx), 'vert_smooth', vert_smooth(1))
+        call set_nml_var(lt_options%N_squared, N_squared(n_indx), 'N_squared', N_squared(1))
+        call set_nml_var(lt_options%linear_contribution, linear_contribution(n_indx), 'linear_contribution', linear_contribution(1))
+        call set_nml_var(lt_options%remove_lowres_linear, remove_lowres_linear(n_indx), 'remove_lowres_linear')
+        call set_nml_var(lt_options%rm_N_squared, rm_N_squared(n_indx), 'rm_N_squared', rm_N_squared(1))
+        call set_nml_var(lt_options%rm_linear_contribution, rm_linear_contribution(n_indx), 'rm_linear_contribution', rm_linear_contribution(1))
+        call set_nml_var(lt_options%linear_update_fraction, linear_update_fraction(n_indx), 'linear_update_fraction', linear_update_fraction(1))
+        call set_nml_var(lt_options%dirmax, dirmax(n_indx), 'dirmax', dirmax(1))
+        call set_nml_var(lt_options%dirmin, dirmin(n_indx), 'dirmin', dirmin(1))
+        call set_nml_var(lt_options%spdmax, spdmax(n_indx), 'spdmax', spdmax(1))
+        call set_nml_var(lt_options%spdmin, spdmin(n_indx), 'spdmin', spdmin(1))
+        call set_nml_var(lt_options%nsqmax, nsqmax(n_indx), 'nsqmax', nsqmax(1))
+        call set_nml_var(lt_options%nsqmin, nsqmin(n_indx), 'nsqmin', nsqmin(1))
+        call set_nml_var(lt_options%n_dir_values, n_dir_values(n_indx), 'n_dir_values', n_dir_values(1))
+        call set_nml_var(lt_options%n_nsq_values, n_nsq_values(n_indx), 'n_nsq_values', n_nsq_values(1))
+        call set_nml_var(lt_options%n_spd_values, n_spd_values(n_indx), 'n_spd_values', n_spd_values(1))
+        call set_nml_var(lt_options%minimum_layer_size, minimum_layer_size(n_indx), 'minimum_layer_size', minimum_layer_size(1))
+        call set_nml_var(lt_options%read_LUT, read_LUT(n_indx), 'read_LUT', read_LUT(1))
+        call set_nml_var(lt_options%write_LUT, write_LUT(n_indx), 'write_LUT', write_LUT(1))
+        call set_nml_var(lt_options%u_LUT_Filename, u_LUT_Filename(n_indx), 'u_LUT_Filename', u_LUT_Filename(1))
+        call set_nml_var(lt_options%v_LUT_Filename, v_LUT_Filename(n_indx), 'v_LUT_Filename', v_LUT_Filename(1))
+        call set_nml_var(lt_options%overwrite_lt_lut, overwrite_lt_lut(n_indx), 'overwrite_lt_lut', overwrite_lt_lut(1))
+
+
+    end subroutine lt_parameters_namelist
+
+
+    !> -------------------------------
+    !! Initialize the advection options
+    !!
+    !! Reads the adv_parameters namelist or sets default values
+    !!
+    !! -------------------------------
+    subroutine adv_parameters_namelist(filename, adv_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),   intent(in)   :: filename
+        type(adv_options_type), intent(inout) :: adv_options
+        logical, intent(in) :: read_nml
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: info_only, gen_nml
+
+        integer :: name_unit, rc, nml_scratch
+        logical :: print_info, gennml
+
+        logical :: advect_density(kMAX_NESTS)
+        integer, dimension(kMAX_NESTS) :: flux_corr, h_order, v_order, cz_diff_order
+        CHARACTER(LEN=200) :: error_msg
+
+        ! define the namelist
+        namelist /adv_parameters/ flux_corr, h_order, v_order, advect_density, cz_diff_order
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(advect_density, 'advect_density', print_info, gennml)
+        call set_nml_var_default(cz_diff_order, 'cz_diff_order', print_info, gennml)
+        call set_nml_var_default(flux_corr, 'flux_corr', print_info, gennml)
+        call set_nml_var_default(h_order, 'h_order', print_info, gennml)
+        call set_nml_var_default(v_order, 'v_order', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        ! read the namelist options
+        if (read_nml) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=adv_parameters,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=adv_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('adv_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+            ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
+            advect_density(n_indx) = advect_density(1)
+            cz_diff_order(n_indx) = cz_diff_order(1)
+            ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
+            ! read the namelist options
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=adv_parameters)
+            close(name_unit)
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'adv_parameters' namelist, continuing with defaults"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            ! endif
+        endif
+
+        call set_nml_var(adv_options%flux_corr, flux_corr(n_indx), 'flux_corr', flux_corr(1))
+        call set_nml_var(adv_options%h_order, h_order(n_indx), 'h_order', h_order(1))
+        call set_nml_var(adv_options%v_order, v_order(n_indx), 'v_order', v_order(1))
+        call set_nml_var(adv_options%advect_density, advect_density(n_indx), 'advect_density', advect_density(1))
+        call set_nml_var(adv_options%cz_diff_order, cz_diff_order(n_indx), 'cz_diff_order', cz_diff_order(1))
+
+    end subroutine adv_parameters_namelist
+
+
+    !> -------------------------------
+    !! Initialize the PBL options
+    !!
+    !! Reads the pbl_parameters namelist or sets default values
+    !!
+    !! -------------------------------
+    subroutine pbl_parameters_namelist(filename, pbl_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),   intent(in)   :: filename
+        type(pbl_options_type), intent(inout) :: pbl_options
+        logical, intent(in) :: read_nml
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: info_only, gen_nml
+
+        integer :: name_unit, rc, nml_scratch
+        logical :: print_info, gennml
+
+        integer :: ysu_topdown_pblmix(kMAX_NESTS) ! controls if radiative, top-down mixing in YSU scheme is turned on
+        CHARACTER(LEN=200) :: error_msg
+
+        ! define the namelist
+        namelist /pbl_parameters/ ysu_topdown_pblmix
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(ysu_topdown_pblmix, 'ysu_topdown_pblmix', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        ! read the namelist options
+        if (read_nml) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=pbl_parameters,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=pbl_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('pbl_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+        endif
+
+        call set_nml_var(pbl_options%ysu_topdown_pblmix, ysu_topdown_pblmix(n_indx), 'ysu_topdown_pblmix', ysu_topdown_pblmix(1))
+    end subroutine pbl_parameters_namelist
+
+    !> -------------------------------
+    !! Initialize the surface layer options
+    !!
+    !! Reads the sfc_parameters namelist or sets default values
+    !!
+    !! -------------------------------
+    subroutine sfc_parameters_namelist(filename, sfc_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),   intent(in)   :: filename
+        type(sfc_options_type), intent(inout) :: sfc_options
+        logical, intent(in) :: read_nml
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: info_only, gen_nml
+
+        integer :: name_unit, rc, nml_scratch
+        integer, dimension(kMAX_NESTS) :: isfflx, scm_force_flux, iz0tlnd, isftcflx
+        real    :: sbrlim(kMAX_NESTS)
+
+        logical :: print_info, gennml
+        ! define the namelist
+        namelist /sfc_parameters/ isfflx, scm_force_flux, iz0tlnd, sbrlim, isftcflx
+        CHARACTER(LEN=200) :: error_msg
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(isfflx, 'isfflx', print_info, gennml)
+        call set_nml_var_default(scm_force_flux, 'scm_force_flux', print_info, gennml)
+        call set_nml_var_default(iz0tlnd, 'iz0tlnd', print_info, gennml)
+        call set_nml_var_default(isftcflx, 'isftcflx', print_info, gennml)
+        call set_nml_var_default(sbrlim, 'sbrlim', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        ! read the namelist options
+        if (read_nml) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=sfc_parameters,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=sfc_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('sfc_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+        endif
+        
+        call set_nml_var(sfc_options%isfflx, isfflx(n_indx), 'isfflx', isfflx(1))
+        call set_nml_var(sfc_options%scm_force_flux, scm_force_flux(n_indx), 'scm_force_flux', scm_force_flux(1))
+        call set_nml_var(sfc_options%iz0tlnd, iz0tlnd(n_indx), 'iz0tlnd', iz0tlnd(1))
+        call set_nml_var(sfc_options%isftcflx, isftcflx(n_indx), 'isftcflx', isftcflx(1))
+        call set_nml_var(sfc_options%sbrlim, sbrlim(n_indx), 'sbrlim', sbrlim(1))
+
+    end subroutine sfc_parameters_namelist
+
+
+    !> -------------------------------
+    !! Initialize the convection scheme options
+    !!
+    !! Reads the cu_parameters namelist or sets default values
+    !!
+    !! -------------------------------
+    subroutine cu_parameters_namelist(filename, cu_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),   intent(in)   :: filename
+        type(cu_options_type), intent(inout) :: cu_options
+        logical, intent(in) :: read_nml
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: info_only, gen_nml
+
+        integer :: name_unit, rc, nml_scratch
+        logical :: print_info, gennml
+
+        real, dimension(kMAX_NESTS) :: tendency_fraction, tend_qv_fraction, tend_qc_fraction, tend_th_fraction, tend_qi_fraction, &
+                                       stochastic_cu
+
+
+        ! define the namelist
+        namelist /cu_parameters/ tendency_fraction, tend_qv_fraction, tend_qc_fraction, tend_th_fraction, tend_qi_fraction, &
+                                 stochastic_cu
+        CHARACTER(LEN=200) :: error_msg
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(stochastic_cu, 'stochastic_cu', print_info, gennml)
+        call set_nml_var_default(tendency_fraction, 'tendency_fraction', print_info, gennml)
+        call set_nml_var_default(tend_qv_fraction, 'tend_qv_fraction', print_info, gennml)
+        call set_nml_var_default(tend_qc_fraction, 'tend_qc_fraction', print_info, gennml)
+        call set_nml_var_default(tend_th_fraction, 'tend_th_fraction', print_info, gennml)
+        call set_nml_var_default(tend_qi_fraction, 'tend_qi_fraction', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        ! read the namelist options
+        if (read_nml) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=cu_parameters,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=cu_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('cu_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+        endif
+
+        ! if not set separately, default to the global tendency setting
+        if (tend_qv_fraction(n_indx) < 0) tend_qv_fraction(n_indx) = tendency_fraction(n_indx)
+        if (tend_qc_fraction(n_indx) < 0) tend_qc_fraction(n_indx) = tendency_fraction(n_indx)
+        if (tend_th_fraction(n_indx) < 0) tend_th_fraction(n_indx) = tendency_fraction(n_indx)
+        if (tend_qi_fraction(n_indx) < 0) tend_qi_fraction(n_indx) = tendency_fraction(n_indx)
+
+        ! store everything in the cu_options structure
+        call set_nml_var(cu_options%tendency_fraction, tendency_fraction(n_indx), 'tendency_fraction', tendency_fraction(1))
+        call set_nml_var(cu_options%tend_qv_fraction, tend_qv_fraction(n_indx), 'tend_qv_fraction', tend_qv_fraction(1))
+        call set_nml_var(cu_options%tend_qc_fraction, tend_qc_fraction(n_indx), 'tend_qc_fraction', tend_qc_fraction(1))
+        call set_nml_var(cu_options%tend_th_fraction, tend_th_fraction(n_indx), 'tend_th_fraction', tend_th_fraction(1))
+        call set_nml_var(cu_options%tend_qi_fraction, tend_qi_fraction(n_indx), 'tend_qi_fraction', tend_qi_fraction(1))
+        call set_nml_var(cu_options%stochastic_cu, stochastic_cu(n_indx), 'stochastic_cu', stochastic_cu(1))
+
+    end subroutine cu_parameters_namelist
+
+
+    !> -------------------------------
+    !! Initialize the land surface model options
+    !!
+    !! Reads the lsm_parameters namelist or sets default values
+    !!
+    !! -------------------------------
+    subroutine lsm_parameters_namelist(filename, lsm_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),   intent(in)   :: filename
+        type(lsm_options_type), intent(inout) :: lsm_options
+        logical, intent(in) :: read_nml
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: info_only, gen_nml
+
+        integer :: name_unit, rc, nml_scratch
+        logical :: print_info, gennml
+
+        character(len=kMAX_NAME_LENGTH) :: LU_Categories(kMAX_NESTS) ! Category definitions (e.g. USGS, MODIFIED_IGBP_MODIS_NOAH)
+        real    :: max_swe(kMAX_NESTS)
+        real    :: snow_den_const(kMAX_NESTS)                    ! variable for converting snow height into SWE or visa versa when input data is incomplete 
+
+        logical :: monthly_vegfrac(kMAX_NESTS)                   ! read in 12 months of vegfrac data
+        real :: update_interval_lsm(kMAX_NESTS)                  ! minimum number of seconds between LSM updates
+        integer :: urban_category(kMAX_NESTS)                    ! index that defines the urban category in LU_Categories
+        integer :: ice_category(kMAX_NESTS)                      ! index that defines the ice category in LU_Categories
+        integer :: water_category(kMAX_NESTS)                    ! index that defines the water category in LU_Categories
+        integer :: sf_urban_phys(kMAX_NESTS)
+        integer :: num_soil_layers(kMAX_NESTS)
+        real    :: nmp_soiltstep(kMAX_NESTS)
+        integer, dimension(kMAX_NESTS) :: nmp_dveg, nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_frz, nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_wet, nmp_opt_snf, nmp_opt_tbot, nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo, nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, noahmp_output
+        integer, dimension(kMAX_NESTS) :: nmp_opt_runsrf, nmp_opt_runsub, nmp_opt_tksno, nmp_opt_scf, nmp_opt_compact, nmp_opt_infdv
+        integer :: lake_category(kMAX_NESTS)                    ! index that defines the lake category in (some) LU_Categories
+
+        ! define the namelist
+        namelist /lsm_parameters/ LU_Categories, update_interval_lsm, &
+                                  urban_category, ice_category, water_category, lake_category, snow_den_const,&
+                                  monthly_vegfrac, max_swe,  nmp_dveg,   &
+                                  nmp_opt_crs, nmp_opt_sfc, nmp_opt_btr, nmp_opt_frz, nmp_opt_wet, &
+                                  nmp_opt_runsrf, nmp_opt_runsub, nmp_opt_tksno, nmp_opt_scf, nmp_opt_compact, nmp_opt_infdv, &
+                                  nmp_opt_inf, nmp_opt_rad, nmp_opt_alb, nmp_opt_snf, nmp_opt_tbot,           &
+                                  nmp_opt_stc, nmp_opt_gla, nmp_opt_rsf, nmp_opt_soil, nmp_opt_pedo,          &
+                                  nmp_opt_crop, nmp_opt_irr, nmp_opt_irrm, nmp_opt_tdrn, nmp_soiltstep,       &
+                                  sf_urban_phys, noahmp_output, num_soil_layers !! MJ added
+        CHARACTER(LEN=200) :: error_msg
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(LU_Categories, 'LU_Categories', print_info, gennml)
+        call set_nml_var_default(update_interval_lsm, 'update_interval_lsm', print_info, gennml)
+        call set_nml_var_default(monthly_vegfrac, 'monthly_vegfrac', print_info, gennml)
+        call set_nml_var_default(num_soil_layers, 'num_soil_layers', print_info, gennml)
+
+        call set_nml_var_default(urban_category, 'urban_category', print_info, gennml)
+        call set_nml_var_default(ice_category, 'ice_category', print_info, gennml)
+        call set_nml_var_default(water_category, 'water_category', print_info, gennml)
+        call set_nml_var_default(lake_category, 'lake_category', print_info, gennml)
+        call set_nml_var_default(snow_den_const, 'snow_den_const', print_info, gennml)
+        call set_nml_var_default(max_swe, 'max_swe', print_info, gennml)
+        call set_nml_var_default(sf_urban_phys, 'sf_urban_phys', print_info, gennml)
+        call set_nml_var_default(nmp_dveg, 'nmp_dveg', print_info, gennml)
+        call set_nml_var_default(nmp_opt_crs, 'nmp_opt_crs', print_info, gennml)
+        call set_nml_var_default(nmp_opt_sfc, 'nmp_opt_sfc', print_info, gennml)
+        call set_nml_var_default(nmp_opt_btr, 'nmp_opt_btr', print_info, gennml)
+        call set_nml_var_default(nmp_opt_runsrf, 'nmp_opt_runsrf', print_info, gennml)
+        call set_nml_var_default(nmp_opt_runsub, 'nmp_opt_runsub', print_info, gennml)
+        call set_nml_var_default(nmp_opt_infdv, 'nmp_opt_infdv', print_info, gennml)
+        call set_nml_var_default(nmp_opt_tksno, 'nmp_opt_tksno', print_info, gennml)
+        call set_nml_var_default(nmp_opt_scf, 'nmp_opt_scf', print_info, gennml)
+        call set_nml_var_default(nmp_opt_compact, 'nmp_opt_compact', print_info, gennml)
+        call set_nml_var_default(nmp_opt_frz, 'nmp_opt_frz', print_info, gennml)
+        call set_nml_var_default(nmp_opt_inf, 'nmp_opt_inf', print_info, gennml)
+        call set_nml_var_default(nmp_opt_rad, 'nmp_opt_rad', print_info, gennml)
+        call set_nml_var_default(nmp_opt_alb, 'nmp_opt_alb', print_info, gennml)
+        call set_nml_var_default(nmp_opt_wet, 'nmp_opt_wet', print_info, gennml)
+        call set_nml_var_default(nmp_opt_snf, 'nmp_opt_snf', print_info, gennml)
+        call set_nml_var_default(nmp_opt_tbot, 'nmp_opt_tbot', print_info, gennml)
+        call set_nml_var_default(nmp_opt_stc, 'nmp_opt_stc', print_info, gennml)
+        call set_nml_var_default(nmp_opt_gla, 'nmp_opt_gla', print_info, gennml)
+        call set_nml_var_default(nmp_opt_rsf, 'nmp_opt_rsf', print_info, gennml)
+        call set_nml_var_default(nmp_opt_soil, 'nmp_opt_soil', print_info, gennml)
+
+        call set_nml_var_default(nmp_opt_pedo, 'nmp_opt_pedo', print_info, gennml)
+        call set_nml_var_default(nmp_opt_crop, 'nmp_opt_crop', print_info, gennml)
+        call set_nml_var_default(nmp_opt_irr, 'nmp_opt_irr', print_info, gennml)
+        call set_nml_var_default(nmp_opt_irrm, 'nmp_opt_irrm', print_info, gennml)
+        call set_nml_var_default(nmp_opt_tdrn, 'nmp_opt_tdrn', print_info, gennml)
+        call set_nml_var_default(nmp_soiltstep, 'nmp_soiltstep', print_info, gennml)
+        call set_nml_var_default(noahmp_output, 'noahmp_output', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        ! read the namelist options
+        if (read_nml) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=lsm_parameters,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=lsm_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('lsm_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+            ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
+            monthly_vegfrac(n_indx) = monthly_vegfrac(1)
+            ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
+            ! read the namelist options
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=lsm_parameters)
+            close(name_unit)
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'lsm_parameters' namelist, continuing with defaults"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            ! endif
+        endif
+
+        call set_default_LU_categories(LU_Categories(n_indx), urban_category(n_indx), ice_category(n_indx), water_category(n_indx), lake_category(n_indx))
+
+        call set_nml_var(lsm_options%LU_Categories, LU_Categories(n_indx), 'LU_Categories', LU_Categories(1))
+        call set_nml_var(lsm_options%update_interval, update_interval_lsm(n_indx), 'update_interval_lsm', update_interval_lsm(1))
+        call set_nml_var(lsm_options%monthly_vegfrac, monthly_vegfrac(n_indx), 'monthly_vegfrac', monthly_vegfrac(1))
+        call set_nml_var(lsm_options%num_soil_layers, num_soil_layers(n_indx), 'num_soil_layers', num_soil_layers(1))
+
+        call set_nml_var(lsm_options%urban_category, urban_category(n_indx), 'urban_category', urban_category(1))
+        call set_nml_var(lsm_options%ice_category, ice_category(n_indx), 'ice_category', ice_category(1))
+        call set_nml_var(lsm_options%water_category, water_category(n_indx), 'water_category', water_category(1))
+        call set_nml_var(lsm_options%lake_category, lake_category(n_indx), 'lake_category', lake_category(1))
+        call set_nml_var(lsm_options%snow_den_const, snow_den_const(n_indx), 'snow_den_const', snow_den_const(1))
+        call set_nml_var(lsm_options%max_swe, max_swe(n_indx), 'max_swe', max_swe(1))
+        call set_nml_var(lsm_options%sf_urban_phys, sf_urban_phys(n_indx), 'sf_urban_phys', sf_urban_phys(1))
+        call set_nml_var(lsm_options%nmp_dveg, nmp_dveg(n_indx), 'nmp_dveg', nmp_dveg(1))
+
+        call set_nml_var(lsm_options%nmp_opt_crs, nmp_opt_crs(n_indx), 'nmp_opt_crs', nmp_opt_crs(1))
+        call set_nml_var(lsm_options%nmp_opt_sfc, nmp_opt_sfc(n_indx), 'nmp_opt_sfc', nmp_opt_sfc(1))
+        call set_nml_var(lsm_options%nmp_opt_btr, nmp_opt_btr(n_indx), 'nmp_opt_btr', nmp_opt_btr(1))
+        call set_nml_var(lsm_options%nmp_opt_runsrf, nmp_opt_runsrf(n_indx), 'nmp_opt_runsrf', nmp_opt_runsrf(1))
+        call set_nml_var(lsm_options%nmp_opt_runsub, nmp_opt_runsub(n_indx), 'nmp_opt_runsub', nmp_opt_runsub(1))
+        call set_nml_var(lsm_options%nmp_opt_infdv, nmp_opt_infdv(n_indx), 'nmp_opt_infdv', nmp_opt_infdv(1))
+        call set_nml_var(lsm_options%nmp_opt_tksno, nmp_opt_tksno(n_indx), 'nmp_opt_tksno', nmp_opt_tksno(1))
+        call set_nml_var(lsm_options%nmp_opt_scf, nmp_opt_scf(n_indx), 'nmp_opt_scf', nmp_opt_scf(1))
+        call set_nml_var(lsm_options%nmp_opt_compact, nmp_opt_compact(n_indx), 'nmp_opt_compact', nmp_opt_compact(1))
+        call set_nml_var(lsm_options%nmp_opt_frz, nmp_opt_frz(n_indx), 'nmp_opt_frz', nmp_opt_frz(1))
+        call set_nml_var(lsm_options%nmp_opt_inf, nmp_opt_inf(n_indx), 'nmp_opt_inf', nmp_opt_inf(1))
+        call set_nml_var(lsm_options%nmp_opt_rad, nmp_opt_rad(n_indx), 'nmp_opt_rad', nmp_opt_rad(1))
+        call set_nml_var(lsm_options%nmp_opt_alb, nmp_opt_alb(n_indx), 'nmp_opt_alb', nmp_opt_alb(1))
+        call set_nml_var(lsm_options%nmp_opt_wet, nmp_opt_wet(n_indx), 'nmp_opt_wet', nmp_opt_wet(1))
+        call set_nml_var(lsm_options%nmp_opt_snf, nmp_opt_snf(n_indx), 'nmp_opt_snf', nmp_opt_snf(1))
+        call set_nml_var(lsm_options%nmp_opt_tbot, nmp_opt_tbot(n_indx), 'nmp_opt_tbot', nmp_opt_tbot(1))
+        call set_nml_var(lsm_options%nmp_opt_stc, nmp_opt_stc(n_indx), 'nmp_opt_stc', nmp_opt_stc(1))
+        call set_nml_var(lsm_options%nmp_opt_gla, nmp_opt_gla(n_indx), 'nmp_opt_gla', nmp_opt_gla(1))
+        call set_nml_var(lsm_options%nmp_opt_rsf, nmp_opt_rsf(n_indx), 'nmp_opt_rsf', nmp_opt_rsf(1))
+        call set_nml_var(lsm_options%nmp_opt_soil, nmp_opt_soil(n_indx), 'nmp_opt_soil', nmp_opt_soil(1))
+        call set_nml_var(lsm_options%nmp_opt_pedo, nmp_opt_pedo(n_indx), 'nmp_opt_pedo', nmp_opt_pedo(1))
+        call set_nml_var(lsm_options%nmp_opt_crop, nmp_opt_crop(n_indx), 'nmp_opt_crop', nmp_opt_crop(1))
+        call set_nml_var(lsm_options%nmp_opt_irr, nmp_opt_irr(n_indx), 'nmp_opt_irr', nmp_opt_irr(1))
+        call set_nml_var(lsm_options%nmp_opt_irrm, nmp_opt_irrm(n_indx), 'nmp_opt_irrm', nmp_opt_irrm(1))
+        call set_nml_var(lsm_options%nmp_opt_tdrn, nmp_opt_tdrn(n_indx), 'nmp_opt_tdrn', nmp_opt_tdrn(1))
+        call set_nml_var(lsm_options%nmp_soiltstep, nmp_soiltstep(n_indx), 'nmp_soiltstep', nmp_soiltstep(1))
+        call set_nml_var(lsm_options%noahmp_output, noahmp_output(n_indx), 'noahmp_output', noahmp_output(1))
+
+        
+    end subroutine lsm_parameters_namelist
+
+    subroutine sm_parameters_namelist(filename, sm_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),   intent(in)   :: filename
+        type(sm_options_type), intent(inout) :: sm_options
+        logical, intent(in) :: read_nml
+        integer, intent(in) :: n_indx
+        logical, intent(in), optional  :: info_only, gen_nml
+
+        integer :: name_unit, rc, nml_scratch
+        logical :: print_info, gennml
+
+        integer :: sm_nsnow_max(kMAX_NESTS)      ! maximum number of snow layers in the FSM2trans snow model
+        integer, dimension(kMAX_NESTS) :: fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
+                   fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_sntran, fsm_zoffst, fsm_oshdtn, fsm_alradt
+        real, dimension(kMAX_NESTS)    :: fsm_ds_min, fsm_ds_surflay, lowest_susp_level
+        logical, dimension(kMAX_NESTS) :: fsm_hn_on, fsm_for_hn, fsm_z0pert, fsm_wcpert, fsm_fspert, fsm_alpert, fsm_slpert
+
+        integer, dimension(kMAX_NESTS) :: snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt
+        logical, dimension(kMAX_NESTS) :: snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable
+
+        logical, dimension(kMAX_NESTS) :: snowpack_enable_vapour_transport
+        character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_variant
+        character(len=kMAX_NAME_LENGTH), dimension(kMAX_NESTS) :: saltation_model
+        integer, dimension(kMAX_NESTS) :: snowpack_reduce_n_elements
+
+        integer, dimension(kMAX_NESTS) :: suspension_fine_mesh_levels, suspension_layer
+        logical, dimension(kMAX_NESTS) :: bs_atm_feedback
+        integer, dimension(kMAX_NESTS) :: snowslide
+
+        ! define the namelist
+        namelist /sm_parameters/ sm_nsnow_max, fsm_albedo, fsm_canmod, fsm_checks, fsm_condct, fsm_densty, fsm_exchng, &
+                                 fsm_hydrol, fsm_radsbg, fsm_snfrac, fsm_snolay, fsm_sntran, fsm_zoffst, &
+                                 fsm_ds_min, fsm_ds_surflay, fsm_hn_on, fsm_for_hn, &
+                                 fsm_oshdtn, fsm_alradt, fsm_z0pert, fsm_wcpert, fsm_fspert, fsm_alpert, fsm_slpert, &
+                                 snicar_bandnumber_opt, snicar_snowoptics_opt, snicar_solarspec_opt, snicar_dustoptics_opt, snicar_rtsolver_opt, snicar_snowshape_opt, &
+                                 snicar_use_aerosol, snicar_snowbc_intmix, snicar_snowdust_intmix, snicar_use_oc, snicar_aerosol_readtable, &
+                                 snowpack_albedo_parameterization, snowpack_atmospheric_stability, snowpack_reduce_n_elements, snowpack_variant, snowpack_enable_vapour_transport, &
+                                 suspension_fine_mesh_levels, lowest_susp_level, suspension_layer, bs_atm_feedback, saltation_model, snowslide
+                                 
+
+        CHARACTER(LEN=200) :: error_msg
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(sm_nsnow_max, 'sm_nsnow_max', print_info, gennml)
+        call set_nml_var_default(fsm_albedo, 'fsm_albedo', print_info, gennml)
+        call set_nml_var_default(fsm_canmod, 'fsm_canmod', print_info, gennml)
+        call set_nml_var_default(fsm_checks, 'fsm_checks', print_info, gennml)
+        call set_nml_var_default(fsm_condct, 'fsm_condct', print_info, gennml)
+        call set_nml_var_default(fsm_densty, 'fsm_densty', print_info, gennml)
+        call set_nml_var_default(fsm_exchng, 'fsm_exchng', print_info, gennml)
+        call set_nml_var_default(fsm_hydrol, 'fsm_hydrol', print_info, gennml)
+        call set_nml_var_default(fsm_radsbg, 'fsm_radsbg', print_info, gennml)
+        call set_nml_var_default(fsm_snfrac, 'fsm_snfrac', print_info, gennml)
+        call set_nml_var_default(fsm_snolay, 'fsm_snolay', print_info, gennml)
+        call set_nml_var_default(fsm_sntran, 'fsm_sntran', print_info, gennml)
+        call set_nml_var_default(fsm_zoffst, 'fsm_zoffst', print_info, gennml)
+        call set_nml_var_default(fsm_ds_min, 'fsm_ds_min', print_info, gennml)
+        call set_nml_var_default(fsm_ds_surflay, 'fsm_ds_surflay', print_info, gennml)
+        
+        call set_nml_var_default(fsm_hn_on, 'fsm_hn_on', print_info, gennml)
+        call set_nml_var_default(fsm_for_hn, 'fsm_for_hn', print_info, gennml)
+        call set_nml_var_default(fsm_oshdtn, 'fsm_oshdtn', print_info, gennml)
+        call set_nml_var_default(fsm_alradt, 'fsm_alradt', print_info, gennml)
+        call set_nml_var_default(fsm_z0pert, 'fsm_z0pert', print_info, gennml)
+        call set_nml_var_default(fsm_wcpert, 'fsm_wcpert', print_info, gennml)
+        call set_nml_var_default(fsm_fspert, 'fsm_fspert', print_info, gennml)
+        call set_nml_var_default(fsm_alpert, 'fsm_alpert', print_info, gennml)
+        call set_nml_var_default(fsm_slpert, 'fsm_slpert', print_info, gennml)
+        call set_nml_var_default(snicar_bandnumber_opt, 'snicar_bandnumber_opt', print_info, gennml)
+        call set_nml_var_default(snicar_snowoptics_opt, 'snicar_snowoptics_opt', print_info, gennml)
+        call set_nml_var_default(snicar_solarspec_opt, 'snicar_solarspec_opt', print_info, gennml)
+        call set_nml_var_default(snicar_dustoptics_opt, 'snicar_dustoptics_opt', print_info, gennml)
+        call set_nml_var_default(snicar_rtsolver_opt, 'snicar_rtsolver_opt', print_info, gennml)
+        call set_nml_var_default(snicar_snowshape_opt, 'snicar_snowshape_opt', print_info, gennml)
+        call set_nml_var_default(snicar_use_aerosol, 'snicar_use_aerosol', print_info, gennml)
+        call set_nml_var_default(snicar_snowbc_intmix, 'snicar_snowbc_intmix', print_info, gennml)
+        call set_nml_var_default(snicar_snowdust_intmix, 'snicar_snowdust_intmix', print_info, gennml)
+        call set_nml_var_default(snicar_use_oc, 'snicar_use_oc', print_info, gennml)
+        call set_nml_var_default(snicar_aerosol_readtable, 'snicar_aerosol_readtable', print_info, gennml)
+
+        call set_nml_var_default(snowpack_albedo_parameterization, 'snowpack_albedo_parameterization', print_info, gennml)
+        call set_nml_var_default(snowpack_atmospheric_stability, 'snowpack_atmospheric_stability', print_info, gennml)
+        call set_nml_var_default(snowpack_reduce_n_elements, 'snowpack_reduce_n_elements', print_info, gennml)
+        call set_nml_var_default(snowpack_variant, 'snowpack_variant', print_info, gennml)
+        call set_nml_var_default(snowpack_enable_vapour_transport, 'snowpack_enable_vapour_transport', print_info, gennml)
+
+        call set_nml_var_default(suspension_layer, 'suspension_layer', print_info, gennml)
+        call set_nml_var_default(suspension_fine_mesh_levels, 'suspension_fine_mesh_levels', print_info, gennml)
+        call set_nml_var_default(lowest_susp_level, 'lowest_susp_level', print_info, gennml)
+        call set_nml_var_default(bs_atm_feedback, 'bs_atm_feedback', print_info, gennml)
+        call set_nml_var_default(saltation_model, 'saltation_model', print_info, gennml)
+        call set_nml_var_default(snowslide, 'snowslide', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        ! read the namelist options
+        if (read_nml) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=sm_parameters,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=sm_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('sm_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+            ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
+            fsm_hn_on(n_indx) = fsm_hn_on(1)
+            fsm_for_hn(n_indx) = fsm_for_hn(1)
+            fsm_z0pert(n_indx) = fsm_z0pert(1)
+            fsm_wcpert(n_indx) = fsm_wcpert(1)
+            fsm_fspert(n_indx) = fsm_fspert(1)
+            fsm_alpert(n_indx) = fsm_alpert(1)
+            fsm_slpert(n_indx) = fsm_slpert(1)
+
+            snicar_use_aerosol(n_indx) = snicar_use_aerosol(1)
+            snicar_snowbc_intmix(n_indx) = snicar_snowbc_intmix(1)
+            snicar_snowdust_intmix(n_indx) = snicar_snowdust_intmix(1)
+            snicar_use_oc(n_indx) = snicar_use_oc(1)
+            snicar_aerosol_readtable(n_indx) = snicar_aerosol_readtable(1)
+            snowpack_enable_vapour_transport(n_indx) = snowpack_enable_vapour_transport(1)
+            snowpack_reduce_n_elements(n_indx) = snowpack_reduce_n_elements(1)
+            bs_atm_feedback(n_indx) = bs_atm_feedback(1)
+            ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
+            ! read the namelist options
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=sm_parameters)
+            close(name_unit)
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'sm_parameters' namelist, continuing with defaults"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            ! endif
+        endif
+
+        call set_nml_var(sm_options%sm_nsnow_max, sm_nsnow_max(n_indx), 'sm_nsnow_max', sm_nsnow_max(1))
+        call set_nml_var(sm_options%fsm_albedo, fsm_albedo(n_indx), 'fsm_albedo', fsm_albedo(1))
+        call set_nml_var(sm_options%fsm_canmod, fsm_canmod(n_indx), 'fsm_canmod', fsm_canmod(1))
+        call set_nml_var(sm_options%fsm_checks, fsm_checks(n_indx), 'fsm_checks', fsm_checks(1))
+        call set_nml_var(sm_options%fsm_condct, fsm_condct(n_indx), 'fsm_condct', fsm_condct(1))
+        call set_nml_var(sm_options%fsm_densty, fsm_densty(n_indx), 'fsm_densty', fsm_densty(1))
+        call set_nml_var(sm_options%fsm_exchng, fsm_exchng(n_indx), 'fsm_exchng', fsm_exchng(1))
+        call set_nml_var(sm_options%fsm_hydrol, fsm_hydrol(n_indx), 'fsm_hydrol', fsm_hydrol(1))
+        call set_nml_var(sm_options%fsm_radsbg, fsm_radsbg(n_indx), 'fsm_radsbg', fsm_radsbg(1))
+        call set_nml_var(sm_options%fsm_snfrac, fsm_snfrac(n_indx), 'fsm_snfrac', fsm_snfrac(1))
+        call set_nml_var(sm_options%fsm_snolay, fsm_snolay(n_indx), 'fsm_snolay', fsm_snolay(1))
+        call set_nml_var(sm_options%fsm_sntran, fsm_sntran(n_indx), 'fsm_sntran', fsm_sntran(1))
+        call set_nml_var(sm_options%fsm_zoffst, fsm_zoffst(n_indx), 'fsm_zoffst', fsm_zoffst(1))
+        call set_nml_var(sm_options%fsm_ds_min, fsm_ds_min(n_indx), 'fsm_ds_min', fsm_ds_min(1))
+        call set_nml_var(sm_options%fsm_ds_surflay, fsm_ds_surflay(n_indx), 'fsm_ds_surflay', fsm_ds_surflay(1))
+
+        call set_nml_var(sm_options%fsm_hn_on, fsm_hn_on(n_indx), 'fsm_hn_on')
+        call set_nml_var(sm_options%fsm_for_hn, fsm_for_hn(n_indx), 'fsm_for_hn')
+
+        call set_nml_var(sm_options%fsm_oshdtn, fsm_oshdtn(n_indx), 'fsm_oshdtn', fsm_oshdtn(1))
+        call set_nml_var(sm_options%fsm_alradt, fsm_alradt(n_indx), 'fsm_alradt', fsm_alradt(1))
+        call set_nml_var(sm_options%fsm_z0pert, fsm_z0pert(n_indx), 'fsm_z0pert')
+        call set_nml_var(sm_options%fsm_wcpert, fsm_wcpert(n_indx), 'fsm_wcpert')
+        call set_nml_var(sm_options%fsm_fspert, fsm_fspert(n_indx), 'fsm_fspert')
+        call set_nml_var(sm_options%fsm_alpert, fsm_alpert(n_indx), 'fsm_alpert')
+        call set_nml_var(sm_options%fsm_slpert, fsm_slpert(n_indx), 'fsm_slpert')
+
+        call set_nml_var(sm_options%snicar_bandnumber_opt, snicar_bandnumber_opt(n_indx), 'snicar_bandnumber_opt', snicar_bandnumber_opt(1))
+        call set_nml_var(sm_options%snicar_snowoptics_opt, snicar_snowoptics_opt(n_indx), 'snicar_snowoptics_opt', snicar_snowoptics_opt(1))
+        call set_nml_var(sm_options%snicar_solarspec_opt, snicar_solarspec_opt(n_indx), 'snicar_solarspec_opt', snicar_solarspec_opt(1))
+        call set_nml_var(sm_options%snicar_dustoptics_opt, snicar_dustoptics_opt(n_indx), 'snicar_dustoptics_opt', snicar_dustoptics_opt(1))
+        call set_nml_var(sm_options%snicar_rtsolver_opt, snicar_rtsolver_opt(n_indx), 'snicar_rtsolver_opt', snicar_rtsolver_opt(1))
+        call set_nml_var(sm_options%snicar_snowshape_opt, snicar_snowshape_opt(n_indx), 'snicar_snowshape_opt', snicar_snowshape_opt(1))
+        call set_nml_var(sm_options%snicar_use_aerosol, snicar_use_aerosol(n_indx), 'snicar_use_aerosol')
+        call set_nml_var(sm_options%snicar_snowbc_intmix, snicar_snowbc_intmix(n_indx), 'snicar_snowbc_intmix')
+        call set_nml_var(sm_options%snicar_snowdust_intmix, snicar_snowdust_intmix(n_indx), 'snicar_snowdust_intmix')
+        call set_nml_var(sm_options%snicar_use_oc, snicar_use_oc(n_indx), 'snicar_use_oc')
+        call set_nml_var(sm_options%snicar_aerosol_readtable, snicar_aerosol_readtable(n_indx), 'snicar_aerosol_readtable')
+
+        call set_nml_var(sm_options%snowpack_albedo_parameterization, snowpack_albedo_parameterization(n_indx), 'snowpack_albedo_parameterization', snowpack_albedo_parameterization(1))
+        call set_nml_var(sm_options%snowpack_atmospheric_stability, snowpack_atmospheric_stability(n_indx), 'snowpack_atmospheric_stability', snowpack_atmospheric_stability(1))
+        call set_nml_var(sm_options%snowpack_reduce_n_elements, snowpack_reduce_n_elements(n_indx), 'snowpack_reduce_n_elements', snowpack_reduce_n_elements(1))
+        call set_nml_var(sm_options%snowpack_variant, snowpack_variant(n_indx), 'snowpack_variant', snowpack_variant(1))
+        call set_nml_var(sm_options%snowpack_enable_vapour_transport, snowpack_enable_vapour_transport(n_indx), 'snowpack_enable_vapour_transport')
+
+        call set_nml_var(sm_options%suspension_layer, suspension_layer(n_indx), 'suspension_layer', suspension_layer(1))
+        call set_nml_var(sm_options%suspension_fine_mesh_levels, suspension_fine_mesh_levels(n_indx), 'suspension_fine_mesh_levels', suspension_fine_mesh_levels(1))
+        call set_nml_var(sm_options%lowest_susp_level, lowest_susp_level(n_indx), 'lowest_susp_level', lowest_susp_level(1))
+        call set_nml_var(sm_options%bs_atm_feedback, bs_atm_feedback(n_indx), 'bs_atm_feedback')
+        call set_nml_var(sm_options%saltation_model, saltation_model(n_indx), 'saltation_model', saltation_model(1))
+        call set_nml_var(sm_options%snowslide, snowslide(n_indx), 'snowslide', snowslide(1))
+
+    end subroutine sm_parameters_namelist
+    !> -------------------------------
+    !! Initialize the radiation model options
+    !!
+    !! Reads the rad_parameters namelist or sets default values
+    !! -------------------------------
+    subroutine rad_parameters_namelist(filename, rad_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),   intent(in)   :: filename
+        type(rad_options_type), intent(inout) :: rad_options
+        logical, intent(in)  :: read_nml
+        integer, intent(in)  :: n_indx
+        logical, intent(in), optional  :: info_only, gen_nml
+
+        integer :: name_unit, rc, nml_scratch
+        logical :: print_info, gennml
+
+        real    :: update_interval_rad(kMAX_NESTS)             ! minimum number of seconds between RRTMG updates
+        integer :: icloud(kMAX_NESTS), rrtmgp_block_N(kMAX_NESTS) ! how RRTMG interacts with clouds
+        integer :: cldovrlp(kMAX_NESTS)                          ! how RRTMG considers cloud overlapping
+        logical :: read_ghg(kMAX_NESTS)                            ! read GHG concentrations from file
+        logical :: terrain_shading(kMAX_NESTS)                     ! whether to use terrain shading
+        real    :: tzone(kMAX_NESTS) !! MJ adedd,tzone is UTC Offset and 1 here for centeral Erupe
+        real    :: terrain_refl_radius(kMAX_NESTS)                  ! Radius for terrain reflected SW neighborhood (m)
+        ! define the namelist
+        namelist /rad_parameters/ terrain_shading, update_interval_rad, icloud, read_ghg, cldovrlp, tzone, terrain_refl_radius, rrtmgp_block_N
+        CHARACTER(LEN=200) :: error_msg
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(terrain_shading, 'terrain_shading', print_info, gennml)
+        call set_nml_var_default(update_interval_rad, 'update_interval_rad', print_info, gennml)
+        call set_nml_var_default(icloud, 'icloud', print_info, gennml)
+        call set_nml_var_default(cldovrlp, 'cldovrlp', print_info, gennml)
+        call set_nml_var_default(read_ghg, 'read_ghg', print_info, gennml)
+        call set_nml_var_default(tzone, 'tzone', print_info, gennml)
+        call set_nml_var_default(terrain_refl_radius, 'terrain_refl_radius', print_info, gennml)
+        call set_nml_var_default(rrtmgp_block_N, 'rrtmgp_block_N', print_info, gennml)
+
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        ! read the namelist options
+        if (read_nml) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=rad_parameters,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=rad_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('rad_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+            ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
+            read_ghg(n_indx) = read_ghg(1)
+            terrain_shading(n_indx) = terrain_shading(1)
+            ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit, iostat=rc, nml=rad_parameters)
+            close(name_unit)
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'rad_parameters' namelist, continuing with defaults"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            ! endif
+        endif
+
+        call set_nml_var(rad_options%terrain_shading, terrain_shading(n_indx), 'terrain_shading', terrain_shading(1))
+        call set_nml_var(rad_options%update_interval_rad, update_interval_rad(n_indx), 'update_interval_rad', update_interval_rad(1))
+        call set_nml_var(rad_options%icloud, icloud(n_indx), 'icloud', icloud(1))
+        call set_nml_var(rad_options%cldovrlp, cldovrlp(n_indx), 'cldovrlp', cldovrlp(1))
+        call set_nml_var(rad_options%read_ghg, read_ghg(n_indx), 'read_ghg', read_ghg(1))
+        call set_nml_var(rad_options%tzone, tzone(n_indx), 'tzone', tzone(1))
+        call set_nml_var(rad_options%terrain_refl_radius, terrain_refl_radius(n_indx), 'terrain_refl_radius', terrain_refl_radius(1))
+        call set_nml_var(rad_options%rrtmgp_block_N, rrtmgp_block_N(n_indx), 'rrtmgp_block_N', rrtmgp_block_N(1))
+
+    end subroutine rad_parameters_namelist
+    
+    
+    subroutine wind_namelist(filename, wind_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),             intent(in)    :: filename
+        type(wind_type), intent(inout) :: wind_options
+        logical, intent(in)           :: read_nml
+        integer, intent(in)           :: n_indx
+        logical, intent(in), optional  :: info_only, gen_nml
+        
+        integer :: name_unit, rc, update_frequency_checked, nml_scratch     ! logical unit number for namelist
+        logical :: print_info, gennml
+        !Define parameters
+        integer, dimension(kMAX_NESTS) :: wind_iterations, wind_solver_iterations, update_frequency
+        logical, dimension(kMAX_NESTS) :: Sx, thermal, wind_only, linear_theory
+        real, dimension(kMAX_NESTS)    :: Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, smooth_wind_distance
+        
+        !Make name-list
+        namelist /wind/ Sx, thermal, wind_only, linear_theory, Sx_dmax, Sx_scale_ang, TPI_scale, TPI_dmax, alpha_const, &
+                        update_frequency, smooth_wind_distance, wind_iterations, wind_solver_iterations
+        CHARACTER(LEN=200) :: error_msg
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(Sx, 'Sx', print_info, gennml)
+        call set_nml_var_default(thermal, 'thermal', print_info, gennml)
+        call set_nml_var_default(linear_theory, 'linear_theory', print_info, gennml)
+        call set_nml_var_default(wind_only, 'wind_only', print_info, gennml)
+        call set_nml_var_default(Sx_dmax, 'Sx_dmax', print_info, gennml)
+        call set_nml_var_default(Sx_scale_ang, 'Sx_scale_ang', print_info, gennml)
+        call set_nml_var_default(TPI_scale, 'TPI_scale', print_info, gennml)
+        call set_nml_var_default(TPI_dmax, 'TPI_dmax', print_info, gennml)
+        call set_nml_var_default(alpha_const, 'alpha_const', print_info, gennml)
+        call set_nml_var_default(smooth_wind_distance, 'smooth_wind_distance', print_info, gennml)
+        call set_nml_var_default(wind_iterations, 'wind_iterations', print_info, gennml)
+        call set_nml_var_default(wind_solver_iterations, 'wind_solver_iterations', print_info, gennml)
+        call set_nml_var_default(update_frequency, 'update_frequency', print_info, gennml)
+        
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        !Read namelist file
+        if (read_nml) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=wind,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=wind)
+                rewind(nml_scratch)
+                call print_nml_error('wind', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+            ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
+            Sx(n_indx) = Sx(1)
+            thermal(n_indx) = thermal(1)
+            linear_theory(n_indx) = linear_theory(1)
+            ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
+            !Read namelist file
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=wind)
+            close(name_unit)
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'wind' namelist, continuing with defaults"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            ! endif
+        endif
+
+        call set_nml_var(wind_options%Sx, Sx(n_indx), 'Sx', Sx(1))
+        call set_nml_var(wind_options%thermal, thermal(n_indx), 'thermal', thermal(1))
+        call set_nml_var(wind_options%linear_theory, linear_theory(n_indx), 'linear_theory', linear_theory(1))
+        call set_nml_var(wind_options%wind_only, wind_only(n_indx), 'wind_only', wind_only(1))
+        call set_nml_var(wind_options%Sx_dmax, Sx_dmax(n_indx), 'Sx_dmax', Sx_dmax(1))
+        call set_nml_var(wind_options%TPI_dmax, TPI_dmax(n_indx), 'TPI_dmax', TPI_dmax(1))
+        call set_nml_var(wind_options%TPI_scale, TPI_scale(n_indx), 'TPI_scale', TPI_scale(1))
+        call set_nml_var(wind_options%Sx_scale_ang, Sx_scale_ang(n_indx), 'Sx_scale_ang', Sx_scale_ang(1))
+        call set_nml_var(wind_options%alpha_const, alpha_const(n_indx), 'alpha_const', alpha_const(1))
+        call set_nml_var(wind_options%wind_iterations, wind_iterations(n_indx), 'wind_iterations', wind_iterations(1))
+        call set_nml_var(wind_options%wind_solver_iterations, wind_solver_iterations(n_indx), 'wind_solver_iterations', wind_solver_iterations(1))
+        call set_nml_var(wind_options%smooth_wind_distance, smooth_wind_distance(n_indx), 'smooth_wind_distance', smooth_wind_distance(1))
+        call set_nml_var(update_frequency_checked, update_frequency(n_indx), 'update_frequency', update_frequency(1))
+
+        call wind_options%update_dt%set(seconds=update_frequency_checked)
+
+    end subroutine wind_namelist
+
+
+    subroutine time_parameters_namelist(filename, time_options, n_indx, read_nml, info_only, gen_nml)
+        implicit none
+        character(len=*),             intent(in)    :: filename
+        type(time_options_type), intent(inout) :: time_options
+        integer, intent(in)           :: n_indx
+        logical, intent(in), optional  :: read_nml, info_only, gen_nml
+        
+        integer :: name_unit, rc, nml_scratch                  ! logical unit number for namelist
+        !Define parameters
+        real :: cfl_reduction_factor(kMAX_NESTS)    
+        logical :: RK3(kMAX_NESTS)
+
+        logical :: read_namelist, print_info, gennml
+        
+        !Make name-list
+        namelist /time_parameters/ cfl_reduction_factor, RK3
+        CHARACTER(LEN=200) :: error_msg
+
+        read_namelist = .True.
+        if (present(read_nml)) read_namelist = read_nml
+
+        print_info = .False.
+        if (present(info_only)) print_info = info_only
+
+        gennml = .False.
+        if (present(gen_nml)) gennml = gen_nml
+
+        call set_nml_var_default(cfl_reduction_factor, 'cfl_reduction_factor', print_info, gennml)
+        call set_nml_var_default(RK3, 'RK3', print_info, gennml)
+        
+        ! If this is just a verbose print run, exit here so we don't need a namelist
+        if (print_info .or. gennml) return
+
+        !Read namelist file
+        if (read_namelist) then
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=time_parameters,IOMSG=error_msg)
+            close(name_unit)
+            if (rc /= 0) then
+                open(newunit=nml_scratch, status='scratch')
+                write(nml_scratch, nml=time_parameters)
+                rewind(nml_scratch)
+                call print_nml_error('time_parameters', msg=error_msg, iostat=rc, &
+                                      nml_file=filename, valid_nml_unit=nml_scratch)
+                close(nml_scratch)
+            endif
+            ! Copy the first value of logical variables -- this way we can have a user_default value if the value for this nest was not explicitly set
+            RK3(n_indx) = RK3(1)
+            ! Now read namelist again, -- if the value of the logical option is set in the namelist, it will be set to the user set value again
+            open(io_newunit(name_unit), file=filename)
+            read(name_unit,iostat=rc,nml=time_parameters)
+            close(name_unit)
+            ! if (rc /= 0) then
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     if (STD_OUT_PE) write(*,*) "  Error reading 'time_parameters' namelist"
+            !     if (STD_OUT_PE) write(*,*) "  --------------------------------"
+            !     stop
+            ! endif
+        endif
+
+        call set_nml_var(time_options%cfl_reduction_factor, cfl_reduction_factor(n_indx), 'cfl_reduction_factor', cfl_reduction_factor(1))
+        call set_nml_var(time_options%RK3, RK3(n_indx), 'RK3')
+
+    end subroutine time_parameters_namelist
+    
+    
+    !> ----------------------------------------------------------------------------
+    !!  Read in the name of the boundary condition files from a text file
+    !!
+    !!  @param      filename        The name of the text file to read
+    !!  @param[out] forcing_files   An array to store the filenames in
+    !!  @retval     nfiles          The number of files read.
+    !!
+    !! ----------------------------------------------------------------------------
+    function read_forcing_file_names(filename, forcing_files) result(nfiles)
+        implicit none
+        character(len=*) :: filename
+        character(len=kMAX_FILE_LENGTH), dimension(MAX_NUMBER_FILES) :: forcing_files
+        integer :: nfiles
+        integer :: file_unit
+        integer :: i, error
+        logical :: first_file_exists, last_file_exists
+        character(len=kMAX_FILE_LENGTH) :: temporary_file
+
+        open(unit=io_newunit(file_unit), file=filename)
+        i=0
+        error=0
+        do while (error==0)
+            read(file_unit, *, iostat=error) temporary_file
+            if (error==0) then
+                i=i+1
+                forcing_files(i) = temporary_file
+            endif
+        enddo
+        close(file_unit)
+        nfiles = i
+        ! print out a summary
+        if (STD_OUT_PE) write(*,*) "    Boundary conditions files to be used:"
+        if (nfiles>10) then
+            if (STD_OUT_PE) write(*,*) "      nfiles=", trim(str(nfiles)), ", too many to print."
+            if (STD_OUT_PE) write(*,*) "      First file:", trim(forcing_files(1))
+            if (STD_OUT_PE) write(*,*) "      Last file: ", trim(forcing_files(nfiles))
+        else
+            do i=1,nfiles
+                if (STD_OUT_PE) write(*,*) "        ",trim(forcing_files(i))
+            enddo
+        endif
+
+        ! Check that the options file actually exists
+        INQUIRE(file=trim(forcing_files(1)), exist=first_file_exists)
+        INQUIRE(file=trim(forcing_files(nfiles)), exist=last_file_exists)
+
+        ! if options file does not exist, print an error and quit
+        if (.not.first_file_exists .or. .not.last_file_exists) then
+            if (.not.first_file_exists .and. STD_OUT_PE) write(*,*) "  The first forcing file does not exist = ", trim(forcing_files(1))
+            if (.not.last_file_exists .and. STD_OUT_PE) write(*,*) "  The last forcing file does not exist = ", trim(forcing_files(nfiles))
+
+            ! stop "At least the first or last forcing file does not exist. Only the first and last file are checked, please check the rest."
+        endif
+
+
+    end function read_forcing_file_names
+
+
+    !> -------------------------------
+    !! Sets the default value for each of three land use categories depending on the LU_Categories input
+    !!
+    !! -------------------------------
+    subroutine set_default_LU_categories(LU_Categories, urban_category, ice_category, water_category, lake_category)
+        ! if various LU categories were not defined in the namelist (i.e. they == -1) then attempt
+        ! to define default values for them based on the LU_Categories variable supplied.
+        implicit none
+        integer, intent(inout) :: urban_category, ice_category, water_category, lake_category
+        character(len=kMAX_NAME_LENGTH), intent(in) :: LU_Categories
+
+        if (trim(LU_Categories)=="MODIFIED_IGBP_MODIS_NOAH") then
+            if (urban_category==-1) urban_category = 13
+            if (ice_category==-1)   ice_category = 15
+            if (water_category==-1) water_category = 17
+            if (lake_category==-1) lake_category = 21
+
+        elseif (trim(LU_Categories)=="USGS") then
+            if (urban_category==-1) urban_category = 1
+            if (ice_category==-1)   ice_category = -1
+            if (water_category==-1) water_category = 16
+            ! if (lake_category==-1) lake_category = 16  ! No separate lake category!
+
+        elseif (trim(LU_Categories)=="USGS-RUC") then
+            if (urban_category==-1) urban_category = 1
+            if (ice_category==-1)   ice_category = 24
+            if (water_category==-1) water_category = 16
+            if (lake_category==-1) lake_category = 28
+            ! also note, lakes_category = 28
+            ! write(*,*) "  WARNING: not handling lake category (28)"
+
+        elseif (trim(LU_Categories)=="MODI-RUC") then
+            if (urban_category==-1) urban_category = 13
+            if (ice_category==-1)   ice_category = 15
+            if (water_category==-1) water_category = 17
+            if (lake_category==-1) lake_category = 21
+            ! also note, lakes_category = 21
+            ! write(*,*) "  WARNING: not handling lake category (21)"
+
+        elseif (trim(LU_Categories)=="NLCD40") then
+            if (urban_category==-1) urban_category = 13
+            if (ice_category==-1)   ice_category = 15 ! and 22?
+            ! if (water_category==-1) water_category = 17 ! and 21 'Open Water'
+            write(*,*) "  WARNING: not handling all varients of categories (e.g. permanent_snow=15 is, but permanent_snow_ice=22 is not)"
+        endif
+
+    end subroutine set_default_LU_categories
+
+    !> -------------------------------
+    !! Add variables needed by all domains to the list of requested variables
+    !!
+    !! -------------------------------
+    subroutine default_var_requests(options)
+        type(options_t) :: options
+        
+        ! List the variables that are required to be allocated for any domain
+        call options%alloc_vars(                                                    &
+                     [kVARS%z,                      kVARS%z_interface,              &
+                      kVARS%dz,                     kVARS%dz_interface,             &
+                      kVARS%advection_dz,                                           &
+                      kVARS%jacobian,               kVARS%jacobian_u,               &
+                      kVARS%jacobian_v,             kVARS%jacobian_w,               &
+                      kVARS%dzdx_u,                 kVARS%dzdy_v,                   &
+                      kVARS%dzdx,                   kVARS%dzdy,                     &
+                      kVARS%relax_filter_2d,        kVARS%relax_filter_3d,          &
+                      kVARS%neighbor_terrain,                                       &
+                      kVARS%h1,                     kVARS%h2,                       &
+                      kVARS%h1_u,                   kVARS%h2_u,                     &
+                      kVARS%h1_v,                   kVARS%h2_v,                     &
+                      kVARS%sintheta,               kVARS%costheta,                 &
+                      kVARS%global_z_interface,     kVARS%global_dz_interface,      &
+                      kVARS%u,                      kVARS%v,                        &
+                      kVARS%u_mass,                 kVARS%v_mass,                   &
+                      kVARS%w,                      kVARS%w_real,                   &
+                      kVARS%surface_pressure,       kVARS%roughness_z0,             &
+                      kVARS%terrain,                kVARS%pressure,                 &
+                      kVARS%temperature,            kVARS%pressure_interface,       &
+                      kVARS%exner,                  kVARS%potential_temperature,    &
+                      kVARS%latitude,               kVARS%longitude,                &
+                      kVARS%u_latitude,             kVARS%u_longitude,              &
+                      kVARS%v_latitude,             kVARS%v_longitude,              &
+                      kVARS%temperature_interface,  kVars%density])
+
+        ! List the variables that are required for any restart
+        call options%restart_vars(                                                  &
+                     [kVARS%z,                                                      &
+                      kVARS%terrain,                kVARS%potential_temperature,    &
+                      kVARS%pressure,                                               &
+                      kVARS%latitude,               kVARS%longitude,                &
+                      kVARS%u,                      kVARS%v,                        &
+                      kVARS%w,                      kVARS%w_real,                   &
+                      kVARS%u_latitude,             kVARS%u_longitude,              &
+                      kVARS%v_latitude,             kVARS%v_longitude               ])
+
+    end subroutine default_var_requests
+
+    !> -------------------------------
+    !! Add list of new variables to a list of variables
+    !!
+    !! Adds one to the associated index of the list and returns an error
+    !! Sets Error/=0 if any of the variables suggested are outside the bounds of the list
+    !!
+    !! -------------------------------
+    subroutine add_to_varlist(varlist, varids, error)
+        implicit none
+        integer, intent(inout)  :: varlist(:)
+        integer, intent(in)     :: varids(:)
+        integer, intent(out), optional  :: error
+
+        integer :: i, ierr
+
+        ierr=0
+        do i=1,size(varids)
+            if (varids(i) <= size(varlist)) then
+                varlist( varids(i) ) = varlist( varids(i) ) + 1
+            else
+                if (STD_OUT_PE) write(*,*) "  WARNING: trying to add var outside of permitted list:",varids(i), size(varlist)
+                ierr=1
+            endif
+        enddo
+
+        if (present(error)) error=ierr
+
+    end subroutine add_to_varlist
+
+
+    !> -------------------------------
+    !! Add a set of variable(s) to the internal list of variables to be allocated
+    !!
+    !! Sets error /= 0 if an error occurs in add_to_varlist
+    !!
+    !! -------------------------------
+    module subroutine alloc_vars(this, input_vars, var_idx, error)
+        class(options_t),  intent(inout):: this
+        integer, optional, intent(in)  :: input_vars(:)
+        integer, optional, intent(in)  :: var_idx
+        integer, optional, intent(out) :: error
+
+        integer :: ierr
+
+        ierr=0
+        if (present(var_idx)) then
+            call add_to_varlist(this%vars_to_allocate,[var_idx], ierr)
+        endif
+
+        if (present(input_vars)) then
+            call add_to_varlist(this%vars_to_allocate,input_vars, ierr)
+        endif
+
+        if (present(error)) error=ierr
+
+    end subroutine alloc_vars
+
+    !> -------------------------------
+    !! Overwrites options%forcing struct to expect "forcing" data from the parent nest
+    !!
+    !! Mostly just changes forcing var names
+    !!
+    !! -------------------------------
+    module subroutine setup_synthetic_forcing(this, parent_opts)
+        implicit none
+        class(options_t),  intent(inout) :: this
+        type(options_t),   intent(in)    :: parent_opts
+        integer :: ierr, i
+
+        this%forcing%qv_is_relative_humidity = .false.
+        this%forcing%qv_is_spec_humidity = .false.  
+        this%forcing%t_is_potential = .True.
+        this%forcing%z_is_geopotential = .False.
+        this%forcing%time_varying_z = .False.
+        this%forcing%t_offset = 0.0
+        this%forcing%p_multiplier = 1.0
+        this%forcing%relax_filters = .False.
+        this%forcing%compute_z = .False.
+
+        ! Now set the forcing variable names -- these are the same as the domain variable names
+        ! NOTE: temperature must be the first of the forcing variables read
+        this%forcing%vars_to_read(:) = ""
+        this%forcing%dim_list(:)%num_dims = 0
+        i = 1
+        call set_nml_var(this%forcing%zvar, get_varname( kVARS%z ), 'zvar', this%forcing, i, no_check=.True.)
+        call set_nml_var(this%forcing%uvar, get_varname( kVARS%u ), 'uvar', this%forcing, i, no_check=.True.)
+        call set_nml_var(this%forcing%vvar, get_varname( kVARS%v ), 'vvar', this%forcing, i, no_check=.True.)
+        call set_nml_var(this%forcing%wvar, get_varname( kVARS%w_real ), 'wvar', this%forcing, i, no_check=.True.)
+        call set_nml_var(this%forcing%qvvar, get_varname( kVARS%water_vapor ), 'qvvar', this%forcing, i, no_check=.True.)
+        call set_nml_var(this%forcing%tvar, get_varname( kVARS%potential_temperature ), 'tvar', this%forcing, i, no_check=.True.)
+        call set_nml_var(this%forcing%pvar, get_varname( kVARS%pressure ), 'pvar', this%forcing, i, no_check=.True.)
+        call set_nml_var(this%forcing%latvar, get_varname( kVARS%latitude ), 'latvar', this%forcing, no_check=.True.)
+        call set_nml_var(this%forcing%lonvar, get_varname( kVARS%longitude ), 'lonvar', this%forcing, no_check=.True.)
+        call set_nml_var(this%forcing%hgtvar, get_varname( kVARS%terrain ), 'hgtvar', this%forcing, no_check=.True.)
+
+        if (0<this%vars_to_allocate( kVARS%cloud_water_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%cloud_water_mass) ) call set_nml_var(this%forcing%qcvar, get_varname( kVARS%cloud_water_mass ), 'qcvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%ice_mass) ) call set_nml_var(this%forcing%qivar, get_varname( kVARS%ice_mass ), 'qivar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%rain_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%rain_mass) ) call set_nml_var(this%forcing%qrvar, get_varname( kVARS%rain_mass ), 'qrvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%graupel_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%graupel_mass) ) call set_nml_var(this%forcing%qgvar, get_varname( kVARS%graupel_mass ), 'qgvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%snow_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%snow_mass) ) call set_nml_var(this%forcing%qsvar, get_varname( kVARS%snow_mass ), 'qsvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%cloud_number) .and. 0<parent_opts%vars_to_allocate( kVARS%cloud_number) ) call set_nml_var(this%forcing%qncvar, get_varname( kVARS%cloud_number ), 'qncvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice_number) .and. 0<parent_opts%vars_to_allocate( kVARS%ice_number) ) call set_nml_var(this%forcing%qnivar, get_varname( kVARS%ice_number ), 'qnivar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%rain_number) .and. 0<parent_opts%vars_to_allocate( kVARS%rain_number) ) call set_nml_var(this%forcing%qnrvar, get_varname( kVARS%rain_number ), 'qnrvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%graupel_number) .and. 0<parent_opts%vars_to_allocate( kVARS%graupel_number) ) call set_nml_var(this%forcing%qngvar, get_varname( kVARS%graupel_number ), 'qngvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%snow_number) .and. 0<parent_opts%vars_to_allocate( kVARS%snow_number) ) call set_nml_var(this%forcing%qnsvar, get_varname( kVARS%snow_number ), 'qnsvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice2_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%ice2_mass) ) call set_nml_var(this%forcing%i2mvar, get_varname( kVARS%ice2_mass ), 'i2mvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice3_mass) .and. 0<parent_opts%vars_to_allocate( kVARS%ice3_mass) ) call set_nml_var(this%forcing%i3mvar, get_varname( kVARS%ice3_mass ), 'i3mvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice2_number) .and. 0<parent_opts%vars_to_allocate( kVARS%ice2_number) ) call set_nml_var(this%forcing%i2nvar, get_varname( kVARS%ice2_number ), 'i2nvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice3_number) .and. 0<parent_opts%vars_to_allocate( kVARS%ice3_number) ) call set_nml_var(this%forcing%i3nvar, get_varname( kVARS%ice3_number ), 'i3nvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice1_a) .and. 0<parent_opts%vars_to_allocate( kVARS%ice1_a) ) call set_nml_var(this%forcing%i1avar, get_varname( kVARS%ice1_a ), 'i1avar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice2_a) .and. 0<parent_opts%vars_to_allocate( kVARS%ice2_a) ) call set_nml_var(this%forcing%i2avar, get_varname( kVARS%ice2_a ), 'i2avar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice3_a) .and. 0<parent_opts%vars_to_allocate( kVARS%ice3_a) ) call set_nml_var(this%forcing%i3avar, get_varname( kVARS%ice3_a ), 'i3avar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice1_c) .and. 0<parent_opts%vars_to_allocate( kVARS%ice1_c) ) call set_nml_var(this%forcing%i1cvar, get_varname( kVARS%ice1_c ), 'i1cvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice2_c) .and. 0<parent_opts%vars_to_allocate( kVARS%ice2_c) ) call set_nml_var(this%forcing%i2cvar, get_varname( kVARS%ice2_c ), 'i2cvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ice3_c) .and. 0<parent_opts%vars_to_allocate( kVARS%ice3_c) ) call set_nml_var(this%forcing%i3cvar, get_varname( kVARS%ice3_c ), 'i3cvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%qs_fm) .and. 0<parent_opts%vars_to_allocate( kVARS%qs_fm) ) call set_nml_var(this%forcing%qs_fmvar, get_varname( kVARS%qs_fm ), 'qs_fmvar', this%forcing, i, no_check=.True.)
+        if (0<this%vars_to_allocate( kVARS%ns_fm) .and. 0<parent_opts%vars_to_allocate( kVARS%ns_fm) ) call set_nml_var(this%forcing%ns_fmvar, get_varname( kVARS%ns_fm ), 'ns_fmvar', this%forcing, i, no_check=.True.)
+
+    end subroutine setup_synthetic_forcing
+
+
+    !> -------------------------------
+    !! Add a set of variable(s) to the internal list of variables to be output in a restart file
+    !!
+    !! Sets error /= 0 if an error occurs in add_to_varlist
+    !!
+    !! -------------------------------
+    module subroutine restart_vars(this, input_vars, var_idx, error)
+        class(options_t),  intent(inout):: this
+        integer, optional, intent(in)  :: input_vars(:)
+        integer, optional, intent(in)  :: var_idx
+        integer, optional, intent(out) :: error
+
+        integer :: ierr
+
+        ierr=0
+        if (present(var_idx)) then
+            call add_to_varlist(this%vars_for_restart,[var_idx], ierr)
+        endif
+
+        if (present(input_vars)) then
+            call add_to_varlist(this%vars_for_restart,input_vars, ierr)
+        endif
+
+        if (present(error)) error=ierr
+
+    end subroutine
+
+
+    !> -------------------------------
+    !! Check the version number in the namelist file and compare to the current model version
+    !!
+    !! If the namelist version doesn't match, print the differences between that version and this
+    !! and STOP execution
+    !!
+    !! -------------------------------
+    subroutine version_check(options)
+        type(general_options_type),intent(inout)  :: options
+
+
+        if (options%version.ne.kVERSION_STRING) then
+            if (STD_OUT_PE) write(*,*) "  Model version does not match namelist version"
+            if (STD_OUT_PE) write(*,*) "    Model version: ",kVERSION_STRING
+            if (STD_OUT_PE) write(*,*) "    Namelist version: ",trim(options%version)
+            call print_model_diffs(options%version)
+            stop
+        endif
+
+        if (STD_OUT_PE) write(*,*) "    Model version: ",trim(options%version)
+
+    end subroutine version_check
+
+    subroutine print_nml_error(nml_name, msg, iostat, nml_file, valid_nml_unit)
+        implicit none
+        character(len=*), intent(in) :: nml_name, msg
+        integer, intent(in) :: iostat
+        character(len=*), intent(in), optional :: nml_file
+        integer, intent(in), optional :: valid_nml_unit
+
+        integer :: obj_indx
+
+        if (STD_OUT_PE) write(*,*)
+        if (STD_OUT_PE) write(*,*) "  -----------------------------------------------------------------"
+        if (STD_OUT_PE) write(*,*) "  ERROR reading '",trim(nml_name),"' namelist, continuing with defaults"
+        if (STD_OUT_PE) write(*,*)
+
+        IF (IS_IOSTAT_END(iostat)) THEN
+            if (STD_OUT_PE) WRITE(*,*) '    End of file encountered'
+            stop
+        ELSE IF (IS_IOSTAT_EOR(iostat)) THEN
+            if (STD_OUT_PE)  WRITE(*,*) '    End of record encountered'
+            stop
+        ELSE
+            if (STD_OUT_PE) write(*,*) "    ERROR message: ", trim(msg)
+
+            ! Try to identify invalid variable names by comparing user's file against valid names
+            if (present(nml_file) .and. present(valid_nml_unit)) then
+                call find_invalid_nml_vars(nml_name, nml_file, valid_nml_unit)
+            else
+                !see if msg contains string "Bad data"
+                if (index(msg, "Bad data") > 0) then
+                    !get index of location after first occurance of "object" in msg
+                    obj_indx = index(msg, "object") + len("object ")
+                    if (STD_OUT_PE) write(*,*) "    Alternatively, the user may have defined a variable in the namelist that is not valid."
+                    if (STD_OUT_PE) write(*,*) "    Please check that the variable following '", trim(msg(obj_indx:)), "' is valid."
+                    if (STD_OUT_PE) write(*,*)
+                    if (STD_OUT_PE) write(*,*) "    To see all valid namelist variables, generate a default namelist file using:"
+                    if (STD_OUT_PE) write(*,*) "        ./HICAR --gen-nml default.nml"
+                    if (STD_OUT_PE) write(*,*)
+                    if (STD_OUT_PE) write(*,*) "    To check if a variable is valid namelist variable use:"
+                    if (STD_OUT_PE) write(*,*) "        ./HICAR -v [YOUR_VAR]"
+                    if (STD_OUT_PE) write(*,*)
+                endif
+            endif
+        END IF
+
+        if (STD_OUT_PE) write(*,*) "  -----------------------------------------------------------------"
+        if (STD_OUT_PE) write(*,*)
+
+    end subroutine
+
+
+    ! =========================================================================
+    ! Config string generation for restart validation
+    ! =========================================================================
+
+    subroutine append_kv_str(config_str, pos, group, key, val)
+        character(len=*), intent(inout) :: config_str
+        integer, intent(inout) :: pos
+        character(len=*), intent(in) :: group, key, val
+        character(len=10000) :: line
+        integer :: n
+
+        write(line, '(A,"/",A,"=",A)') trim(group), trim(key), trim(val)
+        n = len_trim(line)
+        config_str(pos:pos+n) = trim(line) // char(10)
+        pos = pos + n + 1
+    end subroutine
+
+    subroutine append_kv_int(config_str, pos, group, key, val)
+        character(len=*), intent(inout) :: config_str
+        integer, intent(inout) :: pos
+        character(len=*), intent(in) :: group, key
+        integer, intent(in) :: val
+        character(len=64) :: val_str
+
+        write(val_str, '(I0)') val
+        call append_kv_str(config_str, pos, group, key, trim(val_str))
+    end subroutine
+
+    subroutine append_kv_real(config_str, pos, group, key, val)
+        character(len=*), intent(inout) :: config_str
+        integer, intent(inout) :: pos
+        character(len=*), intent(in) :: group, key
+        real, intent(in) :: val
+        character(len=64) :: val_str
+
+        write(val_str, '(ES16.9)') val
+        call append_kv_str(config_str, pos, group, key, trim(adjustl(val_str)))
+    end subroutine
+
+    subroutine append_kv_logical(config_str, pos, group, key, val)
+        character(len=*), intent(inout) :: config_str
+        integer, intent(inout) :: pos
+        character(len=*), intent(in) :: group, key
+        logical, intent(in) :: val
+
+        if (val) then
+            call append_kv_str(config_str, pos, group, key, 'T')
+        else
+            call append_kv_str(config_str, pos, group, key, 'F')
+        endif
+    end subroutine
+
+    subroutine append_kv_real_array(config_str, pos, group, key, val)
+        character(len=*), intent(inout) :: config_str
+        integer, intent(inout) :: pos
+        character(len=*), intent(in) :: group, key
+        real, intent(in) :: val(:)
+        character(len=32) :: tmp
+        character(len=8192) :: arr_str
+        integer :: i
+
+        arr_str = ''
+        do i = 1, size(val)
+            write(tmp, '(ES16.9)') val(i)
+            if (i == 1) then
+                arr_str = trim(adjustl(tmp))
+            else
+                arr_str = trim(arr_str) // ',' // trim(adjustl(tmp))
+            endif
+        end do
+        call append_kv_str(config_str, pos, group, key, trim(arr_str))
+    end subroutine
+
+
+    module subroutine generate_config_string(this, config_str, exclude_restart_fields)
+        implicit none
+        class(options_t),            intent(in)  :: this
+        character(len=kMAX_CONFIG_STRING_LENGTH), intent(out) :: config_str
+        logical, optional,           intent(in)  :: exclude_restart_fields
+
+        logical :: exclude
+        integer :: pos
+
+        exclude = .false.
+        if (present(exclude_restart_fields)) exclude = exclude_restart_fields
+
+        config_str = ''
+        pos = 1
+
+        ! --- physics group ---
+        call append_kv_str(config_str, pos, 'physics', 'mp',   trim(translate_numeric_mapping('mp',   this%physics%microphysics)))
+        call append_kv_str(config_str, pos, 'physics', 'lsm',  trim(translate_numeric_mapping('lsm',  this%physics%landsurface)))
+        call append_kv_str(config_str, pos, 'physics', 'pbl',  trim(translate_numeric_mapping('pbl',  this%physics%boundarylayer)))
+        call append_kv_str(config_str, pos, 'physics', 'sfc',  trim(translate_numeric_mapping('sfc',  this%physics%surfacelayer)))
+        call append_kv_str(config_str, pos, 'physics', 'sm',   trim(translate_numeric_mapping('sm',   this%physics%snowmodel)))
+        call append_kv_str(config_str, pos, 'physics', 'water',trim(translate_numeric_mapping('water', this%physics%watersurface)))
+        call append_kv_str(config_str, pos, 'physics', 'rad',  trim(translate_numeric_mapping('rad',  this%physics%radiation)))
+        call append_kv_str(config_str, pos, 'physics', 'conv', trim(translate_numeric_mapping('conv', this%physics%convection)))
+        call append_kv_str(config_str, pos, 'physics', 'adv',  trim(translate_numeric_mapping('adv',  this%physics%advection)))
+        call append_kv_str(config_str, pos, 'physics', 'wind', trim(translate_numeric_mapping('wind', this%physics%windtype)))
+
+        ! --- wind group ---
+        call append_kv_logical(config_str, pos, 'wind', 'Sx',                   this%wind%Sx)
+        call append_kv_logical(config_str, pos, 'wind', 'thermal',              this%wind%thermal)
+        call append_kv_logical(config_str, pos, 'wind', 'linear_theory',        this%wind%linear_theory)
+        call append_kv_logical(config_str, pos, 'wind', 'wind_only',            this%wind%wind_only)
+        call append_kv_real   (config_str, pos, 'wind', 'TPI_scale',            this%wind%TPI_scale)
+        call append_kv_real   (config_str, pos, 'wind', 'TPI_dmax',             this%wind%TPI_dmax)
+        call append_kv_real   (config_str, pos, 'wind', 'Sx_dmax',              this%wind%Sx_dmax)
+        call append_kv_real   (config_str, pos, 'wind', 'Sx_scale_ang',         this%wind%Sx_scale_ang)
+        call append_kv_real   (config_str, pos, 'wind', 'alpha_const',          this%wind%alpha_const)
+        call append_kv_int    (config_str, pos, 'wind', 'wind_iterations',      this%wind%wind_iterations)
+        call append_kv_int    (config_str, pos, 'wind', 'wind_solver_iterations', this%wind%wind_solver_iterations)
+        call append_kv_real   (config_str, pos, 'wind', 'smooth_wind_distance', this%wind%smooth_wind_distance)
+        call append_kv_real   (config_str, pos, 'wind', 'update_frequency',     real(this%wind%update_dt%seconds()))
+
+        ! --- time group ---
+        call append_kv_logical(config_str, pos, 'time', 'RK3',                  this%time%RK3)
+        call append_kv_real   (config_str, pos, 'time', 'cfl_reduction_factor', this%time%cfl_reduction_factor)
+
+        ! --- mp group ---
+        call append_kv_real   (config_str, pos, 'mp', 'Nt_c',            this%mp%Nt_c)
+        call append_kv_real   (config_str, pos, 'mp', 'TNO',             this%mp%TNO)
+        call append_kv_real   (config_str, pos, 'mp', 'am_s',            this%mp%am_s)
+        call append_kv_real   (config_str, pos, 'mp', 'rho_g',           this%mp%rho_g)
+        call append_kv_real   (config_str, pos, 'mp', 'av_s',            this%mp%av_s)
+        call append_kv_real   (config_str, pos, 'mp', 'bv_s',            this%mp%bv_s)
+        call append_kv_real   (config_str, pos, 'mp', 'fv_s',            this%mp%fv_s)
+        call append_kv_real   (config_str, pos, 'mp', 'av_i',            this%mp%av_i)
+        call append_kv_real   (config_str, pos, 'mp', 'av_g',            this%mp%av_g)
+        call append_kv_real   (config_str, pos, 'mp', 'bv_g',            this%mp%bv_g)
+        call append_kv_real   (config_str, pos, 'mp', 'Ef_si',           this%mp%Ef_si)
+        call append_kv_real   (config_str, pos, 'mp', 'Ef_rs',           this%mp%Ef_rs)
+        call append_kv_real   (config_str, pos, 'mp', 'Ef_rg',           this%mp%Ef_rg)
+        call append_kv_real   (config_str, pos, 'mp', 'Ef_ri',           this%mp%Ef_ri)
+        call append_kv_real   (config_str, pos, 'mp', 'C_cubes',         this%mp%C_cubes)
+        call append_kv_real   (config_str, pos, 'mp', 'C_sqrd',          this%mp%C_sqrd)
+        call append_kv_real   (config_str, pos, 'mp', 'mu_r',            this%mp%mu_r)
+        call append_kv_real   (config_str, pos, 'mp', 't_adjust',        this%mp%t_adjust)
+        call append_kv_logical(config_str, pos, 'mp', 'Ef_rw_l',         this%mp%Ef_rw_l)
+        call append_kv_logical(config_str, pos, 'mp', 'EF_sw_l',         this%mp%EF_sw_l)
+        call append_kv_real   (config_str, pos, 'mp', 'update_interval', this%mp%update_interval)
+        call append_kv_int    (config_str, pos, 'mp', 'top_mp_level',    this%mp%top_mp_level)
+
+        ! --- lt group ---
+        call append_kv_int    (config_str, pos, 'lt', 'buffer',                  this%lt%buffer)
+        call append_kv_int    (config_str, pos, 'lt', 'stability_window_size',   this%lt%stability_window_size)
+        call append_kv_real   (config_str, pos, 'lt', 'max_stability',           this%lt%max_stability)
+        call append_kv_real   (config_str, pos, 'lt', 'min_stability',           this%lt%min_stability)
+        call append_kv_logical(config_str, pos, 'lt', 'variable_N',              this%lt%variable_N)
+        call append_kv_logical(config_str, pos, 'lt', 'smooth_nsq',              this%lt%smooth_nsq)
+        call append_kv_int    (config_str, pos, 'lt', 'vert_smooth',             this%lt%vert_smooth)
+        call append_kv_real   (config_str, pos, 'lt', 'N_squared',               this%lt%N_squared)
+        call append_kv_real   (config_str, pos, 'lt', 'linear_contribution',     this%lt%linear_contribution)
+        call append_kv_logical(config_str, pos, 'lt', 'remove_lowres_linear',    this%lt%remove_lowres_linear)
+        call append_kv_real   (config_str, pos, 'lt', 'rm_N_squared',            this%lt%rm_N_squared)
+        call append_kv_real   (config_str, pos, 'lt', 'rm_linear_contribution',  this%lt%rm_linear_contribution)
+        call append_kv_real   (config_str, pos, 'lt', 'linear_update_fraction',  this%lt%linear_update_fraction)
+        call append_kv_real   (config_str, pos, 'lt', 'dirmax',                  this%lt%dirmax)
+        call append_kv_real   (config_str, pos, 'lt', 'dirmin',                  this%lt%dirmin)
+        call append_kv_real   (config_str, pos, 'lt', 'spdmax',                  this%lt%spdmax)
+        call append_kv_real   (config_str, pos, 'lt', 'spdmin',                  this%lt%spdmin)
+        call append_kv_real   (config_str, pos, 'lt', 'nsqmax',                  this%lt%nsqmax)
+        call append_kv_real   (config_str, pos, 'lt', 'nsqmin',                  this%lt%nsqmin)
+        call append_kv_int    (config_str, pos, 'lt', 'n_dir_values',            this%lt%n_dir_values)
+        call append_kv_int    (config_str, pos, 'lt', 'n_nsq_values',            this%lt%n_nsq_values)
+        call append_kv_int    (config_str, pos, 'lt', 'n_spd_values',            this%lt%n_spd_values)
+        call append_kv_real   (config_str, pos, 'lt', 'minimum_layer_size',      this%lt%minimum_layer_size)
+
+        ! --- adv group ---
+        call append_kv_int    (config_str, pos, 'adv', 'flux_corr',      this%adv%flux_corr)
+        call append_kv_int    (config_str, pos, 'adv', 'h_order',        this%adv%h_order)
+        call append_kv_int    (config_str, pos, 'adv', 'v_order',        this%adv%v_order)
+        call append_kv_logical(config_str, pos, 'adv', 'advect_density', this%adv%advect_density)
+        call append_kv_int    (config_str, pos, 'adv', 'cz_diff_order',  this%adv%cz_diff_order)
+
+        ! --- cu group ---
+        call append_kv_real(config_str, pos, 'cu', 'stochastic_cu',     this%cu%stochastic_cu)
+        call append_kv_real(config_str, pos, 'cu', 'tendency_fraction',  this%cu%tendency_fraction)
+        call append_kv_real(config_str, pos, 'cu', 'tend_qv_fraction',   this%cu%tend_qv_fraction)
+        call append_kv_real(config_str, pos, 'cu', 'tend_qc_fraction',   this%cu%tend_qc_fraction)
+        call append_kv_real(config_str, pos, 'cu', 'tend_th_fraction',   this%cu%tend_th_fraction)
+        call append_kv_real(config_str, pos, 'cu', 'tend_qi_fraction',   this%cu%tend_qi_fraction)
+
+        ! --- pbl group ---
+        call append_kv_int(config_str, pos, 'pbl', 'ysu_topdown_pblmix', this%pbl%ysu_topdown_pblmix)
+
+        ! --- sfc group ---
+        call append_kv_int (config_str, pos, 'sfc', 'isfflx',         this%sfc%isfflx)
+        call append_kv_int (config_str, pos, 'sfc', 'scm_force_flux', this%sfc%scm_force_flux)
+        call append_kv_int (config_str, pos, 'sfc', 'iz0tlnd',        this%sfc%iz0tlnd)
+        call append_kv_int (config_str, pos, 'sfc', 'isftcflx',       this%sfc%isftcflx)
+        call append_kv_real(config_str, pos, 'sfc', 'sbrlim',         this%sfc%sbrlim)
+
+        ! --- lsm group ---
+        call append_kv_str    (config_str, pos, 'lsm', 'LU_Categories',    trim(this%lsm%LU_Categories))
+        call append_kv_real   (config_str, pos, 'lsm', 'max_swe',          this%lsm%max_swe)
+        call append_kv_real   (config_str, pos, 'lsm', 'snow_den_const',   this%lsm%snow_den_const)
+        call append_kv_real   (config_str, pos, 'lsm', 'update_interval',  this%lsm%update_interval)
+        call append_kv_int    (config_str, pos, 'lsm', 'urban_category',   this%lsm%urban_category)
+        call append_kv_int    (config_str, pos, 'lsm', 'ice_category',     this%lsm%ice_category)
+        call append_kv_int    (config_str, pos, 'lsm', 'water_category',   this%lsm%water_category)
+        call append_kv_int    (config_str, pos, 'lsm', 'lake_category',    this%lsm%lake_category)
+        call append_kv_logical(config_str, pos, 'lsm', 'monthly_vegfrac',  this%lsm%monthly_vegfrac)
+        call append_kv_int    (config_str, pos, 'lsm', 'sf_urban_phys',    this%lsm%sf_urban_phys)
+        call append_kv_int    (config_str, pos, 'lsm', 'num_soil_layers',  this%lsm%num_soil_layers)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_dveg',         this%lsm%nmp_dveg)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_crs',      this%lsm%nmp_opt_crs)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_sfc',      this%lsm%nmp_opt_sfc)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_btr',      this%lsm%nmp_opt_btr)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_runsrf',   this%lsm%nmp_opt_runsrf)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_runsub',   this%lsm%nmp_opt_runsub)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_infdv',    this%lsm%nmp_opt_infdv)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_frz',      this%lsm%nmp_opt_frz)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_inf',      this%lsm%nmp_opt_inf)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_rad',      this%lsm%nmp_opt_rad)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_alb',      this%lsm%nmp_opt_alb)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_wet',      this%lsm%nmp_opt_wet)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_snf',      this%lsm%nmp_opt_snf)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_tksno',    this%lsm%nmp_opt_tksno)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_compact',  this%lsm%nmp_opt_compact)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_scf',      this%lsm%nmp_opt_scf)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_tbot',     this%lsm%nmp_opt_tbot)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_stc',      this%lsm%nmp_opt_stc)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_gla',      this%lsm%nmp_opt_gla)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_rsf',      this%lsm%nmp_opt_rsf)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_soil',     this%lsm%nmp_opt_soil)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_pedo',     this%lsm%nmp_opt_pedo)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_crop',     this%lsm%nmp_opt_crop)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_irr',      this%lsm%nmp_opt_irr)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_irrm',     this%lsm%nmp_opt_irrm)
+        call append_kv_int    (config_str, pos, 'lsm', 'nmp_opt_tdrn',     this%lsm%nmp_opt_tdrn)
+        call append_kv_int    (config_str, pos, 'lsm', 'noahmp_output',    this%lsm%noahmp_output)
+        call append_kv_real   (config_str, pos, 'lsm', 'nmp_soiltstep',    this%lsm%nmp_soiltstep)
+
+        ! --- sm group ---
+        call append_kv_int    (config_str, pos, 'sm', 'sm_nsnow_max',    this%sm%sm_nsnow_max)
+        call append_kv_real   (config_str, pos, 'sm', 'fsm_ds_min',       this%sm%fsm_ds_min)
+        call append_kv_real   (config_str, pos, 'sm', 'fsm_ds_surflay',   this%sm%fsm_ds_surflay)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_albedo',       this%sm%fsm_albedo)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_canmod',       this%sm%fsm_canmod)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_checks',       this%sm%fsm_checks)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_condct',       this%sm%fsm_condct)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_densty',       this%sm%fsm_densty)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_exchng',       this%sm%fsm_exchng)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_hydrol',       this%sm%fsm_hydrol)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_radsbg',       this%sm%fsm_radsbg)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_snfrac',       this%sm%fsm_snfrac)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_snolay',       this%sm%fsm_snolay)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_sntran',       this%sm%fsm_sntran)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_zoffst',       this%sm%fsm_zoffst)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_oshdtn',       this%sm%fsm_oshdtn)
+        call append_kv_int    (config_str, pos, 'sm', 'fsm_alradt',       this%sm%fsm_alradt)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_hn_on',        this%sm%fsm_hn_on)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_for_hn',       this%sm%fsm_for_hn)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_z0pert',       this%sm%fsm_z0pert)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_wcpert',       this%sm%fsm_wcpert)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_fspert',       this%sm%fsm_fspert)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_alpert',       this%sm%fsm_alpert)
+        call append_kv_logical(config_str, pos, 'sm', 'fsm_slpert',       this%sm%fsm_slpert)
+        call append_kv_int    (config_str, pos, 'sm', 'snicar_snowoptics_opt',   this%sm%snicar_snowoptics_opt)
+        call append_kv_int    (config_str, pos, 'sm', 'snicar_dustoptics_opt',   this%sm%snicar_dustoptics_opt)
+        call append_kv_int    (config_str, pos, 'sm', 'snicar_solarspec_opt',    this%sm%snicar_solarspec_opt)
+        call append_kv_int    (config_str, pos, 'sm', 'snicar_bandnumber_opt',   this%sm%snicar_bandnumber_opt)
+        call append_kv_int    (config_str, pos, 'sm', 'snicar_rtsolver_opt',     this%sm%snicar_rtsolver_opt)
+        call append_kv_int    (config_str, pos, 'sm', 'snicar_snowshape_opt',    this%sm%snicar_snowshape_opt)
+        call append_kv_logical(config_str, pos, 'sm', 'snicar_use_aerosol',      this%sm%snicar_use_aerosol)
+        call append_kv_logical(config_str, pos, 'sm', 'snicar_snowbc_intmix',    this%sm%snicar_snowbc_intmix)
+        call append_kv_logical(config_str, pos, 'sm', 'snicar_snowdust_intmix',  this%sm%snicar_snowdust_intmix)
+        call append_kv_logical(config_str, pos, 'sm', 'snicar_use_oc',           this%sm%snicar_use_oc)
+        call append_kv_logical(config_str, pos, 'sm', 'snicar_aerosol_readtable',this%sm%snicar_aerosol_readtable)
+        call append_kv_int    (config_str, pos, 'sm', 'snowpack_atmospheric_stability',   this%sm%snowpack_atmospheric_stability)
+        call append_kv_int    (config_str, pos, 'sm', 'snowpack_variant',                 this%sm%snowpack_variant)
+        call append_kv_int    (config_str, pos, 'sm', 'snowpack_albedo_parameterization', this%sm%snowpack_albedo_parameterization)
+        call append_kv_int    (config_str, pos, 'sm', 'snowpack_reduce_n_elements',       this%sm%snowpack_reduce_n_elements)
+        call append_kv_logical(config_str, pos, 'sm', 'snowpack_enable_vapour_transport', this%sm%snowpack_enable_vapour_transport)
+        call append_kv_int    (config_str, pos, 'sm', 'suspension_layer',              this%sm%suspension_layer)
+        call append_kv_int    (config_str, pos, 'sm', 'suspension_fine_mesh_levels',   this%sm%suspension_fine_mesh_levels)
+        call append_kv_real    (config_str, pos, 'sm', 'lowest_susp_level',             this%sm%lowest_susp_level)
+        call append_kv_logical(config_str, pos, 'sm', 'bs_atm_feedback',               this%sm%bs_atm_feedback)
+        call append_kv_int    (config_str, pos, 'sm', 'saltation_model',               this%sm%saltation_model)
+        call append_kv_int    (config_str, pos, 'sm', 'snowslide',                   this%sm%snowslide)
+
+        ! --- rad group ---
+        call append_kv_logical(config_str, pos, 'rad', 'terrain_shading',      this%rad%terrain_shading)
+        call append_kv_real   (config_str, pos, 'rad', 'update_interval_rad',  this%rad%update_interval_rad)
+        call append_kv_int    (config_str, pos, 'rad', 'icloud',               this%rad%icloud)
+        call append_kv_int    (config_str, pos, 'rad', 'cldovrlp',             this%rad%cldovrlp)
+        call append_kv_logical(config_str, pos, 'rad', 'read_ghg',             this%rad%read_ghg)
+        call append_kv_real   (config_str, pos, 'rad', 'tzone',                this%rad%tzone)
+        call append_kv_real   (config_str, pos, 'rad', 'terrain_refl_radius',  this%rad%terrain_refl_radius)
+
+        ! --- domain group (behavior-affecting fields only) ---
+        call append_kv_real   (config_str, pos, 'domain', 'dx',                          this%domain%dx)
+        call append_kv_int    (config_str, pos, 'domain', 'nz',                          this%domain%nz)
+        if (allocated(this%domain%dz_levels)) then
+            call append_kv_real_array(config_str, pos, 'domain', 'dz_levels', this%domain%dz_levels)
+        endif
+        call append_kv_real   (config_str, pos, 'domain', 'flat_z_height',                this%domain%flat_z_height)
+        call append_kv_logical(config_str, pos, 'domain', 'sleve',                        this%domain%sleve)
+        call append_kv_int    (config_str, pos, 'domain', 'terrain_smooth_windowsize',    this%domain%terrain_smooth_windowsize)
+        call append_kv_int    (config_str, pos, 'domain', 'terrain_smooth_cycles',        this%domain%terrain_smooth_cycles)
+        call append_kv_real   (config_str, pos, 'domain', 'decay_rate_L_topo',            this%domain%decay_rate_L_topo)
+        call append_kv_real   (config_str, pos, 'domain', 'decay_rate_S_topo',            this%domain%decay_rate_S_topo)
+        call append_kv_real   (config_str, pos, 'domain', 'sleve_n',                      this%domain%sleve_n)
+        call append_kv_logical(config_str, pos, 'domain', 'use_agl_height',               this%domain%use_agl_height)
+        call append_kv_real   (config_str, pos, 'domain', 'agl_cap',                      this%domain%agl_cap)
+        call append_kv_logical(config_str, pos, 'domain', 'use_map_factors',              this%domain%use_map_factors)
+        call append_kv_int    (config_str, pos, 'domain', 'longitude_system',             this%domain%longitude_system)
+        call append_kv_real   (config_str, pos, 'domain', 'init_surf_temp',               this%domain%init_surf_temp)
+        call append_kv_real   (config_str, pos, 'domain', 'init_sst',                     this%domain%init_sst)
+
+        ! --- forcing group (behavior-affecting fields only) ---
+        call append_kv_logical(config_str, pos, 'forcing', 'qv_is_relative_humidity', this%forcing%qv_is_relative_humidity)
+        call append_kv_logical(config_str, pos, 'forcing', 'qv_is_spec_humidity',     this%forcing%qv_is_spec_humidity)
+        call append_kv_logical(config_str, pos, 'forcing', 't_is_potential',           this%forcing%t_is_potential)
+        call append_kv_logical(config_str, pos, 'forcing', 'z_is_geopotential',        this%forcing%z_is_geopotential)
+        call append_kv_logical(config_str, pos, 'forcing', 'time_varying_z',           this%forcing%time_varying_z)
+        call append_kv_logical(config_str, pos, 'forcing', 'relax_filters',            this%forcing%relax_filters)
+        call append_kv_real   (config_str, pos, 'forcing', 't_offset',                 this%forcing%t_offset)
+        call append_kv_real   (config_str, pos, 'forcing', 'p_multiplier',             this%forcing%p_multiplier)
+        call append_kv_logical(config_str, pos, 'forcing', 'limit_rh',                 this%forcing%limit_rh)
+        call append_kv_real   (config_str, pos, 'forcing', 'inputinterval',            this%forcing%inputinterval)
+
+        ! --- general group (behavior-affecting fields only) ---
+        call append_kv_str    (config_str, pos, 'general', 'calendar',         trim(this%general%calendar))
+        call append_kv_int    (config_str, pos, 'general', 'nests',            this%general%nests)
+        call append_kv_int    (config_str, pos, 'general', 'parent_nest',      this%general%parent_nest)
+        call append_kv_logical(config_str, pos, 'general', 'use_mp_options',   this%general%use_mp_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_lt_options',   this%general%use_lt_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_adv_options',  this%general%use_adv_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_lsm_options',  this%general%use_lsm_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_sm_options',   this%general%use_sm_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_cu_options',   this%general%use_cu_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_rad_options',  this%general%use_rad_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_pbl_options',  this%general%use_pbl_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_sfc_options',  this%general%use_sfc_options)
+        call append_kv_logical(config_str, pos, 'general', 'use_wind_options', this%general%use_wind_options)
+
+        ! Fields only included in full config string (not for restart comparison)
+        if (.not. exclude) then
+            ! --- general: session-specific fields ---
+            call append_kv_logical(config_str, pos, 'general', 'debug',       this%general%debug)
+            call append_kv_logical(config_str, pos, 'general', 'interactive', this%general%interactive)
+            call append_kv_str    (config_str, pos, 'general', 'version',     trim(this%general%version))
+            call append_kv_str    (config_str, pos, 'general', 'comment',     trim(this%general%comment))
+
+            ! --- restart ---
+            call append_kv_logical(config_str, pos, 'restart', 'restart_run',    this%restart%restart)
+            call append_kv_int    (config_str, pos, 'restart', 'restartinterval',this%restart%restart_count)
+            call append_kv_str    (config_str, pos, 'restart', 'restart_folder', trim(this%restart%restart_folder))
+
+            ! --- output ---
+            call append_kv_str (config_str, pos, 'output', 'output_folder',    trim(this%output%output_folder))
+            call append_kv_real(config_str, pos, 'output', 'outputinterval',   this%output%outputinterval)
+            call append_kv_int (config_str, pos, 'output', 'frames_per_outfile', this%output%frames_per_outfile)
+
+            ! --- domain: file/variable name fields ---
+            !call append_kv_str(config_str, pos, 'domain', 'init_conditions_file', trim(this%domain%init_conditions_file))
+
+            ! --- lt: LUT file fields ---
+            call append_kv_logical(config_str, pos, 'lt', 'read_LUT',         this%lt%read_LUT)
+            call append_kv_logical(config_str, pos, 'lt', 'write_LUT',        this%lt%write_LUT)
+            call append_kv_str    (config_str, pos, 'lt', 'u_LUT_Filename',   trim(this%lt%u_LUT_Filename))
+            call append_kv_str    (config_str, pos, 'lt', 'v_LUT_Filename',   trim(this%lt%v_LUT_Filename))
+            call append_kv_logical(config_str, pos, 'lt', 'overwrite_lt_lut', this%lt%overwrite_lt_lut)
+        endif
+
+    end subroutine generate_config_string
+
+end submodule

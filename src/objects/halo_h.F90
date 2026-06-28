@@ -1,0 +1,362 @@
+module halo_interface
+        
+    use grid_interface,           only : grid_t
+    use variable_interface,       only : variable_t
+    use timer_interface,          only : timer_t
+    use data_structures,          only : index_type
+#ifdef USE_NCCL
+    use iso_c_binding, only: c_ptr, c_null_ptr
+#endif
+
+    use mpi_f08
+    implicit none
+
+    private
+    public :: halo_t
+
+    type halo_t
+
+        integer           :: halo_size, n_2d, n_3d
+
+        type(grid_t)      :: grid
+
+        type(MPI_Win)     :: north_in_win
+        type(MPI_Win)     :: south_in_win
+        type(MPI_Win)     :: east_in_win
+        type(MPI_Win)     :: west_in_win
+        type(MPI_Win)     :: northwest_in_win
+        type(MPI_Win)     :: southwest_in_win
+        type(MPI_Win)     :: northeast_in_win
+        type(MPI_Win)     :: southeast_in_win
+
+        type(MPI_win)     :: north_3d_win
+        type(MPI_win)     :: south_3d_win
+        type(MPI_win)     :: east_3d_win
+        type(MPI_win)     :: west_3d_win
+        type(MPI_win)     :: northwest_3d_win
+        type(MPI_win)     :: southwest_3d_win
+        type(MPI_win)     :: northeast_3d_win
+        type(MPI_win)     :: southeast_3d_win
+        
+        type(MPI_win)     :: north_2d_win
+        type(MPI_win)     :: south_2d_win
+        type(MPI_win)     :: east_2d_win
+        type(MPI_win)     :: west_2d_win
+
+        type(MPI_Datatype) :: NS_3d_win_halo_type
+        type(MPI_Datatype) :: EW_3d_win_halo_type
+        type(MPI_Datatype) :: corner_3d_win_halo_type
+
+        type(MPI_Datatype) :: NS_2d_win_halo_type
+        type(MPI_Datatype) :: EW_2d_win_halo_type
+
+        type(MPI_Group)    :: north_neighbor_grp, south_neighbor_grp, east_neighbor_grp, west_neighbor_grp
+        type(MPI_Group)    :: northwest_neighbor_grp, southwest_neighbor_grp, northeast_neighbor_grp, southeast_neighbor_grp
+
+        real, contiguous, pointer :: south_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: north_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: west_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: east_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: northwest_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: southwest_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: northeast_batch_in_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: southeast_batch_in_3d(:,:,:,:) => null()
+
+        real, contiguous, pointer :: north_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: south_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: east_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: west_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: northwest_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: southwest_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: northeast_buffer_3d(:,:,:,:) => null()
+        real, contiguous, pointer :: southeast_buffer_3d(:,:,:,:) => null()
+
+        real, pointer     :: south_in_3d(:,:,:) => null()
+        real, pointer     :: north_in_3d(:,:,:) => null()
+        real, pointer     :: west_in_3d(:,:,:) => null()
+        real, pointer     :: east_in_3d(:,:,:) => null()
+        real, pointer     :: southwest_in_3d(:,:,:) => null()
+        real, pointer     :: northwest_in_3d(:,:,:) => null()
+        real, pointer     :: southeast_in_3d(:,:,:) => null()
+        real, pointer     :: northeast_in_3d(:,:,:) => null()
+
+        real, contiguous, pointer :: south_batch_in_2d(:,:,:) => null()
+        real, contiguous, pointer :: north_batch_in_2d(:,:,:) => null()
+        real, contiguous, pointer :: west_batch_in_2d(:,:,:) => null()
+        real, contiguous, pointer :: east_batch_in_2d(:,:,:) => null()
+
+        real, contiguous, pointer :: north_buffer_2d(:,:,:) => null()
+        real, contiguous, pointer :: south_buffer_2d(:,:,:) => null()
+        real, contiguous, pointer :: east_buffer_2d(:,:,:) => null()
+        real, contiguous, pointer :: west_buffer_2d(:,:,:) => null()
+
+        real, contiguous, pointer :: north_in_buffer(:,:,:) => null()
+        real, contiguous, pointer :: south_in_buffer(:,:,:) => null()
+        real, contiguous, pointer :: east_in_buffer(:,:,:) => null()
+        real, contiguous, pointer :: west_in_buffer(:,:,:) => null()
+        real, contiguous, pointer :: north_in_buffer_2d(:,:) => null()
+        real, contiguous, pointer :: south_in_buffer_2d(:,:) => null()
+        real, contiguous, pointer :: east_in_buffer_2d(:,:) => null()
+        real, contiguous, pointer :: west_in_buffer_2d(:,:) => null()
+
+        real, contiguous, pointer :: ne_corner_send(:,:,:) => null()
+        real, contiguous, pointer :: nw_corner_send(:,:,:) => null()
+        real, contiguous, pointer :: se_corner_send(:,:,:) => null()
+        real, contiguous, pointer :: sw_corner_send(:,:,:) => null()
+
+        integer :: north_neighbor, south_neighbor, east_neighbor, west_neighbor, halo_rank
+        integer :: northwest_neighbor, southwest_neighbor, northeast_neighbor, southeast_neighbor
+
+        logical :: north_boundary = .True.
+        logical :: south_boundary = .True.
+        logical :: east_boundary = .True.
+        logical :: west_boundary = .True.
+
+        logical :: northwest_boundary = .True.
+        logical :: southwest_boundary = .True.
+        logical :: northeast_boundary = .True.
+        logical :: southeast_boundary = .True.
+
+        logical :: corner, interior
+
+        ! store the start (s) and end (e) for the i,j,k dimensions
+        integer ::  ids,ide, jds,jde, kds,kde, & ! for the entire model domain    (d)
+                ims,ime, jms,jme, kms,kme, & ! for the memory in these arrays (m)
+                its,ite, jts,jte, kts,kte ! for the data tile to process   (t)
+
+        ! Flags indicating if shared memory communication is used for each direction
+        logical :: north_shared = .false.
+        logical :: south_shared = .false.
+        logical :: east_shared = .false.
+        logical :: west_shared = .false.
+        logical :: northwest_shared = .false.
+        logical :: southwest_shared = .false.
+        logical :: northeast_shared = .false.
+        logical :: southeast_shared = .false.
+        logical :: use_shared_windows = .false.
+
+#ifdef USE_NCCL
+        type(c_ptr) :: nccl_comm = c_null_ptr
+        ! nccl_stream: aliased to OpenACC's acc_async_sync — used by exch_var
+        ! and put_*/retrieve_* so within-stream ordering keeps that path
+        ! correct without extra event sync (single-call, self-contained).
+        type(c_ptr) :: nccl_stream = c_null_ptr
+        ! nccl_batch_stream: dedicated CUDA stream for halo_*_send_batch.
+        ! Lets NCCL run concurrently with caller compute on acc_async_sync;
+        ! pack_*_done / nccl_*_done events handshake across the two streams.
+        type(c_ptr) :: nccl_batch_stream = c_null_ptr
+        type(c_ptr) :: pack_3d_done = c_null_ptr
+        type(c_ptr) :: nccl_3d_done = c_null_ptr
+        type(c_ptr) :: pack_2d_done = c_null_ptr
+        type(c_ptr) :: nccl_2d_done = c_null_ptr
+#endif
+
+    contains
+        procedure, public :: init => init_halo 
+        procedure, public :: finalize
+        procedure, public :: exch_var
+        ! procedure, public :: batch_exch
+        procedure, public :: halo_3d_send_batch
+        procedure, public :: halo_3d_retrieve_batch
+
+        procedure :: put_north
+        procedure :: put_south
+        procedure :: put_west
+        procedure :: put_east
+        procedure :: retrieve_north_halo
+        procedure :: retrieve_south_halo
+        procedure :: retrieve_west_halo
+        procedure :: retrieve_east_halo
+
+        procedure :: put_northwest
+        procedure :: put_northeast
+        procedure :: put_southwest
+        procedure :: put_southeast
+        procedure :: retrieve_northwest_halo
+        procedure :: retrieve_northeast_halo
+        procedure :: retrieve_southwest_halo
+        procedure :: retrieve_southeast_halo
+
+        procedure :: halo_2d_send_batch
+        procedure :: halo_2d_retrieve_batch
+
+    end type
+
+interface
+
+    module subroutine init_halo(this, exch_vars, grid, comms)
+        implicit none
+        class(halo_t), intent(inout) :: this
+        type(index_type), intent(in) :: exch_vars(:)
+        type(grid_t), intent(in) :: grid
+        type(MPI_comm), intent(inout) :: comms
+    end subroutine init_halo
+
+    module subroutine finalize(this)
+        implicit none
+        class(halo_t), intent(inout) :: this
+    end subroutine finalize
+
+    module subroutine exch_var(this, var, do_dqdt, corners)
+        implicit none
+        class(halo_t),     intent(inout) :: this
+        type(variable_t), intent(inout) :: var
+        logical, optional, intent(in) :: do_dqdt, corners
+    end subroutine exch_var
+
+
+    ! module subroutine batch_exch(this, exch_vars, adv_vars, two_d, three_d, exch_var_only)
+    !     implicit none
+    !     class(halo_t), intent(inout) :: this
+    !     type(variable_t), intent(inout) :: adv_vars(:), exch_vars(:)
+    !     logical, optional, intent(in) :: two_d,three_d,exch_var_only
+    ! end subroutine
+
+    module subroutine halo_3d_send_batch(this, vars_to_send, var_data)
+        implicit none
+        class(halo_t), intent(inout) :: this
+        type(index_type), intent(inout) :: vars_to_send(:)
+        type(variable_t), intent(inout) :: var_data(:)
+    end subroutine halo_3d_send_batch
+
+    module subroutine halo_3d_retrieve_batch(this, vars_to_ret, var_data, wait_timer)
+        implicit none
+        class(halo_t), intent(inout) :: this
+        type(index_type), intent(inout) :: vars_to_ret(:)
+        type(variable_t), intent(inout) :: var_data(:)
+        type(timer_t), optional,     intent(inout)   :: wait_timer
+
+    end subroutine halo_3d_retrieve_batch
+
+    module subroutine halo_2d_send_batch(this, vars_to_send, var_data)
+        implicit none
+        class(halo_t), intent(inout) :: this
+        type(index_type), intent(inout) :: vars_to_send(:)
+        type(variable_t), intent(inout) :: var_data(:)
+        end subroutine halo_2d_send_batch
+
+    module subroutine halo_2d_retrieve_batch(this, vars_to_ret, var_data)
+        implicit none
+        class(halo_t), intent(inout) :: this
+        type(index_type), intent(inout) :: vars_to_ret(:)
+        type(variable_t), intent(inout) :: var_data(:)
+        end subroutine halo_2d_retrieve_batch
+
+
+    module subroutine put_north(this,var,do_dqdt)
+        implicit none
+        class(halo_t), intent(inout) :: this
+        class(variable_t), intent(in) :: var
+        logical, optional, intent(in) :: do_dqdt
+    end subroutine
+
+    module subroutine put_south(this,var,do_dqdt)
+        implicit none
+        class(halo_t), intent(inout) :: this
+        class(variable_t), intent(in) :: var
+        logical, optional, intent(in) :: do_dqdt
+    end subroutine
+
+    module subroutine retrieve_north_halo(this,var,do_dqdt)
+        implicit none
+        class(halo_t), intent(in) :: this
+        class(variable_t), intent(inout) :: var
+        logical, optional, intent(in) :: do_dqdt
+    end subroutine
+
+    module subroutine retrieve_south_halo(this,var,do_dqdt)
+        implicit none
+        class(halo_t), intent(in) :: this
+        class(variable_t), intent(inout) :: var
+        logical, optional, intent(in) :: do_dqdt
+    end subroutine
+
+    module subroutine put_east(this,var,do_dqdt)
+        implicit none
+        class(halo_t), intent(inout) :: this
+        class(variable_t), intent(in) :: var
+        logical, optional, intent(in) :: do_dqdt
+    end subroutine
+
+    module subroutine put_west(this,var,do_dqdt)
+        implicit none
+        class(halo_t), intent(inout) :: this
+        class(variable_t), intent(in) :: var
+        logical, optional, intent(in) :: do_dqdt
+
+    end subroutine
+
+    module subroutine retrieve_east_halo(this,var,do_dqdt)
+        implicit none
+        class(halo_t), intent(in) :: this
+        class(variable_t), intent(inout) :: var
+        logical, optional, intent(in) :: do_dqdt
+
+    end subroutine
+
+    module subroutine retrieve_west_halo(this,var,do_dqdt)
+        implicit none
+        class(halo_t), intent(in) :: this
+        class(variable_t), intent(inout) :: var
+        logical, optional, intent(in) :: do_dqdt
+
+    end subroutine
+
+  module subroutine put_northwest(this,var,do_dqdt)
+      implicit none 
+      class(halo_t), intent(inout) :: this
+      class(variable_t), intent(in) :: var
+      logical, optional, intent(in) :: do_dqdt
+  end subroutine
+
+  module subroutine put_northeast(this,var,do_dqdt)
+      implicit none 
+      class(halo_t), intent(inout) :: this
+      class(variable_t), intent(in) :: var
+      logical, optional, intent(in) :: do_dqdt
+  end subroutine
+
+  module subroutine put_southeast(this,var,do_dqdt)
+      implicit none 
+      class(halo_t), intent(inout) :: this
+      class(variable_t), intent(in) :: var
+      logical, optional, intent(in) :: do_dqdt
+  end subroutine
+
+  module subroutine put_southwest(this,var,do_dqdt)
+      implicit none 
+      class(halo_t), intent(inout) :: this
+      class(variable_t), intent(in) :: var
+      logical, optional, intent(in) :: do_dqdt
+  end subroutine
+
+  module subroutine retrieve_northwest_halo(this,var,do_dqdt)
+      implicit none 
+      class(halo_t), intent(in) :: this
+      class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
+  end subroutine
+
+  module subroutine retrieve_northeast_halo(this,var,do_dqdt)
+      implicit none 
+      class(halo_t), intent(in) :: this
+      class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
+  end subroutine
+
+  module subroutine retrieve_southeast_halo(this,var,do_dqdt)
+      implicit none 
+      class(halo_t), intent(in) :: this
+      class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
+  end subroutine
+
+  module subroutine retrieve_southwest_halo(this,var,do_dqdt)
+      implicit none 
+      class(halo_t), intent(in) :: this
+      class(variable_t), intent(inout) :: var
+    logical, optional, intent(in) :: do_dqdt
+  end subroutine
+
+end interface
+end module

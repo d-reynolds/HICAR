@@ -7,18 +7,29 @@ HICAR is a variant of the Intermediate Complexity Atmospheric Research (ICAR) mo
 
 More information about the model features enabling this can be found in Reynolds et al., 2023.
 
+## Getting Started
+
+To start working with the model, follow the instructions under docs/compiling to compile the model. 
+
+Once the model has been compiled, a working directory file structure, supporting files, and test case can be setup and downloaded with the following script:
+
+```bash
+./helpers/gen_HICAR_dir.sh /path/to/working/directory /path/to/HICAR/repo
+```
+
+This script creates the working-directory tree (`input/`, `output/`, `restart/`, `forcing/`, `domains/`) and copies the supporting files (the NoahMP `.TBL` file and the `mp_support`/`rrtmg_support`/`rrtmgp_support` directories) from the repo's `run/` directory into `input/`. It runs non-interactively and does not overwrite existing directories; the supporting files must already have been downloaded by the cmake configure step.
+
 #### Compilation Requirements
 While being fast to run compared to traditional weather models, HICAR has still been developed and intended for use on High Performance Computing (HPC) machines, although it can also be run on a local machine. HICAR thus uses a few package requirements which are common to HPC environments. They are:
 
 - Parallel NetCDF4
 - FFTW
-- PETSc
 
-HICAR currently supports either the GNU Fortran or Cray compilers. The Cray compiler offers a better adoption of the Coarray-Fortran standard and faster optimization options, and is thus significantly faster than the GNU compiler. However, debugging is sometimes easier with the GNU compiler.
+HICAR currently supports either the GNU Fortran or NVFortran compilers.
 
 #### Static data requirements
 
-HICAR uses a domain file which defines land-surface variables and some terrain-descriptors. To generate a HICAR domain file using an existing DEM and land use data, the  python script gen_HICAR_dom.py, located in helpers/ can be used. See below for more details on how to run this script.
+HICAR uses a domain file which defines land-surface variables and some terrain-descriptors. To generate a HICAR domain file using an existing DEM and land use data, the python script gen_HICAR_dom.py, located in helpers/domains/, can be used. See below for more details on how to run this script.
 
 Example static data for running a 1-day simulation can be found under [HICAR-model/Test-data](https://github.com/HICAR-Model/Test-Data)
 
@@ -35,13 +46,13 @@ When using the variational wind solver, providing W winds from forcing data can 
 
 To perform nested runs, HICAR can be forced with the output from a previous HICAR simulation. Thus HICAR also supports the forcing of all hydrometeors and all of their moments as according to the microphysics scheme chosen. It is recommended to specify these forcing variables when forcing HICAR with output from coarser resolution HICAR runs.
 
-HICAR reads in forcing data from a forcing file list supplied to the model in the namelist. A shell script for generating a forcing file list from a given directory is found within helper/filelist_script.sh
+HICAR reads in forcing data from a forcing file list supplied to the model in the namelist. A shell script for generating a forcing file list from a given directory is found within helpers/filelist_script.sh
 
 Example forcing data for running a 1-day simulation can be found under: [HICAR-model/Test-data](https://github.com/HICAR-Model/Test-Data)
 
 #### Namelist
 
-An example of a test namelist can be found under run/HICAR_Test_Case.nml. This namelist is the same which can be run with the test case provided in [HICAR-model/Test-data](https://github.com/HICAR-Model/Test-Data). The complete namelist options found in run/namelists/complete_hicar_options.nml show all possible name list options, with comments describing their function and use. Full documentation on namelist options to run with the model are in development…
+Example namelists for a range of configurations are provided under `helpers/example_namelists/`. The complete set of namelist options, with default values and inline comments describing their function, can be generated from the compiled executable with `./bin/HICAR --gen-nml my_options.nml` (see [docs/namelist_options.md](docs/namelist_options.md)).
 
 #### Supplementary data
 
@@ -52,43 +63,16 @@ If you plan to make any major additions to HICAR or ICAR, please get in touch, f
 
 If your code changes are core to the model and would benefit both HICAR and ICAR, please make them over at the ICAR model repo: https://github.com/NCAR/icar.
 
-For an outline of the basic code structure see the [ICAR code overview](docs/icar_code_overview.md)
+For an outline of the basic code structure see the [code overview](docs/code_overview.md).
 
-For reference working with the model code and git, see the [ICAR and Git workflow](docs/howto/icar_and_git_howto.md).
+For the contribution workflow and how to add to the model, see [Developing HICAR](docs/developing.md).
 
 
-####Generating Static Data
+#### Generating Static Data
 
-HICAR relies on pre-computed static data to speed up some of it’s online calculations. To generate a HICAR domain file, an existing netCDF file with lat, lon, DEM, and landuse categories is needed. The lat and lon variables must be named **lat** and **lon**, and the terrain variable must be named **topo**. Additionally, a larger extent DEM of the same resolution is needed to generate parameters for terrain-shading of radiation. I.e., if you have a 50m resolution domain, a larger DEM with an extent ~20km beyond the boundaries of the target domain is also needed.
+HICAR relies on pre-computed static data to speed up some of it’s online calculations. To generate a HICAR domain file, an existing netCDF file with lat, lon, and a DEM is required; landuse categories and a land mask are optional (the land mask is derived from landuse when present, and the domain otherwise defaults to all-land). The lat and lon variables must be named **lat** and **lon**, and the terrain variable must be named **topo**. Additionally, a larger extent DEM of the same resolution is needed to generate parameters for terrain-shading of radiation. I.e., if you have a 50m resolution domain, a larger DEM with an extent ~20km beyond the boundaries of the target domain is also needed.
 
-Once you have these two netCDF files, you can use a python script to generate the rest of the variables used by HICAR.
-
-First, install the conda environment located in the HICAR_dom.yml file found in helpers/
-
-```bash
-conda env create -f HICAR_dom.yml
-```
-
-Once this environment is installed, activate it with:
-```bash
-conda activate HICAR_dom
-```
-
-Now you will need to install HORAYZON, a python package to efficiently calculate the horizon line matrix and sky view factor (Steger et al., 2022). To do so, type:
-
-```bash
-git clone https://github.com/ChristianSteger/HORAYZON.git
-cd HORAYZON
-python -m pip install .
-```
-
-Your python environment should now be complete. To generate the domain file, open gen_HICAR_dom.py and edit the paths for the target domain, radiation domain, and output domain. HICAR_Domain.py and ProjHelpers.py, both contained in the helpers/ directory, must be in the same directory as gen_HICAR_dom.py.
-
-Now run:
-
-```bash
-python gen_HICAR_dom.py
-```
+For information on how to generate the rest of the variables used by HICAR, namely those for calculating terrain shading, see docs/domain_generation.md
 
 #### Reference
 

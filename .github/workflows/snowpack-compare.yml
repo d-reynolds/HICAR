@@ -1,0 +1,189 @@
+# SNOWPACK implementation comparison (CPU / GNU, GitHub-hosted).
+#
+# Builds HICAR twice on the same gfortran toolchain, differing only in the snow
+# driver, and checks the native-Fortran SNOWPACK port tracks the C++ reference:
+#   reference: -DSNOWPACK_CPP=ON  (C++ bindings, sm_SNOWPACK.F90)
+#   candidate: default build       (native-Fortran port, snowpack_driver.F90)
+# A 3 h Standard run seeded with a 14-layer / 1 m snowpack is compared against
+# tests/tolerances/tolerances_snowpack.yaml. See tests/snowpack/test_snowpack_compare.sh.
+#
+# Triggers: every PR into main (the gate — no path filter), push to main (the
+# fresh post-merge run), nightly, and manual (with optional bless).
+name: SNOWPACK C++ vs Fortran
+
+on:
+  pull_request:
+    branches: [main]          # gate: run on EVERY PR into main, on the test-merge
+  push:
+    branches: [main]          # fresh post-merge parity run that signs main's HEAD
+  schedule:
+    - cron: '0 3 * * *'   # 03:00 UTC nightly
+  workflow_dispatch:
+    inputs:
+      bless:
+        description: >-
+          On PASS, bless this commit as the SNOWPACK parity reference
+          (posts hicar-snowpack-parity-blessed=success with the upstream SNOWPACK SHA).
+        type: boolean
+        required: false
+        default: false
+      reason:
+        description: Audit note for the bless (why the parity anchor moves)
+        type: string
+        required: false
+
+concurrency:
+  group: snowpack-compare-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # parity bless archives its evidence as a GitHub release
+  actions: read     # the `changed` gate queries previous runs
+  statuses: write   # the optional parity bless (workflow_dispatch with bless=true)
+
+jobs:
+  # On a nightly, skip if main is unchanged since the last completed run.
+  # PRs into main, push to main, and manual dispatch always run.
+  changed:
+    runs-on: ubuntu-22.04
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "Event '${{ github.event_name }}' is a PR/push/manual trigger — running."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # On any API error, fall back to empty so we run rather than skip.
+          last_sha=$(gh api \
+            "/repos/${{ github.repository }}/actions/workflows/snowpack-compare.yml/runs?branch=main&status=completed&per_page=1&exclude_pull_requests=true" \
+            --jq '.workflow_runs[0].head_sha // ""') || last_sha=""
+          cur_sha="${{ github.sha }}"
+          echo "current main SHA:  $cur_sha"
+          echo "last run main SHA: ${last_sha:-<none>}"
+          if [ -z "$last_sha" ]; then
+            echo "No previous run found — running."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$last_sha" = "$cur_sha" ]; then
+            echo "main unchanged since the last run — skipping."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "main advanced since the last run — running."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  snowpack-compare:
+    needs: changed
+    if: needs.changed.outputs.should_run == 'true'
+    runs-on: ubuntu-22.04
+    env:
+      # Release (-O3) for BOTH builds: the C++ SNOWPACK library is always -O3, so a
+      # debug HICAR would compare an -O0 port against -O3 C++ physics — FP-reorder
+      # noise. Release puts both at -O3 for a like-for-like comparison (and is faster).
+      HICAR_MODE: release
+    steps:
+      # Posting the parity status needs admin/maintain, so fail fast before a
+      # 40-minute double build if a non-maintainer requested bless.
+      - name: Verify maintainer permission for bless
+        if: github.event_name == 'workflow_dispatch' && inputs.bless
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          role=$(gh api "/repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission" \
+                   --jq '.role_name // .permission')
+          echo "actor=${{ github.actor }} role=$role"
+          case "$role" in
+            admin|maintain) echo "Bless authorized." ;;
+            *) echo "::error::Parity bless is restricted to repo admins/maintainers (role: $role)"; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: ./.github/actions/hicar-deps
+      - uses: ./.github/actions/snowpack-src-cache   # outage fallback for the git.wsl.ch snowpack+meteoio fetch
+
+      # Build A (reference): C++ SNOWPACK into its OWN tree so its shared libs
+      # survive Build B; the exe's RPATH points into build_cpp, so no LD juggling.
+      - name: Build HICAR with C++ SNOWPACK
+        env:
+          HICAR_CMAKE_EXTRA: "-DSNOWPACK_CPP=ON"
+          HICAR_BUILD_DIR: build_cpp
+        run: |
+          bash .github/scripts/hicar_install_utils.sh hicar_install
+          cp bin/HICAR "$GITHUB_WORKSPACE/HICAR_snowpack_cpp"
+
+      # Build B (candidate): native-Fortran port (the default build; OpenACC off
+      # for the GNU CPU comparison). Separate tree so it doesn't wipe build_cpp.
+      - name: Build HICAR with native-Fortran SNOWPACK
+        env:
+          HICAR_CMAKE_EXTRA: "-DOPENACC=OFF"
+          HICAR_BUILD_DIR: build_fortran
+        run: |
+          bash .github/scripts/hicar_install_utils.sh hicar_install
+          cp bin/HICAR "$GITHUB_WORKSPACE/HICAR_snowpack_fortran"
+
+      # --- Forcing/test data (download_test_data clones into tests/Test_Cases) ---
+      - name: Download test forcing data
+        run: cd build_fortran && make download_test_data
+
+      # --- Run the comparison ------------------------------------------------
+      - name: Compare C++ vs Fortran SNOWPACK
+        run: |
+          bash tests/snowpack/test_snowpack_compare.sh "$GITHUB_WORKSPACE" \
+            "$GITHUB_WORKSPACE/HICAR_snowpack_cpp" \
+            "$GITHUB_WORKSPACE/HICAR_snowpack_fortran"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snowpack-compare-diagnostics
+          path: |
+            tests/figures/snowpack_compare/**
+            tests/Test_Cases/input/SNOWPACK_*.err
+            tests/Test_Cases/input/SNOWPACK_*.out
+          if-no-files-found: ignore
+
+  # Post snow-parity=success (required by main's ruleset). On a PR the status must
+  # land on the PR HEAD, not the merge commit; a manual dispatch resolves to github.sha.
+  sign-snow:
+    needs: snowpack-compare
+    if: needs.snowpack-compare.result == 'success'
+    runs-on: ubuntu-22.04
+    permissions:
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/sign-commit
+        with:
+          sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          context: snow-parity
+          description: Passed SNOWPACK C++ vs native-Fortran parity
+          token: ${{ github.token }}
+
+  # Parity bless (manual dispatch + bless=true only). The `parity-bless`
+  # Environment must be configured with REQUIRED REVIEWERS — GitHub then pauses
+  # this job until a reviewer approves. The bless script reads the SNOWPACK anchor
+  # SHA from the evidence artifact and re-verifies PASS + commit identity.
+  # NB: if the Environment doesn't exist yet, the first run auto-creates it WITHOUT
+  # protection — configure the reviewers before relying on this gate.
+  bless:
+    needs: snowpack-compare
+    if: github.event_name == 'workflow_dispatch' && inputs.bless
+    runs-on: ubuntu-22.04
+    environment: parity-bless
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: snowpack-compare-diagnostics
+          path: tests
+      - name: Bless SNOWPACK parity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash tests/snowpack/test_snowpack_compare.sh "$GITHUB_WORKSPACE" --bless \
+            --reason "${{ inputs.reason || 'snowpack-compare pass' }}"

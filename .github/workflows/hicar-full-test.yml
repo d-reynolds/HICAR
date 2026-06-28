@@ -1,0 +1,202 @@
+# HICAR full-test (CPU / GNU, GitHub-hosted) — the correctness gate.
+#
+# Two builds: debug (unit tests, Standard integration, reproducibility) and
+# release (all integration cases + regression vs the blessed commit). If both
+# pass, `sign` posts the hicar-full-test=success commit status; the GPU lane
+# reads it to decide whether it can skip re-running this suite (gpu.yml).
+#
+# example-namelists (push to develop only) reuses cpu-release's regenerated .nml
+# artifact and commits it back — develop not main, because it pushes directly and
+# main is PR-protected. It runs regardless of test outcome, independent of `sign`.
+#
+# Triggers:
+#   - pull_request -> main : the gate. Runs on the test-merge; signs the PR HEAD.
+#   - push to develop      : fast feedback on develop (signs the develop commit).
+#   - push to main         : the FRESH post-merge run that signs main's own HEAD.
+#   - workflow_dispatch / workflow_call (gpu.yml reuse).
+name: HICAR full-test (CPU)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+  statuses: write   # sign posts the commit status
+
+concurrency:
+  group: fulltest-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # build-deps: build the dependency toolchain once (cached) so cpu-debug and
+  # cpu-release restore it instead of each rebuilding netcdf/hdf5/pnetcdf.
+  build-deps:
+    # No push/PR dedup: a PR into main is meant to run on the TEST-MERGE (the
+    # predicted post-merge state), which is a different commit from the develop
+    # push, so both runs are legitimate and wanted.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: ./.github/actions/hicar-deps
+
+  # debug build: crashes / instabilities / reproducibility
+  cpu-debug:
+    needs: build-deps
+    runs-on: ubuntu-22.04
+    env:
+      HICAR_MODE: debug
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: ./.github/actions/hicar-deps   # warm cache => short-circuits
+      - uses: ./.github/actions/snowpack-src-cache   # outage fallback for the git.wsl.ch fetch
+      - run: bash .github/scripts/hicar_install_utils.sh hicar_install
+      - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
+      - name: CLI options                    # cheapest failure first
+        run: bash tests/test_cli_options.sh "$GITHUB_WORKSPACE"
+      - name: Unit / invariant tests
+        run: cd build && mpiexec -np 4 tests/HICAR-tester
+      # Regenerate from the gen scripts BEFORE integration, so cases validate the
+      # current scripts rather than a stale committed .nml.
+      - name: Regenerate example namelists
+        run: bash helpers/example_namelists/generate_examples.sh "$GITHUB_WORKSPACE/bin/HICAR_debug"
+      - name: Reproducibility (decomposition + restart)
+        run: bash tests/test_reproducibility.sh "$GITHUB_WORKSPACE" all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cpu-debug-diagnostics
+          path: |
+            tests/Test_Cases/input/*.err
+            tests/Test_Cases/input/*.out
+            tests/figures/**
+          if-no-files-found: ignore
+
+  # release build: full config matrix + regression vs the blessed commit
+  cpu-release:
+    needs: build-deps
+    runs-on: ubuntu-22.04
+    env:
+      HICAR_MODE: release
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: ./.github/actions/hicar-deps   # warm cache => short-circuits
+      - uses: ./.github/actions/snowpack-src-cache   # outage fallback for the git.wsl.ch fetch
+      - run: bash .github/scripts/hicar_install_utils.sh hicar_install
+      - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
+      - name: Regenerate example namelists
+        run: bash helpers/example_namelists/generate_examples.sh "$GITHUB_WORKSPACE/bin/HICAR"
+      # Publish the .nml regenerated HERE (on the builder, where the -march=native
+      # release exe runs) so example-namelists can commit them without re-running
+      # the exe on a different runner (it would SIGILL). Uploaded before the tests
+      # so it survives a later test failure.
+      - name: Upload regenerated example namelists
+        uses: actions/upload-artifact@v4
+        with:
+          name: regenerated-namelists
+          path: helpers/example_namelists/*.nml
+          if-no-files-found: error
+      - name: Integration (all config cases — run only)
+        run: |
+          cd tests/Test_Cases
+          bash test_case_runner.sh "$GITHUB_WORKSPACE" \
+            "Standard,Standard_restart,Nested,Nested_restart"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-diagnostics
+          path: |
+            tests/Test_Cases/input/*.err
+            tests/Test_Cases/input/*.out
+          if-no-files-found: ignore
+
+      # Regression reference = most recent ancestor with hicar-regression-blessed=success.
+      - name: Resolve blessed regression commit
+        id: blessed
+        continue-on-error: true   # none yet -> regression step is skipped
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(bash tests/resolve_blessed_commit.sh "$GITHUB_WORKSPACE" --exclude-head)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "blessed regression commit: $sha"
+      - name: Cache blessed regression exe   # rebuilt only when the blessed commit changes
+        if: steps.blessed.outputs.sha != ''
+        uses: actions/cache@v4
+        with:
+          path: |
+            bin/HICAR_blessed
+            bin/.regression_hash
+          key: regression-exe-${{ runner.os }}-${{ steps.blessed.outputs.sha }}
+      - name: Regression vs blessed commit (recompiles blessed exe, diffs outputs)
+        if: steps.blessed.outputs.sha != ''
+        continue-on-error: true   # flip to false once a blessed commit is established
+        run: |
+          bash tests/test_regression.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/build" \
+            "Standard,Nested" --blessed-commit "${{ steps.blessed.outputs.sha }}" --mode exact
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cpu-release-diagnostics
+          path: |
+            tests/regression_report_*.json
+            tests/figures/**
+          if-no-files-found: ignore
+
+  # sign: mark the commit hicar-full-test=success (the gate the GPU lane reads).
+  # PR: post on the PR HEAD (rulesets evaluate there), not the merge commit.
+  sign:
+    needs: [cpu-debug, cpu-release]
+    runs-on: ubuntu-22.04
+    permissions:
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/sign-commit
+        with:
+          sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          context: hicar-full-test
+          description: Passed HICAR full-test (CPU debug + release)
+          token: ${{ github.token }}
+
+  # example-namelists: commit cpu-release's regenerated .nml (push to develop only).
+  # Reuses the artifact rather than re-running the -march=native exe (it would
+  # SIGILL on a different runner). The github.workflow guard stops it firing when
+  # gpu.yml reuses this workflow via workflow_call.
+  example-namelists:
+    needs: cpu-release
+    if: ${{ always() && github.event_name == 'push' && github.ref_name == 'develop' && github.workflow == 'HICAR full-test (CPU)' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Download regenerated example namelists
+        id: dl
+        continue-on-error: true   # absent if cpu-release failed before regen -> skip
+        uses: actions/download-artifact@v4
+        with:
+          name: regenerated-namelists
+          path: helpers/example_namelists
+      - name: Commit regenerated namelists (if changed)
+        if: steps.dl.outcome == 'success'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- helpers/example_namelists/; then
+            echo "Example namelists already up to date — nothing to commit."
+            exit 0
+          fi
+          git add helpers/example_namelists/*.nml
+          git commit -m "ci: regenerate example namelists [skip ci]"
+          git pull --rebase origin "${{ github.ref_name }}" || true
+          git push origin "HEAD:${{ github.ref_name }}"

@@ -1,0 +1,132 @@
+!>------------------------------------------------
+!! Defines the interface for a variable dictionary
+!!
+!! Dictionary can be accessed by string keys
+!! Dictionary stores variable_t types
+!!
+!!------------------------------------------------
+
+module variable_dict_interface
+    ! variable type to store... this could be made unlimited but that complicates use
+    use variable_interface,     only : variable_t
+    use icar_constants, only: kMAX_NAME_LENGTH, kMAX_STORAGE_VARS
+
+    !>------------------------------------------------
+    !! Defines the object that is actually stored in the dictionary array
+    !!
+    !! This object stores the key-value pair and can also store an associated variable
+    !!
+    !!------------------------------------------------
+    type var_dict_element
+        integer :: id         ! serves as the dictionary key
+        type(variable_t)                :: var          ! store the primary dictionary variable for the key name
+    end type
+
+    !>------------------------------------------------
+    !! Defines the dictionary
+    !!
+    !! Primarily and array of dictionary elements
+    !!
+    !! Methods are defined to add to the dictionary and retrieve from it
+    !! Note that there is no way to remove objects from the dictionary at present
+    !!
+    !!------------------------------------------------
+    type var_dict_t
+        ! this is the primary data structure that holds the dictionary data
+        type(var_dict_element), allocatable :: var_list(:)
+
+        ! used to iterate through variables in dictionary
+        integer :: current_variable
+
+        ! keep track of how many variables we have stored
+        integer :: n_vars = 0
+        ! keep track of how many variables we are able to store (== size(var_list))
+        integer :: max_vars = 0
+
+        ! keep track of wheather or not this dictionary has been initialized yet or not
+        logical :: initialized = .False.
+
+    contains
+        procedure :: reset_iterator     ! reset internal counters to make it possible to iterate over elements
+        procedure :: has_more_elements  ! test if there are more elements to iterate over still
+        procedure :: next               ! continue iterating through array elements
+        procedure :: get_var            ! get a variable for a given key
+        procedure :: get_var_idx       ! get index of a variable for direct in-place access
+        procedure :: add_var            ! store a variable with a given key
+        procedure :: sort_by_kVARS
+
+        procedure :: init => init_var_dict  ! initialize the dictionary (e.g. allocate the var_list)
+    end type
+
+interface
+
+    !>------------------------------------------------
+    !! Additional documentation provided in the associated object implementation
+    !!
+    !!------------------------------------------------
+
+    module subroutine init_var_dict(this)
+        implicit none
+        class(var_dict_t),   intent(inout)  :: this
+    end subroutine init_var_dict
+
+
+    !>-------------------------
+    !! Module subroutines for managing the dictionary as an iterator
+    !!
+    !!-------------------------
+    module subroutine reset_iterator(this)
+        implicit none
+        class(var_dict_t),   intent(inout)  :: this
+    end subroutine
+
+    module function has_more_elements(this) result(boolean)
+        implicit none
+        class(var_dict_t),   intent(in) :: this
+        logical :: boolean
+    end function
+
+    module function next(this, id, err) result(var_data)
+        implicit none
+        class(var_dict_t),   intent(inout)  :: this
+        integer,             intent(out),   optional :: id
+        integer,             intent(out),   optional :: err
+        type(variable_t)                    :: var_data
+    end function
+
+    module subroutine sort_by_kVARS(this)
+        implicit none
+        class(var_dict_t),   intent(inout)  :: this
+    end subroutine
+    !>-------------------------
+    !! Primary subroutines to add and retrieve elements
+    !!
+    !!-------------------------
+    module function get_var(this, in_id, err, indx) result(var_data)
+        implicit none
+        class(var_dict_t),   intent(in) :: this
+        integer,             intent(in) :: in_id
+        integer,             intent(out),   optional :: err, indx
+        type(variable_t)                :: var_data
+    end function
+
+    module function get_var_idx(this, in_id, err) result(idx)
+        implicit none
+        class(var_dict_t), intent(in) :: this
+        integer,           intent(in) :: in_id
+        integer,           intent(out), optional :: err
+        integer :: idx
+    end function
+
+    module subroutine add_var(this, in_id, var_data, save_state, err)
+        implicit none
+        class(var_dict_t),   intent(inout)  :: this
+        integer,             intent(in)     :: in_id
+        type(variable_t),    intent(in)     :: var_data
+        logical,             intent(in), optional :: save_state
+        integer,             intent(out),optional :: err
+    end subroutine
+
+end interface
+
+end module

@@ -1,0 +1,1751 @@
+!>------------------------------------------------------------
+!!  Basic file input/output routines
+!!
+!!  @details
+!!  Primary use is io_read2d/3d
+!!  io_write* routines are more used for debugging
+!!  model output is performed in the output module
+!!
+!!  Generic interfaces are supplied for io_read and io_write
+!!  but most code still uses the explicit read/write 2d/3d/etc.
+!!  this keeps the code a little more obvious (at least 2D vs 3D)
+!!
+!!  @author
+!!  Ethan Gutmann (gutmann@ucar.edu)
+!!
+!!------------------------------------------------------------
+module io_routines
+    use netcdf
+    use iso_fortran_env, only: real64, real64, output_unit
+    use icar_constants, only: STD_OUT_PE, kMAX_DIM_LENGTH, kMAX_NAME_LENGTH
+    implicit none
+    ! maximum number of dimensions for a netCDF file
+    integer,parameter::io_maxDims=10
+    !>------------------------------------------------------------
+    !! Generic interface to the netcdf read routines
+    !!------------------------------------------------------------
+    interface io_read
+        module procedure io_read6d, io_read5d, io_read4d, io_read3d, io_read2d, io_read1d,  &
+            io_read2dd, io_read2di, io_read1dd, io_read_scalar_d, io_read0d, io_read0di
+    end interface
+
+    !>------------------------------------------------------------
+    !! Generic interface to the netcdf write routines
+    !!------------------------------------------------------------
+    interface io_write
+        module procedure io_write6d, io_write5d, io_write4d, io_write3d, io_write2d, io_write4di, io_write3di
+    end interface
+
+    !>------------------------------------------------------------
+    !! Generic interface to the netcdf read_attribute_TYPE routines
+    !!------------------------------------------------------------
+    interface io_read_attribute
+        module procedure io_read_attribute_r, io_read_attribute_i, io_read_attribute_c
+    end interface
+    ! to be added as necessary
+    !, io_read_attribute_d
+
+    !>------------------------------------------------------------
+    !! Generic interface to the netcdf add_attribute_TYPE routines
+    !!------------------------------------------------------------
+    interface io_add_attribute
+        module procedure io_add_attribute_r, io_add_attribute_i, io_add_attribute_c
+    end interface
+    ! to be added as necessary
+    !, io_add_attribute_d
+
+!   All routines are public
+contains
+
+    !>------------------------------------------------------------
+    !! Tests to see if a file exists
+    !!
+    !! @param filename name of file to look for
+    !! @retval logical true if file exists, false if it doesn't
+    !!
+    !!------------------------------------------------------------
+    logical function file_exists(filename)
+        character(len=*), intent(in) :: filename
+        inquire(file=filename,exist=file_exists)
+    end function file_exists
+
+    subroutine check_file_exists(filename, message)
+        implicit none
+        character(len=*), intent(IN) :: filename
+        character(len=*), intent(IN) :: message
+
+        ! if  file does not exist, print an error and quit
+        if (.not.file_exists(filename)) then
+            if (STD_OUT_PE) write(*,*) "Using file = ", trim(filename)
+            stop trim(message)
+        endif
+
+    end subroutine check_file_exists
+
+    logical function can_file_parallel(filename)
+        implicit none
+        character(len=*), intent(in) :: filename
+        
+        integer :: ncid, format_type, ierr
+        
+        can_file_parallel = .false.
+        
+        ! Try to open file in serial mode first to check format
+        ierr = nf90_open(filename, NF90_NOWRITE, ncid)
+        if (ierr /= NF90_NOERR) then
+            ! Can't even open the file
+            return
+        endif
+        
+        ! Check the file format
+        ierr = nf90_inquire(ncid, formatNum=format_type)
+        if (ierr == NF90_NOERR) then
+            ! NetCDF-4 formats support parallel access
+            if (format_type == nf90_format_netcdf4 .or. &
+                format_type == nf90_format_netcdf4_classic) then
+                can_file_parallel = .true.
+            endif
+        endif
+        
+        ! Close the file
+        ierr = nf90_close(ncid)
+        
+    end function can_file_parallel
+
+    !>------------------------------------------------------------
+    !! Tests to see if a variable is present in a netcdf file
+    !! returns true of it is, false if it isn't
+    !!
+    !! @param filename name of NetCDF file
+    !! @param variable_name name of variable to search for in filename
+    !! @retval logical True if variable_name is present in filename
+    !!
+    !!------------------------------------------------------------
+    logical function io_variable_is_present(filename,variable_name)
+        character(len=*), intent(in) :: filename
+        character(len=*), intent(in) :: variable_name
+        integer :: ncid,err,varid
+
+        call check(nf90_open(filename, IOR(NF90_NOWRITE,NF90_NETCDF4), ncid))
+        err = nf90_inq_varid(ncid, variable_name, varid)
+        call check( nf90_close(ncid),filename )
+
+        io_variable_is_present = (err==NF90_NOERR)
+    end function io_variable_is_present
+
+    subroutine check_variable_present(filename,variable_name)
+        character(len=*), intent(in) :: filename
+        character(len=*), intent(in) :: variable_name
+        if (variable_name/="" .and. .not.io_variable_is_present(filename,variable_name)) then
+            if (STD_OUT_PE) write(*,*) "ERROR: requested variable: ",trim(variable_name), " does not exist in file: ",trim(filename)
+            stop
+        endif
+    end subroutine check_variable_present
+
+    !>------------------------------------------------------------
+    !! Finds the nearest time step in a file to a given MJD
+    !! Uses the "time" variable from filename.
+    !!
+    !! @param filename  Name of an ICAR NetCDF output file
+    !! @param mjd       Modified Julian day to find.
+    !!                  If on a noleap calendar, it assumes MJD is days since 1900
+    !! @retval integer  Index into the time dimension (last dim)
+    !!
+    !!------------------------------------------------------------
+    integer function io_nearest_time_step(filename, mjd)
+        character(len=*),intent(in) :: filename
+        real(real64), intent(in) :: mjd
+        real(real64), allocatable, dimension(:) :: time_data
+        integer :: ncid,varid,dims(1),ntimes,i
+
+        call check(nf90_open(trim(filename), IOR(NF90_NOWRITE,NF90_NETCDF4), ncid),trim(filename))
+        ! Get the varid of the data_in variable, based on its name.
+        call check(nf90_inq_varid(ncid, "time", varid),                 trim(filename)//" : time")
+        call check(nf90_inquire_variable(ncid, varid, dimids = dims),   trim(filename)//" : time dims")
+        call check(nf90_inquire_dimension(ncid, dims(1), len = ntimes), trim(filename)//" : inq time dim")
+
+        allocate(time_data(ntimes))
+        call check(nf90_get_var(ncid, varid, time_data),trim(filename)//"reading time")
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+        io_nearest_time_step=1
+        do i=1,ntimes
+            ! keep track of every time that occurs before the mjd we are looking for
+            ! the last one will be the date we want to use.
+            if ((mjd - time_data(i)) > -1e-4) then
+                io_nearest_time_step=i
+            endif
+        end do
+        deallocate(time_data)
+    end function io_nearest_time_step
+
+
+    !>------------------------------------------------------------
+    !! Read the dimensions of a variable in a given netcdf file
+    !!
+    !! @param   filename    Name of NetCDF file to look at
+    !! @param   varname     Name of the NetCDF variable to find the dimensions of
+    !! @param[out] dims     Allocated array to store output
+    !! @retval dims(:) dims[i]=length of dimension i for a given variable
+    !!
+    !!------------------------------------------------------------
+    subroutine io_getdims(filename,varname,dims)
+        implicit none
+        character(len=*), intent(in) :: filename,varname
+        integer, allocatable, intent(out) :: dims(:)
+
+        ! internal variables
+        integer :: ncid,varid,numDims,dimlen,i
+        integer,dimension(io_maxDims) :: dimIds
+
+        ! open the netcdf file
+        call check(nf90_open(trim(filename), IOR(NF90_NOWRITE,NF90_NETCDF4), ncid),trim(filename))
+
+        ! Get the varid of the variable, based on its name.
+        call check(nf90_inq_varid(ncid, varname, varid),varname)
+        ! find the number of dimensions
+
+        call check(nf90_inquire_variable(ncid, varid, ndims = numDims),varname)
+        ! find the dimension IDs
+        call check(nf90_inquire_variable(ncid, varid, dimids = dimIds(:numDims)),varname)
+
+        if (allocated(dims)) deallocate(dims)
+        allocate(dims(numDims))
+
+        ! finally, find the length of each dimension
+        do i=1,numDims
+            call check(nf90_inquire_dimension(ncid, dimIds(i), len = dimlen))
+            !assign in reverse order, since netcdf reverses the dimension order from what is in the file
+            dims(i)=dimlen
+        end do
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename )
+
+    end subroutine io_getdims
+
+    subroutine io_getdimnames(filename,varname,dimnames)
+        implicit none
+        character(len=*), intent(in) :: filename,varname
+        character(len=kMAX_DIM_LENGTH), allocatable, intent(out) :: dimnames(:)
+
+        ! internal variables
+        integer :: ncid,varid,numDims,dimid,i
+        integer,dimension(io_maxDims) :: dimIds
+
+        ! open the netcdf file
+        call check(nf90_open(trim(filename), IOR(NF90_NOWRITE,NF90_NETCDF4), ncid),trim(filename))
+
+        ! Get the varid of the variable, based on its name.
+        call check(nf90_inq_varid(ncid, varname, varid),varname)
+        ! find the number of dimensions
+
+        call check(nf90_inquire_variable(ncid, varid, ndims = numDims),varname)
+        ! find the dimension IDs
+        call check(nf90_inquire_variable(ncid, varid, dimids = dimIds(:numDims)),varname)
+
+        if (allocated(dimnames)) deallocate(dimnames)
+        allocate(dimnames(numDims))
+
+        ! finally, find the name of each dimension
+        do i=1,numDims
+            call check(nf90_inquire_dimension(ncid, dimIds(i), name = dimnames(i)))
+        end do
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename )
+
+    end subroutine io_getdimnames
+
+    !>------------------------------------------------------------
+    !! Tests to see if a dimension is present for a variable in a netcdf file
+    !! returns true if it is, false if it isn't
+    !!
+    !! @param filename name of NetCDF file
+    !! @param variable_name name of variable to check dimensions for
+    !! @param dimension_name name of dimension to search for in variable
+    !! @retval logical True if dimension_name is present on variable_name
+    !!
+    !!------------------------------------------------------------
+    logical function io_dimension_is_present(filename, variable_name, dimension_name)
+        character(len=*), intent(in) :: filename
+        character(len=*), intent(in) :: variable_name
+        character(len=*), intent(in) :: dimension_name
+        integer :: ncid, varid, ndims, i, dimid
+        integer, dimension(io_maxDims) :: dimids
+        character(len=kMAX_DIM_LENGTH) :: dim_name
+
+        io_dimension_is_present = .false.
+
+        call check(nf90_open(filename, IOR(NF90_NOWRITE,NF90_NETCDF4), ncid))
+        
+        ! Get the variable ID
+        if (nf90_inq_varid(ncid, variable_name, varid) /= NF90_NOERR) then
+            call check(nf90_close(ncid), filename)
+            return
+        endif
+        
+        ! Get the number of dimensions and dimension IDs for this variable
+        call check(nf90_inquire_variable(ncid, varid, ndims=ndims, dimids=dimids))
+        
+        ! Check each dimension name
+        do i = 1, ndims
+            call check(nf90_inquire_dimension(ncid, dimids(i), name=dim_name))
+            if (trim(dim_name) == trim(dimension_name)) then
+                io_dimension_is_present = .true.
+                exit
+            endif
+        end do
+        
+        call check(nf90_close(ncid), filename)
+    end function io_dimension_is_present
+
+
+
+    !>------------------------------------------------------------
+    !! Determines if the variable should be flipped based on variable attributes
+    !!
+    !! @details
+    !! Checks the specified variable for attributes that indicate the data is stored
+    !! in a decreasing order (top-to-bottom). Specifically looks for:
+    !! - positive = "down"
+    !! - stored_direction = "down" or "decreasing"
+    !! if both attributes are present and indicate opposite directions,
+    !! the variable should be flipped. if both are defined and indicate the same direction,
+    !! the variable should not be flipped.
+    !!
+    !! @param   filename    Name of NetCDF file to examine
+    !! @param   var_name    Name of the variable to check
+    !! @retval  logical     True if variable should be flipped, False otherwise
+    !!
+    !!------------------------------------------------------------
+    logical function io_var_reversed(filename, var_name, err_out)
+        implicit none
+        character(len=*), intent(in) :: filename
+        character(len=*), intent(in) :: var_name
+        integer, optional, intent(out) :: err_out
+
+        ! Local variables
+        integer :: ncid, var_id, err
+        character(len=kMAX_NAME_LENGTH) :: attr_val
+        
+        ! Initialize return value
+        io_var_reversed = .False.
+        
+        ! Open the file
+        call check(nf90_open(trim(filename), IOR(NF90_NOWRITE,NF90_NETCDF4), ncid), trim(filename))
+        
+        ! Get variable ID
+        call check(nf90_inq_varid(ncid, var_name, var_id), " Getting var ID for "//trim(var_name))
+        
+        if (present(err_out)) err_out = 1
+        ! Check for positive = "down" attribute
+        err = nf90_get_att(ncid, var_id, "positive", attr_val)
+        if (err == nf90_noerr) then
+            if (trim(adjustl(attr_val)) == "down") then
+                io_var_reversed = .not.(io_var_reversed)
+                if (present(err_out)) err_out = 0
+            endif
+        endif
+        
+        ! Check for stored_direction attribute
+        err = nf90_get_att(ncid, var_id, "stored_direction", attr_val)
+        if (err == nf90_noerr) then
+            if (trim(adjustl(attr_val)) == "down" .or. trim(adjustl(attr_val)) == "decreasing") then
+                io_var_reversed = .not.(io_var_reversed)
+                if (present(err_out)) err_out = 0
+            endif
+        endif
+        
+        ! Close the file
+        call check(nf90_close(ncid), filename)
+        
+    end function io_var_reversed
+
+    subroutine setup_read(filename, varname, nominal_dim, extradim_start, ncid, varid, scale, offset, dimstart, dimcnt, starts, counts)
+        implicit none
+        character(len=*), intent(in) :: filename, varname
+        integer, intent(in) :: nominal_dim, extradim_start
+        integer, intent(out) :: ncid, varid
+        real, intent(out) :: scale, offset
+        integer, allocatable, dimension(:), intent(out) :: dimcnt
+        integer, dimension(io_maxDims), intent(out) :: dimstart
+        integer, optional, intent(in) :: starts(:), counts(:)
+
+        integer :: err
+
+        dimstart=extradim_start
+        dimstart(1:nominal_dim)=1
+
+        ! Read the dimension lengths
+        call io_getdims(filename,varname,dimcnt)
+
+        if (present(starts) .and. present(counts))then
+
+            ! check that starts and counts have same length
+            if (size(starts) /= size(counts)) then
+                write(*,*) "ERROR: user provided starts and counts must same length for variable ", varname, " in file ", filename
+                stop
+            endif
+            ! check that starts and counts have correct length
+            if (size(starts) > size(dimcnt) .or. size(counts) > size(dimcnt)) then
+                write(*,*) "ERROR: starts and counts not be longer than ", size(dimcnt), " for variable ", varname, " in file ", filename
+                stop
+            endif
+
+            !check that starts and counts are within dimcnt
+            if (any(starts < 1) .or. any(counts < 1) .or. any(starts + counts - 1 > dimcnt)) then
+                write(*,*) "ERROR: starts and counts are out of bounds for variable ", varname, " in file ", filename
+                write(*,*) "starts: ",starts
+                write(*,*) "counts: ",counts
+                write(*,*) "Dimension Counts from file: ",dimcnt
+                stop
+            endif
+
+            dimcnt(1:size(counts))=counts(1:size(counts))
+            dimstart(1:size(starts))=starts(1:size(starts))
+            if (size(dimcnt)>nominal_dim) dimcnt(nominal_dim+1:size(dimcnt))=1 ! set count for extra dims to 1
+        endif
+
+        ! Open the file. IOR(NF90_NOWRITE,NF90_NETCDF4) tells netCDF we want read-only access to the file.
+        call check(nf90_open(trim(filename), IOR(NF90_NOWRITE,NF90_NETCDF4), ncid),trim(filename))
+        ! Get the varid of the data_in variable, based on its name.
+        call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
+
+        err = nf90_get_att(ncid,varid,'scale_factor', scale)
+        if (err/=0) scale=1
+        err = nf90_get_att(ncid,varid,'add_offset', offset)
+        if (err/=0) offset=0
+
+    end subroutine setup_read
+
+    !>------------------------------------------------------------
+    !! Reads in a variable from a netcdf file, allocating memory in data_in for it.
+    !!
+    !! if extradim_start is provided specifies this index for any extra dimensions (dims>6)
+    !!   e.g. we may only want one time slice from a 6d variable
+    !!
+    !! @param   filename    Name of NetCDF file to look at
+    !! @param   varname     Name of the NetCDF variable to read
+    !! @param[out] data_in     Allocatable 6-dimensional array to store output
+    !! @param   extradim_start    OPTIONAL: specify the position to read for any extra (e.g. time) dimension
+    !! @retval data_in     Allocated 6-dimensional array with the netCDF data
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read6d(filename, varname, data_in, extradim_start, starts, counts)
+        implicit none
+        ! This is the name of the data_in file and variable we will read.
+        character(len=*),  intent(in)  :: filename, varname
+        real, allocatable, intent(inout) :: data_in(:,:,:,:,:,:)
+        integer, optional, intent(in)  :: extradim_start
+        integer, optional, intent(in)  :: starts(:), counts(:)
+
+        integer, allocatable  :: dimcnt(:) !will hold dimension lengths
+        integer, dimension(io_maxDims)  :: dimstart
+        ! This will be the netCDF ID for the file and data_in variable.
+        integer :: ncid, varid,i,edim_s
+        real :: scale, offset
+        integer :: nominal_dim = 6
+
+        edim_s = 1
+        if (present(extradim_start)) edim_s = extradim_start
+        if (present(starts) .and. present(counts)) then
+            call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt, starts, counts)
+        else
+             call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt)
+        endif
+
+        ! Read the data_in. skip the slowest varying indices if there are more than 6 dimensions (typically this will be time)
+        ! and good luck if you have more than 6 dimensions...
+        if (allocated(data_in)) deallocate(data_in)
+        allocate(data_in(dimcnt(1),dimcnt(2),dimcnt(3),dimcnt(4),dimcnt(5),dimcnt(6)))
+
+        call check(nf90_get_var(ncid, varid, data_in,&
+                                dimstart(1:size(dimcnt)), &               ! start  = 1 or extradim_start
+                                [ (dimcnt(i), i=1,size(dimcnt)) ],&    ! count=n or 1 created through an implied do loop
+                                [ (1,            i=1,size(dimcnt)) ]),&   ! for all dims, stride = 1     "  implied do loop
+                                trim(filename)//":"//trim(varname)) !pass file:var to check so it can give us more info
+
+        data_in = data_in * scale + offset
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+    end subroutine io_read6d
+    !>------------------------------------------------------------
+    !! Same as io_read6d but for 5-dimensional data
+    !!
+    !! Reads in a variable from a netcdf file, allocating memory in data_in for it.
+    !!
+    !! if extradim_start is provided specifies this index for any extra dimensions (dims>3)
+    !!   e.g. we may only want one time slice from a 3d variable
+    !!
+    !! @param   filename    Name of NetCDF file to look at
+    !! @param   varname     Name of the NetCDF variable to read
+    !! @param[out] data_in     Allocatable 3-dimensional array to store output
+    !! @param   extradim_start    OPTIONAL: specify the position to read for any extra (e.g. time) dimension
+    !! @retval data_in     Allocated 3-dimensional array with the netCDF data
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read5d(filename,varname,data_in,extradim_start,starts,counts)
+        implicit none
+        ! This is the name of the data_in file and variable we will read.
+        character(len=*), intent(in) :: filename, varname
+        real,intent(out),allocatable :: data_in(:,:,:,:,:)
+        integer, intent(in),optional :: extradim_start
+        integer, optional, intent(in)  :: starts(:), counts(:)
+        integer, allocatable  :: dimcnt(:) !will hold dimension lengths
+        integer, dimension(io_maxDims)  :: dimstart
+        ! This will be the netCDF ID for the file and data_in variable.
+        integer :: ncid, varid,i,edim_s
+        real :: scale, offset
+        integer :: nominal_dim = 5
+
+        edim_s = 1
+        if (present(extradim_start)) edim_s = extradim_start
+        if (present(starts) .and. present(counts)) then
+            call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt, starts, counts)
+        else
+             call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt)
+        endif
+
+        if (allocated(data_in)) deallocate(data_in)
+        allocate(data_in(dimcnt(1),dimcnt(2),dimcnt(3),dimcnt(4),dimcnt(5)))
+
+        call check(nf90_get_var(ncid, varid, data_in,&
+                                dimstart(1:size(dimcnt)), &               ! start  = 1 or extradim_start
+                                [ (dimcnt(i), i=1,size(dimcnt)) ],&    ! count=n or 1 created through an implied do loop
+                                [ (1,            i=1,size(dimcnt)) ]),&   ! for all dims, stride = 1     "  implied do loop
+                                trim(filename)//":"//trim(varname)) !pass file:var to check so it can give us more info
+
+        data_in = data_in * scale + offset
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+    end subroutine io_read5d
+    
+    
+    !>------------------------------------------------------------
+    !! Same as io_read6d but for 4-dimensional data
+    !!
+    !! Reads in a variable from a netcdf file, allocating memory in data_in for it.
+    !!
+    !! if extradim_start is provided specifies this index for any extra dimensions (dims>3)
+    !!   e.g. we may only want one time slice from a 3d variable
+    !!
+    !! @param   filename    Name of NetCDF file to look at
+    !! @param   varname     Name of the NetCDF variable to read
+    !! @param[out] data_in     Allocatable 3-dimensional array to store output
+    !! @param   extradim_start    OPTIONAL: specify the position to read for any extra (e.g. time) dimension
+    !! @retval data_in     Allocated 3-dimensional array with the netCDF data
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read4d(filename,varname,data_in,extradim_start,starts,counts)
+        implicit none
+        ! This is the name of the data_in file and variable we will read.
+        character(len=*), intent(in) :: filename, varname
+        real,intent(out),allocatable :: data_in(:,:,:,:)
+        integer, intent(in),optional :: extradim_start
+        integer, intent(in),optional :: starts(:), counts(:)
+        integer, allocatable  :: dimcnt(:) !will hold dimension lengths
+        integer, dimension(io_maxDims)  :: dimstart
+        ! This will be the netCDF ID for the file and data_in variable.
+        integer :: ncid, varid,i,edim_s
+        real :: scale, offset
+        integer :: nominal_dim = 4
+
+        edim_s = 1
+        if (present(extradim_start)) edim_s = extradim_start
+        if (present(starts) .and. present(counts)) then
+            call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt, starts, counts)
+        else
+             call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt)
+        endif
+
+        if (allocated(data_in)) deallocate(data_in)
+        allocate(data_in(dimcnt(1),dimcnt(2),dimcnt(3),dimcnt(4)))
+
+        call check(nf90_get_var(ncid, varid, data_in,&
+                                dimstart(1:size(dimcnt)), &               ! start  = 1 or extradim_start
+                                [ (dimcnt(i), i=1,size(dimcnt)) ],&    ! count=n or 1 created through an implied do loop
+                                [ (1,            i=1,size(dimcnt)) ]),&   ! for all dims, stride = 1     "  implied do loop
+                                trim(filename)//":"//trim(varname)) !pass file:var to check so it can give us more info
+
+        data_in = data_in * scale + offset
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+    end subroutine io_read4d
+
+    !>------------------------------------------------------------
+    !! Same as io_read6d but for 3-dimensional data
+    !!
+    !! Reads in a variable from a netcdf file, allocating memory in data_in for it.
+    !!
+    !! if extradim_start is provided specifies this index for any extra dimensions (dims>3)
+    !!   e.g. we may only want one time slice from a 3d variable
+    !!
+    !! @param   filename    Name of NetCDF file to look at
+    !! @param   varname     Name of the NetCDF variable to read
+    !! @param[out] data_in     Allocatable 3-dimensional array to store output
+    !! @param   extradim_start    OPTIONAL: specify the position to read for any extra (e.g. time) dimension
+    !! @retval data_in     Allocated 3-dimensional array with the netCDF data
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read3d(filename,varname,data_in,extradim_start,starts,counts)
+        implicit none
+        ! This is the name of the data_in file and variable we will read.
+        character(len=*), intent(in) :: filename, varname
+        real,intent(out),allocatable :: data_in(:,:,:)
+        integer, intent(in),optional :: extradim_start
+        integer, intent(in),optional :: starts(:), counts(:)
+        integer, allocatable  :: dimcnt(:) !will hold dimension lengths
+        integer, dimension(io_maxDims)  :: dimstart
+        ! This will be the netCDF ID for the file and data_in variable.
+        integer :: ncid, varid,i,edim_s
+        real :: scale, offset
+        integer :: nominal_dim = 3
+
+        edim_s = 1
+        if (present(extradim_start)) edim_s = extradim_start
+        if (present(starts) .and. present(counts)) then
+            call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt, starts, counts)
+        else
+             call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt)
+        endif
+
+        if (allocated(data_in)) deallocate(data_in)
+        allocate(data_in(dimcnt(1),dimcnt(2),dimcnt(3)))
+
+        call check(nf90_get_var(ncid, varid, data_in,&
+                                dimstart(1:size(dimcnt)), &               ! start  = 1 or extradim_start
+                                [ (dimcnt(i), i=1,size(dimcnt)) ],&    ! count=n or 1 created through an implied do loop
+                                [ (1,            i=1,size(dimcnt)) ]),&   ! for all dims, stride = 1     "  implied do loop
+                                trim(filename)//":"//trim(varname)) !pass file:var to check so it can give us more info
+
+        data_in = data_in * scale + offset
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+    end subroutine io_read3d
+
+    !>------------------------------------------------------------
+    !! Same as io_read3d but for 2-dimensional data
+    !!
+    !! Reads in a variable from a netcdf file, allocating memory in data_in for it.
+    !!
+    !! if extradim_start is provided specifies this index for any extra dimensions (dims>2)
+    !!   e.g. we may only want one time slice from a 2d variable
+    !!
+    !! @param   filename    Name of NetCDF file to look at
+    !! @param   varname     Name of the NetCDF variable to read
+    !! @param[out] data_in     Allocatable 2-dimensional array to store output
+    !! @param   extradim_start    OPTIONAL: specify the position to read for any extra (e.g. time) dimension
+    !! @retval data_in     Allocated 2-dimensional array with the netCDF data
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read2d(filename,varname,data_in,extradim_start,starts,counts)
+        implicit none
+        ! This is the name of the data_in file and variable we will read.
+        character(len=*), intent(in) :: filename, varname
+        real,intent(out),allocatable :: data_in(:,:)
+        integer, intent(in),optional :: extradim_start
+        integer, intent(in),optional :: starts(:), counts(:)
+        integer, allocatable  :: dimcnt(:) ! will hold dimension lengths
+        integer, dimension(io_maxDims)  :: dimstart
+        ! This will be the netCDF ID for the file and data_in variable.
+        integer :: ncid, varid,i,edim_s
+        real :: scale, offset
+        integer :: nominal_dim = 2
+
+        edim_s = 1
+        if (present(extradim_start)) edim_s = extradim_start
+        if (present(starts) .and. present(counts)) then
+            call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt, starts, counts)
+        else
+             call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt)
+        endif
+
+        if (allocated(data_in)) deallocate(data_in)
+        allocate(data_in(dimcnt(1),dimcnt(2)))
+
+        call check(nf90_get_var(ncid, varid, data_in,&
+                                dimstart(1:size(dimcnt)), &               ! start  = 1 or extradim_start
+                                [ (dimcnt(i), i=1,size(dimcnt)) ],&    ! count=n or 1 created through an implied do loop
+                                [ (1,            i=1,size(dimcnt)) ]),&   ! for all dims, stride = 1     "  implied do loop
+                                trim(filename)//":"//trim(varname)) !pass file:var to check so it can give us more info
+
+        data_in = data_in * scale + offset
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+    end subroutine io_read2d
+
+    subroutine io_read2dd(filename,varname,data_in,extradim_start,starts,counts)
+        implicit none
+        ! This is the name of the data_in file and variable we will read.
+        character(len=*), intent(in) :: filename, varname
+        double precision,intent(out),allocatable :: data_in(:,:)
+        integer, intent(in),optional :: extradim_start
+        integer, intent(in),optional :: starts(:), counts(:)
+        integer, allocatable  :: dimcnt(:) ! will hold dimension lengths
+        integer, dimension(io_maxDims)  :: dimstart
+        ! This will be the netCDF ID for the file and data_in variable.
+        integer :: ncid, varid,i,edim_s
+        real :: scale, offset
+        integer :: nominal_dim = 2
+
+        edim_s = 1
+        if (present(extradim_start)) edim_s = extradim_start
+        if (present(starts) .and. present(counts)) then
+            call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt, starts, counts)
+        else
+             call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt)
+        endif
+
+        if (allocated(data_in)) deallocate(data_in)
+        allocate(data_in(dimcnt(1),dimcnt(2)))
+
+        call check(nf90_get_var(ncid, varid, data_in,&
+                                dimstart(1:size(dimcnt)), &               ! start  = 1 or extradim_start
+                                [ (dimcnt(i), i=1,size(dimcnt)) ],&    ! count=n or 1 created through an implied do loop
+                                [ (1,            i=1,size(dimcnt)) ]),&   ! for all dims, stride = 1     "  implied do loop
+                                trim(filename)//":"//trim(varname)) !pass file:var to check so it can give us more info
+
+        data_in = data_in * scale + offset
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+    end subroutine io_read2dd
+
+
+    !>------------------------------------------------------------
+    !! Same as io_read2d but for integer data
+    !!
+    !! Reads in a variable from a netcdf file, allocating memory in data_in for it.
+    !!
+    !! if extradim_start is provided specifies this index for any extra dimensions (dims>2)
+    !!   e.g. we may only want one time slice from a 2d variable
+    !!
+    !! @param   filename    Name of NetCDF file to look at
+    !! @param   varname     Name of the NetCDF variable to read
+    !! @param[out] data_in     Allocatable 2-dimensional array to store output
+    !! @param   extradim_start    OPTIONAL: specify the position to read for any extra (e.g. time) dimension
+    !! @retval data_in     Allocated 2-dimensional array with the netCDF data
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read2di(filename,varname,data_in,extradim_start,starts,counts)
+        implicit none
+        ! This is the name of the data_in file and variable we will read.
+        character(len=*), intent(in) :: filename, varname
+        integer,intent(out),allocatable :: data_in(:,:)
+        integer, intent(in),optional :: extradim_start
+        integer, intent(in),optional :: starts(:), counts(:)
+        integer, allocatable  :: dimcnt(:) ! will hold dimension lengths
+        integer, dimension(io_maxDims)  :: dimstart
+        ! This will be the netCDF ID for the file and data_in variable.
+        integer :: ncid, varid,i,edim_s
+        real    :: scale, offset
+        integer :: nominal_dim = 2
+
+        edim_s = 1
+        if (present(extradim_start)) edim_s = extradim_start
+        if (present(starts) .and. present(counts)) then
+            call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt, starts, counts)
+        else
+             call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt)
+        endif
+
+        if (allocated(data_in)) deallocate(data_in)
+        allocate(data_in(dimcnt(1),dimcnt(2)))
+
+        call check(nf90_get_var(ncid, varid, data_in,&
+                                dimstart(1:size(dimcnt)), &               ! start  = 1 or extradim_start
+                                [ (dimcnt(i), i=1,size(dimcnt)) ],&    ! count=n or 1 created through an implied do loop
+                                [ (1,            i=1,size(dimcnt)) ]),&   ! for all dims, stride = 1     "  implied do loop
+                                trim(filename)//":"//trim(varname)) !pass file:var to check so it can give us more info
+
+        data_in = data_in * scale + offset
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+    end subroutine io_read2di
+
+    !>------------------------------------------------------------
+    !! Same as io_read3d but for 1-dimensional data
+    !!
+    !! Reads in a variable from a netcdf file, allocating memory in data_in for it.
+    !!
+    !! if extradim_start is provided specifies this index for any extra dimensions (dims>1)
+    !!   e.g. we may only want one time slice from a 1d variable
+    !!
+    !! @param   filename    Name of NetCDF file to look at
+    !! @param   varname     Name of the NetCDF variable to read
+    !! @param[out] data_in     Allocatable 1-dimensional array to store output
+    !! @param   extradim_start    OPTIONAL: specify the position to read for any extra (e.g. time) dimension
+    !! @retval data_in     Allocated 1-dimensional array with the netCDF data
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read1d(filename,varname,data_in,extradim_start,starts,counts)
+        implicit none
+        ! This is the name of the data_in file and variable we will read.
+        character(len=*), intent(in) :: filename, varname
+        real,intent(out),allocatable :: data_in(:)
+        integer, intent(in),optional :: extradim_start
+        integer, intent(in),optional :: starts(:), counts(:)
+        integer, allocatable  :: dimcnt(:) ! will hold dimension lengths
+        integer, dimension(io_maxDims)  :: dimstart
+        ! This will be the netCDF ID for the file and data_in variable.
+        integer :: ncid, varid,i,edim_s
+        real    :: scale, offset
+        integer :: nominal_dim = 1
+
+        edim_s = 1
+        if (present(extradim_start)) edim_s = extradim_start
+        if (present(starts) .and. present(counts)) then
+            call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt, starts, counts)
+        else
+             call setup_read(filename, varname, nominal_dim, edim_s, ncid, varid, scale, offset, dimstart, dimcnt)
+        endif
+
+        if (allocated(data_in)) deallocate(data_in)
+        allocate(data_in(dimcnt(1)))
+
+        call check(nf90_get_var(ncid, varid, data_in,&
+                                dimstart(1:size(dimcnt)), &               ! start  = 1 or extradim_start
+                                [ (dimcnt(i), i=1,size(dimcnt)) ],&    ! count=n or 1 created through an implied do loop
+                                [ (1,            i=1,size(dimcnt)) ]),&   ! for all dims, stride = 1     "  implied do loop
+                                trim(filename)//":"//trim(varname)) !pass file:var to check so it can give us more info
+
+        data_in = data_in * scale + offset
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+    end subroutine io_read1d
+
+!>------------------------------------------------------------
+    !! Same as io_read3d but for 0-dimensional data
+    !!
+    !! Reads in a variable from a netcdf file, allocating memory in data_in for it.
+    !!
+    !! if extradim_start is provided specifies this index for any extra dimensions (dims>1)
+    !!   e.g. we may only want one time slice from a 1d variable
+    !!
+    !! @param   filename    Name of NetCDF file to look at
+    !! @param   varname     Name of the NetCDF variable to read
+    !! @param[out] data_in     Allocatable 1-dimensional array to store output
+    !! @param   extradim_start    OPTIONAL: specify the position to read for any extra (e.g. time) dimension
+    !! @retval data_in     Allocated 1-dimensional array with the netCDF data
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read0d(filename,varname,data_in,extradim_start)
+        implicit none
+        ! This is the name of the data_in file and variable we will read.
+        character(len=*), intent(in) :: filename, varname
+        real,intent(out) :: data_in
+        integer, intent(in),optional :: extradim_start
+        integer, dimension(io_maxDims)  :: dimstart
+        ! This will be the netCDF ID for the file and data_in variable.
+        integer :: ncid, varid,i
+
+        if (present(extradim_start)) then
+            dimstart=extradim_start
+            dimstart(1)=1
+        else
+            dimstart=1
+        endif
+
+
+        ! Open the file. IOR(NF90_NOWRITE,NF90_NETCDF4) tells netCDF we want read-only access to
+        ! the file.
+        call check(nf90_open(trim(filename), IOR(NF90_NOWRITE,NF90_NETCDF4), ncid),trim(filename))
+        ! Get the varid of the data_in variable, based on its name.
+        call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
+
+        call check(nf90_get_var(ncid, varid, data_in),trim(filename)//":"//trim(varname))
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+    end subroutine io_read0d
+
+!>------------------------------------------------------------
+    !! Same as io_read3d but for 0-dimensional integer
+    !!
+    !! Reads in a variable from a netcdf file, allocating memory in data_in for it.
+    !!
+    !! if extradim_start is provided specifies this index for any extra dimensions (dims>1)
+    !!   e.g. we may only want one time slice from a 1d variable
+    !!
+    !! @param   filename    Name of NetCDF file to look at
+    !! @param   varname     Name of the NetCDF variable to read
+    !! @param[out] data_in     Allocatable 1-dimensional array to store output
+    !! @param   extradim_start    OPTIONAL: specify the position to read for any extra (e.g. time) dimension
+    !! @retval data_in     Allocated 1-dimensional array with the netCDF data
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read0di(filename,varname,data_in,extradim_start)
+        implicit none
+        ! This is the name of the data_in file and variable we will read.
+        character(len=*), intent(in) :: filename, varname
+        integer,intent(out) :: data_in
+        integer, intent(in),optional :: extradim_start
+        integer, dimension(io_maxDims)  :: dimstart
+        ! This will be the netCDF ID for the file and data_in variable.
+        integer :: ncid, varid,i
+
+        if (present(extradim_start)) then
+            dimstart=extradim_start
+            dimstart(1)=1
+        else
+            dimstart=1
+        endif
+
+
+        ! Open the file. IOR(NF90_NOWRITE,NF90_NETCDF4) tells netCDF we want read-only access to
+        ! the file.
+        call check(nf90_open(trim(filename), IOR(NF90_NOWRITE,NF90_NETCDF4), ncid),trim(filename))
+        ! Get the varid of the data_in variable, based on its name.
+        call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
+
+        call check(nf90_get_var(ncid, varid, data_in),trim(filename)//":"//trim(varname))
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+    end subroutine io_read0di
+
+    !>------------------------------------------------------------
+    !! Same as io_read1d but for real(real64) data
+    !!
+    !! Reads in a variable from a netcdf file, allocating memory in data_in for it.
+    !!
+    !! if extradim_start is provided specifies this index for any extra dimensions (dims>1)
+    !!   e.g. we may only want one time slice from a 1d variable
+    !!
+    !! @param   filename    Name of NetCDF file to look at
+    !! @param   varname     Name of the NetCDF variable to read
+    !! @param[out] data_in     Allocatable 1-dimensional array to store output
+    !! @param   extradim_start    OPTIONAL: specify the position to read for any extra (e.g. time) dimension
+    !! @param   curstep     OPTIONAL: specify the position to read for the primary dimension
+    !! @retval data_in     Allocated 1-dimensional array with the netCDF data
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read1dd(filename, varname, data_in, extradim_start, curstep)
+        implicit none
+        ! This is the name of the data_in file and variable we will read.
+        character(len=*), intent(in) :: filename, varname
+        real(real64),intent(out),allocatable :: data_in(:)
+        integer, intent(in),optional :: extradim_start
+        integer, intent(in),optional :: curstep
+        integer, allocatable  :: dimcnt(:) ! will hold dimension lengths
+        integer, dimension(io_maxDims)  :: dimstart
+        ! This will be the netCDF ID for the file and data_in variable.
+        integer :: ncid, varid,i
+
+        if (present(extradim_start)) then
+            dimstart=extradim_start
+            dimstart(1)=1
+        else
+            dimstart=1
+        endif
+
+        ! Read the dimension lengths
+        call io_getdims(filename,varname,dimcnt)
+
+        if (allocated(data_in)) deallocate(data_in)
+        if (present(curstep) .or. size(dimcnt)<1) then
+            allocate(data_in(1))
+        else
+            allocate(data_in(dimcnt(1)))
+        endif
+
+
+        ! Open the file. IOR(NF90_NOWRITE,NF90_NETCDF4) tells netCDF we want read-only access to
+        ! the file.
+        call check(nf90_open(trim(filename), IOR(NF90_NOWRITE,NF90_NETCDF4), ncid),trim(filename))
+        ! Get the varid of the data_in variable, based on its name.
+        call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
+
+        ! Read the data_in. skip the slowest varying indices if there are more than 1 dimensions (typically this will be time)
+        if (size(dimcnt)>1) then
+            dimcnt(2:size(dimcnt))=1 ! set count for extra dims to 1
+            call check(nf90_get_var(ncid, varid, data_in,&
+                                    dimstart(1:size(dimcnt)), &               ! start  = 1 or extradim_start
+                                    [ (dimcnt(i), i=1,size(dimcnt)) ],&    ! count=n or 1 created through an implied do loop
+                                    [ (1,            i=1,size(dimcnt)) ] ), & ! for all dims, stride = 1      " implied do loop
+                                    trim(filename)//":"//trim(varname)) !pass varname to check so it can give us more info
+        else
+            if (present(curstep)) then
+                call check(nf90_get_var(ncid, varid, data_in,   &
+                            [curstep], [1], [1] ),trim(filename)//":"//trim(varname))
+            else
+                call check(nf90_get_var(ncid, varid, data_in),trim(filename)//":"//trim(varname))
+            endif
+        endif
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+    end subroutine io_read1dd
+
+    !>------------------------------------------------------------
+    !! Read a real(real64) scalar
+    !!
+    !! Reads in a scalar variable from a netcdf file (primarily time).
+    !!
+    !! @param   filename    Name of NetCDF file to look at
+    !! @param   varname     Name of the NetCDF variable to read
+    !! @param[out] result   real(real64) scalar to store the data in
+    !! @param   step        specify the position to read from a 1D array
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read_scalar_d(filename, varname, result, step)
+        implicit none
+        ! This is the name of the data_in file and variable we will read.
+        character(len=*), intent(in)  :: filename, varname
+        real(real64), intent(out) :: result
+        integer,          intent(in)  :: step
+
+        real(real64), allocatable :: data_in(:)
+        ! This will be the netCDF ID for the file and data_in variable.
+        integer :: ncid, varid,i
+
+        ! Open the file. IOR(NF90_NOWRITE,NF90_NETCDF4) tells netCDF we want read-only access to
+        ! the file.
+        call check(nf90_open(trim(filename), IOR(NF90_NOWRITE,NF90_NETCDF4), ncid),trim(filename))
+
+        ! Get the varid of the data_in variable, based on its name.
+        call check(nf90_inq_varid(ncid, varname, varid),trim(filename)//":"//trim(varname))
+
+        ! Read the data_in. Just reads a scalar from the 1D array
+        call check(nf90_get_var(ncid, varid, data_in), &
+                    trim(filename)//":"//trim(varname))
+
+        result = data_in(step)
+        deallocate(data_in)
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid),filename)
+
+    end subroutine io_read_scalar_d
+
+
+    !>------------------------------------------------------------
+    !! Write a 6-dimensional variable to a netcdf file
+    !!
+    !! Create a netcdf file:filename with a variable:varname and write data_out to it
+    !!
+    !! @param   filename    Name of NetCDF file to write/create
+    !! @param   varname     Name of the NetCDF variable to write
+    !! @param   data_out    6-dimensional array to write to the file
+    !!
+    !!------------------------------------------------------------
+    subroutine io_write6d(filename,varname,data_out, dimnames)
+        implicit none
+        ! This is the name of the file and variable we will write.
+        character(len=*), intent(in) :: filename, varname
+        real,intent(in) :: data_out(:,:,:,:,:,:)
+        character(len=*), optional, dimension(6), intent(in) :: dimnames
+
+        ! We are writing 6D data, a nx, nz, ny, na, nb, nc grid.
+        integer :: nx,ny,nz, na,nb,nc
+        integer, parameter :: ndims = 6
+        ! This will be the netCDF ID for the file and data variable.
+        integer :: ncid, varid,temp_dimid,dimids(ndims)
+        character(len=kMAX_DIM_LENGTH), dimension(6) :: dims
+
+        if (present(dimnames)) then
+            dims = dimnames
+        else
+            dims = ["x","y","z","a","b","c"]
+        endif
+
+        nx=size(data_out,1)
+        nz=size(data_out,2)
+        ny=size(data_out,3)
+        na=size(data_out,4)
+        nb=size(data_out,5)
+        nc=size(data_out,6)
+
+        ! Open the file. NF90_CLOBBER tells netCDF we want overwrite existing files
+        call check( nf90_create(filename, NF90_CLOBBER, ncid), filename)
+        ! define the dimensions
+        call check( nf90_def_dim(ncid, dims(1), nx, temp_dimid) )
+        dimids(1)=temp_dimid
+        call check( nf90_def_dim(ncid, dims(2), nz, temp_dimid) )
+        dimids(2)=temp_dimid
+        call check( nf90_def_dim(ncid, dims(3), ny, temp_dimid) )
+        dimids(3)=temp_dimid
+        call check( nf90_def_dim(ncid, dims(4), na, temp_dimid) )
+        dimids(4)=temp_dimid
+        call check( nf90_def_dim(ncid, dims(5), nb, temp_dimid) )
+        dimids(5)=temp_dimid
+        call check( nf90_def_dim(ncid, dims(6), nc, temp_dimid) )
+        dimids(6)=temp_dimid
+
+        ! Create the variable returns varid of the data variable
+        call check( nf90_def_var(ncid, varname, NF90_REAL, dimids, varid), trim(filename)//":"//trim(varname))
+        ! End define mode. This tells netCDF we are done defining metadata.
+        call check( nf90_enddef(ncid) )
+
+        !write the actual data to the file
+        call check( nf90_put_var(ncid, varid, data_out), trim(filename)//":"//trim(varname))
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid), filename)
+    end subroutine io_write6d
+
+    !>------------------------------------------------------------
+    !! Same as io_write6d but for 5-dimensional data
+    !!
+    !! Write a 5-dimensional variable to a netcdf file
+    !!
+    !! Create a netcdf file:filename with a variable:varname and write data_out to it
+    !!
+    !! @param   filename    Name of NetCDF file to write/create
+    !! @param   varname     Name of the NetCDF variable to write
+    !! @param   data_out    5-dimensional array to write to the file
+    !!
+    !!------------------------------------------------------------
+    subroutine io_write5d(filename,varname,data_out, dimnames)
+        implicit none
+        ! This is the name of the file and variable we will write.
+        character(len=*), intent(in) :: filename, varname
+        real,intent(in) :: data_out(:,:,:,:,:)
+        character(len=*), optional, dimension(5), intent(in) :: dimnames
+
+        ! We are writing 5D data, a nx, nz, ny, na, nb, nc grid.
+        integer :: nx,ny,nz, na,nb
+        integer, parameter :: ndims = 5
+        ! This will be the netCDF ID for the file and data variable.
+        integer :: ncid, varid,temp_dimid,dimids(ndims)
+        character(len=kMAX_DIM_LENGTH), dimension(5) :: dims
+
+        if (present(dimnames)) then
+            dims = dimnames
+        else
+            dims = ["x","y","z","a","b"]
+        endif
+
+        nx=size(data_out,1)
+        nz=size(data_out,2)
+        ny=size(data_out,3)
+        na=size(data_out,4)
+        nb=size(data_out,5)
+
+        ! Open the file. NF90_CLOBBER tells netCDF we want overwrite existing files
+        call check( nf90_create(filename, NF90_CLOBBER, ncid), filename)
+        ! define the dimensions
+        call check( nf90_def_dim(ncid, dims(1), nx, temp_dimid) )
+        dimids(1)=temp_dimid
+        call check( nf90_def_dim(ncid, dims(2), nz, temp_dimid) )
+        dimids(2)=temp_dimid
+        call check( nf90_def_dim(ncid, dims(3), ny, temp_dimid) )
+        dimids(3)=temp_dimid
+        call check( nf90_def_dim(ncid, dims(4), na, temp_dimid) )
+        dimids(4)=temp_dimid
+        call check( nf90_def_dim(ncid, dims(5), nb, temp_dimid) )
+        dimids(5)=temp_dimid
+
+        ! Create the variable returns varid of the data variable
+        call check( nf90_def_var(ncid, varname, NF90_REAL, dimids, varid), trim(filename)//":"//trim(varname))
+        ! End define mode. This tells netCDF we are done defining metadata.
+        call check( nf90_enddef(ncid) )
+
+        !write the actual data to the file
+        call check( nf90_put_var(ncid, varid, data_out), trim(filename)//":"//trim(varname))
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid), filename)
+    end subroutine io_write5d
+
+
+    !>------------------------------------------------------------
+    !! Same as io_write6d but for 4-dimensional data
+    !!
+    !! Write a 4-dimensional variable to a netcdf file
+    !!
+    !! Create a netcdf file:filename with a variable:varname and write data_out to it
+    !!
+    !! @param   filename    Name of NetCDF file to write/create
+    !! @param   varname     Name of the NetCDF variable to write
+    !! @param   data_out    4-dimensional array to write to the file
+    !!
+    !!------------------------------------------------------------
+    subroutine io_write4d(filename,varname,data_out)
+        implicit none
+        ! This is the name of the file and variable we will write.
+        character(len=*), intent(in) :: filename, varname
+        real,intent(in) :: data_out(:,:,:,:)
+
+        ! We are writing 4D data, assume a nx x nz x ny x nr grid.
+        integer :: nx,ny,nz,nr
+        integer, parameter :: ndims = 4
+        ! This will be the netCDF ID for the file and data variable.
+        integer :: ncid, varid,temp_dimid,dimids(ndims)
+
+        nx=size(data_out,1)
+        nz=size(data_out,2)
+        ny=size(data_out,3)
+        nr=size(data_out,4)
+
+        ! Open the file. IOR(NF90_NOWRITE,NF90_NETCDF4) tells netCDF we want read-only access to
+        ! the file.
+        call check( nf90_create(filename, NF90_CLOBBER, ncid), filename)
+        ! define the dimensions
+        call check( nf90_def_dim(ncid, "x", nx, temp_dimid) )
+        dimids(1)=temp_dimid
+        call check( nf90_def_dim(ncid, "z", nz, temp_dimid) )
+        dimids(2)=temp_dimid
+        call check( nf90_def_dim(ncid, "y", ny, temp_dimid) )
+        dimids(3)=temp_dimid
+        call check( nf90_def_dim(ncid, "r", nr, temp_dimid) )
+        dimids(4)=temp_dimid
+
+        ! Create the variable returns varid of the data variable
+        call check( nf90_def_var(ncid, varname, NF90_REAL, dimids, varid), trim(filename)//":"//trim(varname))
+        ! End define mode. This tells netCDF we are done defining metadata.
+        call check( nf90_enddef(ncid) )
+
+        ! write the actual data to the file
+        call check( nf90_put_var(ncid, varid, data_out), trim(filename)//":"//trim(varname))
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid), filename)
+    end subroutine io_write4d
+
+    !>------------------------------------------------------------
+    !! Same as io_write4d but for integer data
+    !!
+    !! Write a 4-dimensional variable to a netcdf file
+    !!
+    !! Create a netcdf file:filename with a variable:varname and write data_out to it
+    !!
+    !! @param   filename    Name of NetCDF file to write/create
+    !! @param   varname     Name of the NetCDF variable to write
+    !! @param   data_out    4-dimensional array to write to the file
+    !!
+    !!------------------------------------------------------------
+    subroutine io_write4di(filename,varname,data_out)
+        implicit none
+        ! This is the name of the file and variable we will write.
+        character(len=*), intent(in) :: filename, varname
+        integer,intent(in) :: data_out(:,:,:,:)
+
+        ! We are writing 4D data, assume a nx x nz x ny x nr grid.
+        integer :: nx,ny,nz,nr
+        integer, parameter :: ndims = 4
+        ! This will be the netCDF ID for the file and data variable.
+        integer :: ncid, varid,temp_dimid,dimids(ndims)
+
+        nx=size(data_out,1)
+        nz=size(data_out,2)
+        ny=size(data_out,3)
+        nr=size(data_out,4)
+
+        ! Open the file. IOR(NF90_NOWRITE,NF90_NETCDF4) tells netCDF we want read-only access to
+        ! the file.
+        call check( nf90_create(filename, NF90_CLOBBER, ncid), filename)
+        ! define the dimensions
+        call check( nf90_def_dim(ncid, "x", nx, temp_dimid) )
+        dimids(1)=temp_dimid
+        call check( nf90_def_dim(ncid, "z", nz, temp_dimid) )
+        dimids(2)=temp_dimid
+        call check( nf90_def_dim(ncid, "y", ny, temp_dimid) )
+        dimids(3)=temp_dimid
+        call check( nf90_def_dim(ncid, "r", nr, temp_dimid) )
+        dimids(4)=temp_dimid
+
+        ! Create the variable returns varid of the data variable
+        call check( nf90_def_var(ncid, varname, NF90_INT, dimids, varid), trim(filename)//":"//trim(varname))
+        ! End define mode. This tells netCDF we are done defining metadata.
+        call check( nf90_enddef(ncid) )
+
+        ! write the actual data to the file
+        call check( nf90_put_var(ncid, varid, data_out), trim(filename)//":"//trim(varname))
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid), filename)
+    end subroutine io_write4di
+
+
+    !>------------------------------------------------------------
+    !! Same as io_write6d but for 3-dimensional data
+    !!
+    !! Write a 3-dimensional variable to a netcdf file
+    !!
+    !! Create a netcdf file:filename with a variable:varname and write data_out to it
+    !!
+    !! @param   filename    Name of NetCDF file to write/create
+    !! @param   varname     Name of the NetCDF variable to write
+    !! @param   data_out    3-dimensional array to write to the file
+    !!
+    !!------------------------------------------------------------
+    subroutine io_write3d(filename,varname,data_out)
+        implicit none
+        ! This is the name of the file and variable we will write.
+        character(len=*), intent(in) :: filename, varname
+        real,intent(in) :: data_out(:,:,:)
+
+        ! We are reading 2D data, a nx x ny grid.
+        integer :: nx,ny,nz
+        integer, parameter :: ndims = 3
+        ! This will be the netCDF ID for the file and data variable.
+        integer :: ncid, varid,temp_dimid,dimids(ndims)
+
+        nx=size(data_out,1)
+        nz=size(data_out,2)
+        ny=size(data_out,3)
+
+        ! Open the file. IOR(NF90_NOWRITE,NF90_NETCDF4) tells netCDF we want read-only access to
+        ! the file.
+        call check( nf90_create(filename, NF90_CLOBBER, ncid), filename)
+        ! define the dimensions
+        call check( nf90_def_dim(ncid, "x", nx, temp_dimid) )
+        dimids(1)=temp_dimid
+        call check( nf90_def_dim(ncid, "z", nz, temp_dimid) )
+        dimids(2)=temp_dimid
+        call check( nf90_def_dim(ncid, "y", ny, temp_dimid) )
+        dimids(3)=temp_dimid
+
+        ! Create the variable returns varid of the data variable
+        call check( nf90_def_var(ncid, varname, NF90_REAL, dimids, varid), trim(filename)//":"//trim(varname))
+        ! End define mode. This tells netCDF we are done defining metadata.
+        call check( nf90_enddef(ncid) )
+
+        ! write the actual data to the file
+        call check( nf90_put_var(ncid, varid, data_out), trim(filename)//":"//trim(varname))
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid), filename)
+    end subroutine io_write3d
+
+    !>------------------------------------------------------------
+    !! Same as io_write3d but for integer arrays
+    !!
+    !! Write a 3-dimensional variable to a netcdf file
+    !!
+    !! Create a netcdf file:filename with a variable:varname and write data_out to it
+    !!
+    !! @param   filename    Name of NetCDF file to write/create
+    !! @param   varname     Name of the NetCDF variable to write
+    !! @param   data_out    3-dimensional array to write to the file
+    !!
+    !!------------------------------------------------------------
+    subroutine io_write3di(filename,varname,data_out)
+        implicit none
+        ! This is the name of the data file and variable we will read.
+        character(len=*), intent(in) :: filename, varname
+        integer,intent(in) :: data_out(:,:,:)
+
+        ! We are reading 2D data, a nx x ny grid.
+        integer :: nx,ny,nz
+        integer, parameter :: ndims = 3
+        ! This will be the netCDF ID for the file and data variable.
+        integer :: ncid, varid,temp_dimid,dimids(ndims)
+
+        nx=size(data_out,1)
+        nz=size(data_out,2)
+        ny=size(data_out,3)
+
+        ! Open the file. IOR(NF90_NOWRITE,NF90_NETCDF4) tells netCDF we want read-only access to
+        ! the file.
+        call check( nf90_create(filename, NF90_CLOBBER, ncid) )
+        ! define the dimensions
+        call check( nf90_def_dim(ncid, "x", nx, temp_dimid) )
+        dimids(1)=temp_dimid
+        call check( nf90_def_dim(ncid, "z", nz, temp_dimid) )
+        dimids(2)=temp_dimid
+        call check( nf90_def_dim(ncid, "y", ny, temp_dimid) )
+        dimids(3)=temp_dimid
+
+        ! Create the variable returns varid of the data variable
+        call check( nf90_def_var(ncid, varname, NF90_INT, dimids, varid), trim(filename)//":"//trim(varname) )
+        ! End define mode. This tells netCDF we are done defining metadata.
+        call check( nf90_enddef(ncid) )
+
+        call check( nf90_put_var(ncid, varid, data_out),trim(filename)//":"//trim(varname) )
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid) )
+    end subroutine io_write3di
+
+    !>------------------------------------------------------------
+    !! Same as io_write3d but for 2-dimensional arrays
+    !!
+    !! Write a 2-dimensional variable to a netcdf file
+    !!
+    !! Create a netcdf file:filename with a variable:varname and write data_out to it
+    !!
+    !! @param   filename    Name of NetCDF file to write/create
+    !! @param   varname     Name of the NetCDF variable to write
+    !! @param   data_out    2-dimensional array to write to the file
+    !!
+    !!------------------------------------------------------------
+    subroutine io_write2d(filename,varname,data_out)
+        implicit none
+        ! This is the name of the data file and variable we will read.
+        character(len=*), intent(in) :: filename, varname
+        real,intent(in) :: data_out(:,:)
+
+        ! We are reading 2D data, a nx x ny grid.
+        integer :: nx,ny
+        integer, parameter :: ndims = 2
+        ! This will be the netCDF ID for the file and data variable.
+        integer :: ncid, varid,temp_dimid,dimids(ndims)
+
+        nx=size(data_out,1)
+        ny=size(data_out,2)
+
+        ! Open the file. IOR(NF90_NOWRITE,NF90_NETCDF4) tells netCDF we want read-only access to
+        ! the file.
+        call check( nf90_create(filename, NF90_CLOBBER, ncid) )
+        ! define the dimensions
+        call check( nf90_def_dim(ncid, "x", nx, temp_dimid) )
+        dimids(1)=temp_dimid
+        call check( nf90_def_dim(ncid, "y", ny, temp_dimid) )
+        dimids(2)=temp_dimid
+
+        ! Create the variable returns varid of the data variable
+        call check( nf90_def_var(ncid, varname, NF90_REAL, dimids, varid), trim(filename)//":"//trim(varname))
+        ! End define mode. This tells netCDF we are done defining metadata.
+        call check( nf90_enddef(ncid) )
+
+        call check( nf90_put_var(ncid, varid, data_out), trim(filename)//":"//trim(varname))
+
+        ! Close the file, freeing all resources.
+        call check( nf90_close(ncid) )
+    end subroutine io_write2d
+
+    !>------------------------------------------------------------
+    !! Read a real type attribute from a named file from an optional variable
+    !!
+    !! If a variable name is given reads the named attribute of that variable
+    !! otherwise the named attribute is assumed to be a global attribute
+    !!
+    !! @param   filename    netcdf file to read the attribute from
+    !! @param   att_name    name of attribute to read
+    !! @param   att_value   output value to be returned (real*4)
+    !! @param   var_name    OPTIONAL name of variable to read attribute from
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read_attribute_r(filename, att_name, att_value, var_name, error)
+        implicit none
+        character(len=*), intent(in)  :: filename
+        character(len=*), intent(in)  :: att_name
+        real*4,           intent(out) :: att_value
+        character(len=*), intent(in), optional :: var_name
+        integer,          intent(out),optional :: error
+
+        integer :: internal_error
+        integer :: ncid, varid
+
+        ! open the netcdf file
+        call check(nf90_open(trim(filename), IOR(NF90_NOWRITE,NF90_NETCDF4), ncid),trim(filename))
+
+        ! If a variable name was specified, get the varid of the variable
+        ! else search for a global attribute
+        if (present(var_name)) then
+            call check(nf90_inq_varid(ncid, var_name, varid),var_name)
+        else
+            varid=NF90_GLOBAL
+        endif
+
+        ! Finally get the attribute data
+        internal_error = nf90_get_att(ncid, varid, att_name, att_value)
+        if (present(error)) then
+            error = internal_error
+        else
+            call check(internal_error, att_name)
+        endif
+
+        call check( nf90_close(ncid), "closing:"//trim(filename))
+    end subroutine  io_read_attribute_r
+
+    !>------------------------------------------------------------
+    !! Read a integer type attribute from a named file from an optional variable
+    !!
+    !! If a variable name is given reads the named attribute of that variable
+    !! otherwise the named attribute is assumed to be a global attribute
+    !!
+    !! @param   filename    netcdf file to read the attribute from
+    !! @param   att_name    name of attribute to read
+    !! @param   att_value   output value to be returned (integer)
+    !! @param   var_name    OPTIONAL name of variable to read attribute from
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read_attribute_i(filename, att_name, att_value, var_name, error)
+        implicit none
+        character(len=*), intent(in) :: filename
+        character(len=*), intent(in) :: att_name
+        integer,          intent(out):: att_value
+        character(len=*), intent(in), optional :: var_name
+        integer,          intent(out),optional :: error
+
+        integer :: internal_error
+        integer :: ncid, varid
+
+        ! open the netcdf file
+        call check(nf90_open(trim(filename), IOR(NF90_NOWRITE,NF90_NETCDF4), ncid),trim(filename))
+
+        ! If a variable name was specified, get the varid of the variable
+        ! else search for a global attribute
+        if (present(var_name)) then
+            call check(nf90_inq_varid(ncid, var_name, varid),var_name)
+        else
+            varid=NF90_GLOBAL
+        endif
+
+        ! Finally get the attribute data
+        internal_error = nf90_get_att(ncid, varid, att_name, att_value)
+        if (present(error)) then
+            error = internal_error
+        else
+            call check(internal_error, att_name)
+        endif
+
+        call check( nf90_close(ncid), "closing:"//trim(filename))
+    end subroutine  io_read_attribute_i
+
+    !>------------------------------------------------------------
+    !! Read a character type attribute from a named file from an optional variable
+    !!
+    !! If a variable name is given reads the named attribute of that variable
+    !! otherwise the named attribute is assumed to be a global attribute
+    !!
+    !! @param   filename    netcdf file to read the attribute from
+    !! @param   att_name    name of attribute to read
+    !! @param   att_value   output value to be returned (character)
+    !! @param   var_name    OPTIONAL name of variable to read attribute from
+    !!
+    !!------------------------------------------------------------
+    subroutine io_read_attribute_c(filename, att_name, att_value, var_name, error)
+        implicit none
+        character(len=*), intent(in) :: filename
+        character(len=*), intent(in) :: att_name
+        character(len=*), intent(out) :: att_value
+        character(len=*), intent(in), optional :: var_name
+        integer,          intent(out),optional :: error
+
+        integer :: internal_error
+        integer :: ncid, varid
+
+        ! open the netcdf file
+        call check(nf90_open(trim(filename), IOR(NF90_NOWRITE,NF90_NETCDF4), ncid),trim(filename))
+
+        ! If a variable name was specified, get the varid of the variable
+        ! else search for a global attribute
+        if (present(var_name)) then
+            call check(nf90_inq_varid(ncid, var_name, varid),var_name)
+        else
+            varid=NF90_GLOBAL
+        endif
+
+        ! Finally get the attribute data
+        internal_error = nf90_get_att(ncid, varid, att_name, att_value)
+        if (present(error)) then
+            error = internal_error
+        else
+            call check(internal_error, att_name)
+        endif
+
+        call check( nf90_close(ncid), "closing:"//trim(filename))
+    end subroutine  io_read_attribute_c
+
+
+    !>------------------------------------------------------------
+    !! Write a real type attribute to a named file for an optional variable
+    !!
+    !! If a variable name is given writes the named attribute to that variable
+    !! otherwise the named attribute is assumed to be a global attribute
+    !!
+    !! @param   filename    netcdf file to write the attribute to
+    !! @param   att_name    name of attribute to write
+    !! @param   att_value   output value to be written (real*4)
+    !! @param   var_name    OPTIONAL name of variable to write attribute to
+    !!
+    !!------------------------------------------------------------
+    subroutine io_add_attribute_r(filename, att_name, att_value, varname)
+        implicit none
+        character(len=*), intent(in)           :: filename
+        character(len=*), intent(in)           :: att_name
+        real*4,           intent(in)           :: att_value
+        character(len=*), intent(in), optional :: varname
+
+        integer :: ncid
+        integer :: varid
+
+        ! open the netcdf file to add the attribute to
+        call check (nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), ncid), "opening:"//trim(filename))
+        call check( nf90_redef(ncid) )
+
+        ! if given a variable name find that variable ID to write the attribute to
+        ! else the attribute will be global
+        if (present(varname)) then
+            call check( nf90_inq_varid(ncid, varname, varid))
+        else
+            varid = NF90_GLOBAL
+        endif
+
+        ! write the attribute to the file
+        call check( nf90_put_att(ncid, varid, att_name, att_value), "writing attribute:"//trim(att_name)//" to:"//trim(filename))
+
+        call check( nf90_close(ncid), "closing:"//trim(filename))
+    end subroutine io_add_attribute_r
+
+
+    !>------------------------------------------------------------
+    !! Write an integer type attribute to a named file for an optional variable
+    !!
+    !! If a variable name is given writes the named attribute to that variable
+    !! otherwise the named attribute is assumed to be a global attribute
+    !!
+    !! @param   filename    netcdf file to write the attribute to
+    !! @param   att_name    name of attribute to write
+    !! @param   att_value   output value to be written (integer)
+    !! @param   var_name    OPTIONAL name of variable to write attribute to
+    !!
+    !!------------------------------------------------------------
+    subroutine io_add_attribute_i(filename, att_name, att_value, varname)
+        implicit none
+        character(len=*), intent(in)           :: filename
+        character(len=*), intent(in)           :: att_name
+        integer,          intent(in)           :: att_value
+        character(len=*), intent(in), optional :: varname
+
+        integer :: ncid
+        integer :: varid
+
+        ! open the netcdf file to add the attribute to
+        call check (nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), ncid), "opening:"//trim(filename))
+        call check( nf90_redef(ncid) )
+
+        ! if given a variable name find that variable ID to write the attribute to
+        ! else the attribute will be global
+        if (present(varname)) then
+            call check( nf90_inq_varid(ncid, varname, varid))
+        else
+            varid = NF90_GLOBAL
+        endif
+
+        ! write the attribute to the file
+        call check( nf90_put_att(ncid, varid, att_name, att_value), "writing attribute:"//trim(att_name)//" to:"//trim(filename))
+
+        call check( nf90_close(ncid), "closing:"//trim(filename))
+    end subroutine io_add_attribute_i
+
+
+    !>------------------------------------------------------------
+    !! Write an character type attribute to a named file for an optional variable
+    !!
+    !! If a variable name is given writes the named attribute to that variable
+    !! otherwise the named attribute is assumed to be a global attribute
+    !!
+    !! @param   filename    netcdf file to write the attribute to
+    !! @param   att_name    name of attribute to write
+    !! @param   att_value   output value to be written (character)
+    !! @param   var_name    OPTIONAL name of variable to write attribute to
+    !!
+    !!------------------------------------------------------------
+    subroutine io_add_attribute_c(filename, att_name, att_value, varname)
+        implicit none
+        character(len=*), intent(in)           :: filename
+        character(len=*), intent(in)           :: att_name
+        character(len=*), intent(in)           :: att_value
+        character(len=*), intent(in), optional :: varname
+
+        integer :: ncid
+        integer :: varid
+
+        ! open the netcdf file to add the attribute to
+        call check (nf90_open(filename, IOR(NF90_WRITE,NF90_NETCDF4), ncid), "opening:"//trim(filename))
+        call check( nf90_redef(ncid) )
+
+        ! if given a variable name find that variable ID to write the attribute to
+        ! else the attribute will be global
+        if (present(varname)) then
+            call check( nf90_inq_varid(ncid, varname, varid))
+        else
+            varid = NF90_GLOBAL
+        endif
+
+        ! write the attribute to the file
+        call check( nf90_put_att(ncid, varid, att_name, att_value), "writing attribute:"//trim(att_name)//" to:"//trim(filename))
+
+        call check( nf90_close(ncid), "closing:"//trim(filename))
+    end subroutine io_add_attribute_c
+
+
+    !>------------------------------------------------------------
+    !! Simple error handling for common netcdf file errors
+    !!
+    !! If status does not equal nf90_noerr, then print an error message and STOP
+    !! the entire program.
+    !!
+    !! @param   status  integer return code from nc_* routines
+    !! @param   extra   OPTIONAL string with extra context to print in case of an error
+    !!
+    !!------------------------------------------------------------
+    subroutine check(status,extra)
+        implicit none
+        integer, intent ( in) :: status
+        character(len=*), optional, intent(in) :: extra
+
+        ! check for errors
+        if(status /= nf90_noerr) then
+            ! print a useful message
+            !$omp critical (print_lock)
+            write(*,*) trim(nf90_strerror(status))
+            if(present(extra)) then
+                ! print any optionally provided context
+                write(*,*) trim(extra)
+            endif
+            ! STOP the program execution
+            stop "Stopped"
+            !$omp end critical (print_lock)
+        end if
+    end subroutine check
+
+    !>------------------------------------------------------------
+    !! Find an available file unit number.
+    !!
+    !! LUN_MIN and LUN_MAX define the range of possible LUNs to check.
+    !! The UNIT value is returned by the function, and also by the optional
+    !! argument. This allows the function to be used directly in an OPEN
+    !! statement, and optionally save the result in a local variable.
+    !! If no units are available, -1 is returned.
+    !! Newer versions of fortran can do this automatically, but this keeps one thing
+    !! a little more backwards compatible
+    !!
+    !! @param[out]  unit    OPTIONAL integer to store the file logical unit number
+    !! @retval      integer a file logical unit number
+    !!
+    !!------------------------------------------------------------
+    integer function io_newunit(unit)
+        implicit none
+        integer, intent(out), optional :: unit
+        ! local
+        integer, parameter :: LUN_MIN=10, LUN_MAX=1000
+        logical :: opened
+        integer :: lun
+
+        io_newunit=-1
+        ! loop over all possible units until a non-open unit is found, then exit
+        ! this should be re-written as a while loop instead of a do loop with an exit
+        ! but it ain't broke so...
+        do lun=LUN_MIN,LUN_MAX
+            inquire(unit=lun,opened=opened)
+            if (.not. opened) then
+                io_newunit=lun
+                exit
+            end if
+        end do
+        if (present(unit)) unit=io_newunit
+    end function io_newunit
+    
+end module io_routines

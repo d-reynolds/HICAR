@@ -1,0 +1,158 @@
+# ---------------------------------------------------------------------------
+# C++ SNOWPACK  vs  native-Fortran SNOWPACK  comparison tolerances
+# ---------------------------------------------------------------------------
+# Used by tests/compare_outputs.py --tolerance-spec for the snow-driver
+# comparison test (tests/snowpack/test_snowpack_compare.sh). Both runs use the SAME
+# gfortran toolchain/flags on the SAME domain and forcing; the ONLY difference is
+# the snow driver (C++ Alpine3D/SNOWPACK bindings vs the native-Fortran port).
+#
+# A value passes when:   |candidate - baseline| <= atol + rtol * |baseline|
+# and a variable passes when at most `frac` of its finite values violate that
+# (frac defaults to 0 = strict). NaN/Inf introduced by the candidate ALWAYS
+# fails regardless of these numbers.
+#
+# CALIBRATION (2026-06-12, after the parity-fix campaign of 2026-06-11):
+# with the settling deadband, wind floor, wind-pumping iteration behavior,
+# seed orientation and lw_net precision aligned, the two builds track each
+# other to ~1e-7 per substep deterministically. What remains on a 3 h
+# Gaudergrat midday run is two-sided FP-seeded scatter with HEAVY TAILS:
+# the bulk of every field agrees to its p99.9 listed below, while a few
+# 1e-4..1e-3 of cells sit near regime thresholds (melt onset, hoar formation,
+# cloud/PBL switches) and flip discretely between the builds, producing rare
+# large single-cell excursions (e.g. one cell flipping melt state moves hfls
+# by tens of W/m2). Tolerances are therefore set as:
+#       atol ~ 3-5x the measured p99.9 |diff|   +   frac = 2e-3
+# (observed outlier populations are 2-7e-4, so frac has ~3x headroom; a real
+# regression — every bug found this week hit 30-100% of cells — blows through
+# frac=2e-3 by orders of magnitude). Fields not listed keep the strict
+# default: they matched at rtol=1e-5/atol=1e-6 when calibrated.
+#
+# If a NEW field starts failing here, do not loosen it blindly: run
+# tests/snowpack/snowpack_divergence_report.sh to check for upstream SNOWPACK drift
+# first (see docs/ci_cd_pipeline.md section 3.4).
+# ---------------------------------------------------------------------------
+
+defaults:
+  rtol: 1.0e-5
+  atol: 1.0e-6
+  frac: 0.0
+
+variables:
+  # --- Atmospheric state (identical code; scatter enters via snow-surface ---
+  # --- feedback and compounds through microphysics/PBL thresholds) ----------
+  pressure:              {rtol: 0.0, atol: 5.0}       # Pa    (max 3.0)
+  pressure_i:            {rtol: 0.0, atol: 5.0}       # Pa
+  exner:                 {rtol: 0.0, atol: 5.0e-5}    # -     (max 1.2e-5)
+  temperature:           {rtol: 0.0, atol: 0.2,    frac: 2.0e-3}  # K  p99.9=0.07
+  temperature_i:         {rtol: 0.0, atol: 0.2,    frac: 2.0e-3}  # K
+  potential_temperature: {rtol: 0.0, atol: 0.2,    frac: 2.0e-3}  # K
+  qv:                    {rtol: 0.0, atol: 1.0e-5, frac: 2.0e-3}  # kg/kg p99.9=2.4e-6
+  qc:                    {rtol: 0.0, atol: 1.0e-6, frac: 2.0e-3}  # kg/kg cloud thresholds
+  qi:                    {rtol: 0.0, atol: 5.0e-8, frac: 2.0e-3}  # kg/kg
+  qr:                    {rtol: 0.0, atol: 1.0e-10, frac: 2.0e-3} # kg/kg
+  qs:                    {rtol: 0.0, atol: 5.0e-8, frac: 2.0e-3}  # kg/kg
+  ni:                    {rtol: 0.0, atol: 1.0e+2, frac: 2.0e-3}  # /kg  p99.9=19
+  nr:                    {rtol: 0.0, atol: 0.5,    frac: 2.0e-3}  # /kg
+  ns:                    {rtol: 0.0, atol: 1.0e+1, frac: 2.0e-3}  # /kg
+  ng:                    {rtol: 0.0, atol: 0.5,    frac: 2.0e-3}  # /kg
+  cldfrac:               {rtol: 0.0, atol: 1.0e-2, frac: 2.0e-3}  # -    p99.9=2.5e-3
+  u:                     {rtol: 0.0, atol: 2.0e-3, frac: 2.0e-3}  # m/s  p99.9=2e-4
+  v:                     {rtol: 0.0, atol: 2.0e-3, frac: 2.0e-3}  # m/s
+  u_mass:                {rtol: 0.0, atol: 2.0e-3, frac: 2.0e-3}  # m/s
+  v_mass:                {rtol: 0.0, atol: 2.0e-3, frac: 2.0e-3}  # m/s
+  w:                     {rtol: 0.0, atol: 3.0e-2, frac: 2.0e-3}  # m/s  p99.9=5e-3
+  w_grid:                {rtol: 0.0, atol: 3.0e-2, frac: 2.0e-3}  # m/s
+  u10m:                  {rtol: 0.0, atol: 5.0e-3, frac: 2.0e-3}  # m/s
+  v10m:                  {rtol: 0.0, atol: 5.0e-3, frac: 2.0e-3}  # m/s
+  hus2m:                 {rtol: 0.0, atol: 3.0e-5, frac: 2.0e-3}  # kg/kg
+  precipitation:         {rtol: 0.0, atol: 1.0e-4, frac: 2.0e-3}  # mm (accumulates)
+  snowfall:              {rtol: 0.0, atol: 2.0e-6, frac: 2.0e-3}  # mm
+  lsm_last_precip:       {rtol: 0.0, atol: 1.0e-4, frac: 2.0e-3}  # mm
+  lsm_last_snow:         {rtol: 0.0, atol: 2.0e-6, frac: 2.0e-3}  # mm
+
+  # --- PBL diagnostics: level-quantized, flip discretely on mK seeds --------
+  # (widest legitimate tails of any field: 0.2-0.3% of cells jump levels even
+  # at generous thresholds; still catches any systematic PBL regression)
+  hpbl:   {rtol: 0.0, atol: 1.0e+2, frac: 5.0e-3}   # m      frac(>100)=2.4e-3 obs
+  kpbl:   {rtol: 0.0, atol: 1.5,    frac: 6.0e-3}   # level  frac(>1.5)=3.1e-3 obs
+  mol:    {rtol: 0.0, atol: 5.0e-2, frac: 2.0e-3}   # m (Obukhov)
+  sfc_Ri: {rtol: 0.0, atol: 0.3,    frac: 2.0e-3}   # -
+  blk_ri: {rtol: 0.0, atol: 6.5e+1, frac: 2.0e-3}   # - bulk Ri: whole-field wind-shear
+                                                    #   scatter (43% of cells differ at the
+                                                    #   default tol), max |Δ|~60 (9%) at Ri~660
+  psih:   {rtol: 0.0, atol: 0.5,    frac: 2.0e-3}   # -
+  fh:     {rtol: 0.0, atol: 0.5,    frac: 2.0e-3}   # -
+  fm:     {rtol: 0.0, atol: 0.5,    frac: 2.0e-3}   # -
+
+  # --- Radiation (cloud-feedback scatter; terrain SW unchanged code) --------
+  rsds:          {rtol: 0.0, atol: 5.0,    frac: 2.0e-3}   # W/m2 p99.9=1.2
+  rlus:          {rtol: 0.0, atol: 2.0,    frac: 2.0e-3}   # W/m2
+  swtb:          {rtol: 0.0, atol: 8.0,    frac: 2.0e-3}   # W/m2
+  swtd:          {rtol: 0.0, atol: 8.0,    frac: 2.0e-3}   # W/m2
+  swtr:          {rtol: 0.0, atol: 0.2,    frac: 2.0e-3}   # W/m2
+  lwtr:          {rtol: 0.0, atol: 2.0,    frac: 2.0e-3}   # W/m2
+  lwcf:          {rtol: 0.0, atol: 1.0,    frac: 2.0e-3}   # W/m2
+  swcf:          {rtol: 0.0, atol: 0.3,    frac: 2.0e-3}   # W/m2
+  tend_th_lwrad: {rtol: 0.0, atol: 1.0e-5, frac: 2.0e-3}   # K/s
+  tend_th_swrad: {rtol: 0.0, atol: 5.0e-7, frac: 2.0e-3}   # K/s
+
+  # --- Surface energy balance (couples snow <-> atmosphere) -----------------
+  # snow_basal_heat_flux: the C++ qg0 is the last-substep value while the port
+  # time-averages over substeps, so allow ~0.1 W/m2 / 1%.
+  snow_basal_heat_flux: {rtol: 1.0e-2, atol: 1.0e-1}
+  tsfe:   {rtol: 0.0, atol: 0.3,    frac: 2.0e-3}   # K    p99.9=0.12; melt-flip max 1.3
+  hfss:   {rtol: 0.0, atol: 3.0,    frac: 2.0e-3}   # W/m2 p99.9=1.5; melt-flip max 8
+  hfls:   {rtol: 0.0, atol: 3.0,    frac: 2.0e-3}   # W/m2 p99.9=1.6; melt-flip max 15
+  hfgs:   {rtol: 0.0, atol: 6.0,    frac: 2.0e-3}   # W/m2
+  albedo: {rtol: 0.0, atol: 5.0e-3, frac: 2.0e-3}   # -    p99.9=1.5e-3
+  ustar:  {rtol: 0.0, atol: 5.0e-3, frac: 2.0e-3}   # m/s
+  taix:   {rtol: 0.0, atol: 0.3,    frac: 2.0e-3}   # N/m2
+  moisture_flux:          {rtol: 0.0, atol: 2.0e-6, frac: 2.0e-3}  # kg/m2/s
+  coeff_heat_exchange:    {rtol: 0.0, atol: 1.0e-3, frac: 2.0e-3}  # -
+  coeff_heat_exchange_3d: {rtol: 0.0, atol: 4.0,    frac: 2.0e-3}  # (3d, rare huge rel)
+  density:                {rtol: 0.0, atol: 2.0e-3, frac: 2.0e-3}  # kg/m3 (air)
+  snow_subl:              {rtol: 0.0, atol: 5.0e-3}                # mm (max 2.7e-3, no heavy tail)
+
+  # --- Bulk snow state ------------------------------------------------------
+  swet:             {rtol: 0.0, atol: 0.3,    frac: 2.0e-3}  # kg/m2 p99.9=0.15
+  snow_height:      {rtol: 0.0, atol: 5.0e-5, frac: 2.0e-3}  # m     p99.9=1.6e-5
+  snow_temperature: {rtol: 0.0, atol: 2.0e-2, frac: 2.0e-3}  # K     melt-flip max 2.6
+  scfe:             {rtol: 1.0e-5, atol: 1.0e-5}             # -
+  snow_nlayers:     {rtol: 0.0,    atol: 0.0}                # count — exact
+
+  # --- Per-layer snow state (the heart of the comparison) -------------------
+  # Bulk agreement is sub-1e-5 relative; the frac allowance covers the same
+  # melt/hoar threshold-flip cells as the surface fields.
+  snow_temperature_i: {rtol: 0.0, atol: 2.0e-2, frac: 2.0e-3}  # K (nodes)
+  Ds:          {rtol: 0.0, atol: 2.0e-6, frac: 2.0e-3}   # m    p99.9=3e-7
+  Sice:        {rtol: 1.0e-5, atol: 1.0e-6, frac: 2.0e-3}  # kg/m2
+  Sliq:        {rtol: 1.0e-5, atol: 1.0e-6, frac: 2.0e-3}  # kg/m2
+  Vol_Frac_I:  {rtol: 0.0, atol: 1.0e-4, frac: 2.0e-3}   # -
+  Vol_Frac_W:  {rtol: 0.0, atol: 1.0e-4, frac: 2.0e-3}   # -
+  Vol_Frac_A:  {rtol: 0.0, atol: 1.0e-4, frac: 2.0e-3}   # -
+  Vol_Frac_S:  {rtol: 1.0e-5, atol: 1.0e-6}              # - (soil: must match)
+  Vol_Frac_WP: {rtol: 1.0e-5, atol: 1.0e-6, frac: 2.0e-3} # -
+  Rg:          {rtol: 0.0, atol: 5.0e-5, frac: 2.0e-3}   # mm   p99.9=1e-5
+  Rb:          {rtol: 0.0, atol: 1.0e-5, frac: 2.0e-3}   # mm
+  Dd:          {rtol: 0.0, atol: 2.0e-4, frac: 2.0e-3}   # -
+  Sp:          {rtol: 0.0, atol: 2.0e-4, frac: 2.0e-3}   # -
+  N3:          {rtol: 0.0, atol: 1.0e-4, frac: 2.0e-3}   # -
+  CDot:        {rtol: 0.0, atol: 5.0e-2, frac: 2.0e-3}   # Pa   p99.9=1.3e-3
+  snow_stress: {rtol: 0.0, atol: 1.0,    frac: 2.0e-3}   # Pa   p99.9=0.22
+  mass_hoar:   {rtol: 0.0, atol: 1.0e-6, frac: 6.0e-3}   # kg/m2 hoar forms in one
+                                                          # build only; frac(>1e-6)=3.3e-3 obs
+  mk:          {rtol: 0.0, atol: 0.5,    frac: 1.0e-4}   # marker (integer): flips in
+                                                          # ~2e-6 of values (regime cells)
+
+# Fields NOT comparable between the two SNOWPACK paths, ignored on purpose:
+#   - Coordinate/static fields (FP noise not meaningful).
+#   - Blowing snow (bs_*): the native-Fortran port runs Doorschot saltation
+#     (snow_drift); the C++ SNOWPACK has no blowing-snow model -> 0 by design.
+ignore:
+  - time
+  - lat
+  - lon
+  - bs_salt_conc
+  - bs_salt_flux
+  - bs_salt_height
+  - bs_ustar_t

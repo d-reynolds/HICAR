@@ -1,20 +1,68 @@
-# The Intermediate Complexity Atmospheric Research Model (ICAR)
+# HICAR — The High-resolution Intermediate Complexity Atmospheric Research Model
 
-ICAR is a simplified atmospheric model designed primarily for climate downscaling, atmospheric sensitivity tests, and hopefully educational uses. ICAR combines the wind field from a lower resolution atmospheric model, such as a climate model, with an analytical solution for the effect of topography on that wind field to produce a high-resolution wind field. This wind field is then used to advect heat, moisture, and hydrometeor species (e.g. clouds) around the three dimensional domain, and combines this with microphysical calculations.
+HICAR is an atmospheric model for **dynamic downscaling at the hectometer
+(sub-kilometer) scale**. It takes the output of a coarser atmospheric model — a
+kilometer-scale NWP forecast, a reanalysis, or a climate model — and produces a
+high-resolution atmospheric state suitable for driving land-surface, snow, and
+hydrological simulations over complex (e.g. alpine) terrain.
 
-Version 2 has been a major development and now requires that your fortran compiler supports coarrays (intel, gnu, cray).  Of note, cray may not work because it doesn't seem to properly support some uses of generic classes. Intel works on a single node, but is very slow across multiple nodes.  gfortran works well, but requires the [OpenCoarrays](https://github.com/sourceryinstitute/OpenCoarrays) library be installed.
+HICAR is a variant of the [Intermediate Complexity Atmospheric Research (ICAR)
+model](https://github.com/NCAR/icar). Like ICAR, it pairs physics
+parameterizations shared with full weather models such as WRF (microphysics,
+radiation, PBL, land surface, cumulus) with **massively simplified dynamics**.
+Instead of solving the full non-hydrostatic equations of motion, HICAR computes a
+high-resolution wind field — either from analytical linear theory or from an
+iterative variational wind solver — and uses it to advect heat, moisture, and
+hydrometeors around the domain. This makes HICAR roughly two to three orders of
+magnitude faster than a full NWP model at comparable resolution.
+
+What distinguishes HICAR from ICAR is the move to **sub-kilometer resolution and
+HPC-scale parallelism**. HICAR is parallelized with **MPI** (ICAR v2 used Fortran
+coarrays) and is additionally **GPU-accelerated with OpenACC**, so it can run on
+both CPU clusters and GPU nodes. It adds one-way grid nesting, asynchronous
+parallel I/O, terrain-shaded radiation, and a choice of snow models (SNOWPACK,
+FSM2, and simpler schemes).
 
 ## Requirements
-To run the model 3D time-varying atmospheric data are required, though an ideal test case can be generated for simple simulations as well.  See "Running the Model" below. There are some sample python scripts to help make input forcing files, but the WRF pre-processing system can also be used.  Low-resolution WRF output files can be used directly, various reanalysis and GCM output files can be used with minimal pre-processing (just get all the variables in the same netcdf file.)  In addition, a high-resolution netCDF topography file is required.  This will define the grid that ICAR will run on.  Finally an ICAR options file is used to specify various parameters for the model.  A sample options file is provided in the run/ directory.
 
-## Developing
-For an outline of the basic code structure see the [ICAR code overview](icar_code_overview.md)
+To run HICAR you need: time-varying 3-D atmospheric forcing (U/V winds,
+pressure, temperature, and humidity — at minimum — in a single netCDF file, from
+WRF output, reanalysis, a GCM, or a coarser HICAR run), a high-resolution static
+**domain file** describing the terrain and land surface, and a namelist
+specifying the model options. See [Forcing data](forcing_data.md) and
+[Domain generation](domain_generation.md) for how to prepare these inputs.
 
-For reference working with the model code and git, see the [ICAR and Git workflow](howto/icar_and_git_howto.md).
+## Getting started
 
-You can see more documentation on the code by installing doxygen and running "make doc".  Documentation will be generated in docs/html
+- **[Tutorial](tutorial.md)** — set up a working directory and run the provided
+  test case end to end.
+- **[Compiling](compiling.md)** — dependencies, CMake build, and the GPU build.
+- **[Running](running.md)** — invoking the model, MPI rank layout, and a Slurm
+  template.
+- **[Namelist options](namelist_options.md)** — the self-documenting executable
+  and nested-run configuration.
+- **[AI assistant (MCP)](mcp.md)** — connect Claude Code,
+  Cursor, or other AI agents to HICAR's namelist, physics-scheme, variable, docs, and code knowledge.
+
+For the code, see the **[Code overview](code_overview.md)** and
+**[Developing](developing.md)** pages.
 
 ## References
-Gutmann, E. D., I. Barstad, M. P. Clark, J. R. Arnold, and R. M. Rasmussen (2016), *The Intermediate Complexity Atmospheric Research Model*, J. Hydrometeor, e-View http://dx.doi.org/10.1175/JHM-D-15-0155.1.
 
-Rouson, D., Gutmann, E. D., Fanfarillo, A., Friesen, B. (2017) *Performance portability of an intermediate-complexity atmospheric research model in coarray Fortran*, Proceedings of the Second Annual PGAS Applications Workshop, 1-4
+If you use HICAR, please cite:
+
+> Reynolds, D. S., Gutmann, E., Kruyt, B., Haugeneder, M., Jonas, T., Gerber, F.,
+> Lehning, M., and Mott, R.: *The High-resolution Intermediate Complexity
+> Atmospheric Research (HICAR v1.0) Model Enables Fast Dynamic Downscaling to the
+> Hectometer Scale*, Geosci. Model Dev., 2023.
+> <https://doi.org/10.5194/gmd-2023-16>
+
+<!-- Maintainer note: confirm the final GMD volume/page citation (vs. the
+     gmd-2023-16 discussion DOI) before a documentation release. -->
+
+The underlying ICAR model is described in:
+
+> Gutmann, E. D., I. Barstad, M. P. Clark, J. R. Arnold, and R. M. Rasmussen
+> (2016): *The Intermediate Complexity Atmospheric Research Model*, J.
+> Hydrometeor, 18, 957–973.
+> <https://doi.org/10.1175/JHM-D-15-0155.1>

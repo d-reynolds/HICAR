@@ -1,0 +1,1753 @@
+!>------------------------------------------------------------
+!! Module to manage the ICAR wind field, including calls to linear winds
+!! importantly it also rotates the wind field into the ICAR grid and
+!! balances the U, V, and W fields for "mass" conservation
+!!
+!!  @author
+!!  Ethan Gutmann (gutmann@ucar.edu)
+!!
+!!------------------------------------------------------------
+module wind    
+
+    use linear_theory_winds, only : linear_perturb, setup_linwinds
+    ! use wind_iterative,      only : calc_iter_winds, init_iter_winds
+    use wind_iterative,    only : calc_iter_winds, init_iter_winds, &
+                                  probe_lambda_pattern, probe_zero_corrections, &
+                                  probe_apply_corrections, probe_record, probe_finalize
+    use iso_fortran_env, only : output_unit
+    use icar_constants
+    use domain_interface,  only : domain_t
+    use options_interface, only : options_t
+    use wind_surf, only         : calc_Sx, apply_Sx
+    use wind_thermal, only      : apply_thermal_winds, init_thermal_winds
+    use mod_atm_utilities,   only : calc_froude, calc_Ri, calc_dry_stability
+    use array_utilities,      only : smooth_array
+    use debug_module,     only : domain_check_winds
+
+    implicit none
+    private
+    public:: balance_uvw, update_winds, init_winds, calc_w_real, wind_var_request, update_wind_dqdt, calc_divergence
+
+    integer :: ids, ide, jds, jde, kds, kde,  &
+               ims, ime, jms, jme, kms, kme,  &
+               its, ite, jts, jte, kts, kte!,  &
+            !    i_s, i_e, j_s, j_e
+
+    logical :: first_wind=.True.
+    logical :: operator_calibrated(kMAX_NESTS) = .false.
+    real, parameter::deg2rad=0.017453293 !2*pi/360
+    real, parameter :: rad2deg=57.2957779371
+    real, parameter :: DEFAULT_FR_L = 1000.0
+contains
+
+
+    subroutine wind_linear_var_request(options)
+        implicit none
+        type(options_t), intent(inout) :: options
+
+        ! List the variables that are required to be allocated for the linear wind solution
+        call options%alloc_vars( &
+                        [kVARS%nsquared,    kVARS%potential_temperature,   kVARS%exner,            &
+                            kVARS%water_vapor, kVARS%cloud_water_mass,             kVARS%rain_mass,      &
+                            kVARS%u,           kVARS%v,                       kVARS%w,                &
+                            kVARS%dz, kVARS%global_terrain])
+
+
+        ! List the variables that are required for restarts with the linear wind solution
+        call options%restart_vars( &
+                        [kVARS%nsquared,    kVARS%potential_temperature,                           &
+                            kVARS%water_vapor, kVARS%cloud_water_mass,             kVARS%rain_mass,      &
+                            kVARS%u,           kVARS%v,                       kVARS%w,                &
+                            kVARS%dz ])
+
+    end subroutine
+
+    subroutine wind_var_request(options)
+        implicit none
+        type(options_t), intent(inout) :: options
+
+        if (options%wind%linear_theory) then
+            call wind_linear_var_request(options)
+        endif
+
+        call options%alloc_vars([kVARS%blk_ri, kVARS%froude])
+
+        if (options%physics%windtype == kITERATIVE_WINDS) then
+            call options%alloc_vars([kVARS%wind_alpha])
+
+            if (options%wind%alpha_const<0) call options%alloc_vars([kVARS%froude_terrain])
+
+            call options%restart_vars([kVARS%w_real])
+        endif
+        
+        
+        if (options%wind%thermal) then
+            call options%alloc_vars([kVARS%potential_temperature, kVARS%skin_temperature])
+            
+            call options%restart_vars([kVARS%potential_temperature, kVARS%skin_temperature])
+        endif
+
+        if (options%wind%Sx) then
+            call options%alloc_vars([kVARS%Sx, kVARS%TPI])
+        endif
+    end subroutine wind_var_request
+
+
+
+
+    !------------------------------------------------------------------------------
+    ! subroutine balance_uvw
+    !
+    ! Purpose:
+    !   This subroutine balances the u, v, and w wind components in the domain
+    !   by calculating the divergence of the wind field and adjusting the
+    !   w component to ensure mass conservation.
+    !
+    ! Input:
+    !   domain   - Derived data type containing the domain information
+    !   options  - Derived data type containing various options
+    !   update_in (optional) - Logical variable indicating which variable data array to update
+    !
+    ! Output:
+    !   domain   - Derived data type with updated w component
+    !
+    ! Method:
+    !   1. Calculate the divergence of the wind field
+    !   2. Adjust the w component to balance the divergence
+    !   3. (Optional) Perform the same for the convective wind field
+    !
+    ! Note:
+    !   The convective wind field balancing is currently commented out.
+    !
+    !------------------------------------------------------------------------------    
+    subroutine balance_uvw(domain, adv_den, update_in)
+        ! This subroutine balances the u, v, and w wind components in the domain
+        
+        implicit none
+        
+        ! domain: a derived data type containing the domain information
+        type(domain_t), intent(inout) :: domain
+        
+        ! options: a derived data type containing various options
+        logical, intent(in) :: adv_den
+        
+        ! update_in: an optional logical variable indicating whether to update the wind components
+        logical, optional, intent(in) :: update_in
+        
+        ! divergence: a 3D array to store the divergence of the wind field
+        real, dimension(ims:ime, kms:kme, jms:jme) :: divergence
+        
+        ! update: a logical variable to control whether to update the wind components
+        logical :: update
+        
+        ! Associate various variables from the domain data structure for easier access
+
+        !$acc data create(divergence)
+        associate(dx => domain%dx, &
+                    rho => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
+                    dz => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
+                    jaco_u => domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, &
+                    jaco_v => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
+                    jaco_w => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
+        
+        ! Set the update flag to false initially
+        update = .False.
+        ! If update_in is present, set update flag based on its value
+        if (present(update_in)) update = update_in
+        
+        ! If update is true, calculate the divergence and w component from the dqdt_3d arrays
+        if (update) then
+            call calc_divergence(divergence,domain,horz_only=.True.,use_dqdt=.True.)
+            call calc_w(domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, divergence, dz, jaco_w, rho, adv_den)
+
+        ! If update is false, calculate the divergence and w component from the data_3d arrays
+        else
+            call calc_divergence(divergence,domain,horz_only=.True.,use_dqdt=.False.)
+            call calc_w(domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, divergence, dz, jaco_w, rho, adv_den)
+        endif
+        
+        end associate
+        !$acc end data
+
+        !------------------------------------------------------------
+        ! Now do the same for the convective wind field if needed
+        !------------------------------------------------------------
+        
+        ! if (options%physics%convection > 0) then
+        ! ! calculate horizontal divergence 
+        ! dv = domain%v_cu(2:nx-1,i,3:ny) - domain%v_cu(2:nx-1,i,2:ny-1)
+        ! du = domain%u_cu(3:nx,i,2:ny-1) - domain%u_cu(2:nx-1,i,2:ny-1)
+        ! divergence = du + dv
+        ! ! Then calculate w to balance
+        ! if (i==1) then
+        ! ! if this is the first model level start from 0 at the ground
+        ! domain%w_cu(2:nx-1,i,2:ny-1) = 0 - divergence
+        ! else
+        ! ! else calculate w as a change from w at the level below
+        ! domain%w_cu(2:nx-1,i,2:ny-1) = domain%w_cu(2:nx-1,i-1,2:ny-1) - divergence
+        ! endif
+        ! endif
+        
+    end subroutine balance_uvw
+
+    subroutine calc_w(w,div,dz,jaco_w,rho,adv_den)
+        real,    intent(inout)                                   :: w(ims:ime,kms:kme,jms:jme)
+        real,    dimension(ims:ime,kms:kme,jms:jme), intent(in)  :: div, dz, jaco_w, rho
+        logical, intent(in)    :: adv_den
+        
+        real, dimension(ims:ime,kms:kme,jms:jme) :: rho_i
+        integer :: i, j, k
+
+        !$acc data present(w, div, dz, jaco_w, rho) create(rho_i)
+        !$acc parallel loop gang vector collapse(3) async(1)
+        do j = jms, jme
+            do k = kms, kme-1
+            do i = ims, ime
+                rho_i(i,k,j) = ( rho(i,k,j)*dz(i,k+1,j) + rho(i,k+1,j)*dz(i,k,j) ) / (dz(i,k,j)+dz(i,k+1,j))
+            enddo
+            enddo
+        enddo
+        
+        !$acc parallel loop gang vector collapse(2) async(1)
+        do j = jms, jme
+            do i = ims, ime
+            rho_i(i,kme,j) = rho(i,kme,j)
+            enddo
+        enddo
+        
+        ! gang vector tile(32,16) gives a warp-wide thread group over (i,j); each
+        ! thread runs the k-sequential sweep.  Original gang collapse(2) without
+        ! vector ran one thread per gang, leaving 31/32 lanes idle per warp.
+        !$acc parallel loop gang vector tile(32,16) wait(1) async(10)
+        do j = jms,jme
+        do i = ims,ime
+        !$acc loop seq
+        do k = kms,kme
+            if (adv_den) then
+                if (k==kms) then
+                    w(i,k,j) = 0 - div(i,k,j) * dz(i,k,j) &
+                                                / (jaco_w(i,k,j) * rho_i(i,k,j) )
+                else
+                    w(i,k,j) = ( (w(i,k-1,j) * rho_i(i,k-1,j) &
+                                                * jaco_w(i,k-1,j)) - div(i,k,j) * &
+                                                dz(i,k,j)) / (jaco_w(i,k,j) *  rho_i(i,k,j))
+                endif
+            else
+                if (k==kms) then
+                    w(i,k,j) = (0 - div(i,k,j) * dz(i,k,j)) / (jaco_w(i,k,j) )
+                else 
+                    w(i,k,j) = (w(i,k-1,j) * jaco_w(i,k-1,j) - &
+                                                div(i,k,j) * dz(i,k,j))/ (jaco_w(i,k,j) )
+                end if
+            end if
+        end do
+        end do
+        end do
+        !$acc wait(10)
+        !$acc end data
+    end subroutine
+
+    subroutine calc_divergence(div, domain, advect_density, horz_only, use_dqdt)
+        implicit none
+        real,           intent(inout) :: div(ims:ime,kms:kme,jms:jme)
+        type(domain_t), intent(in)    :: domain
+        logical, optional, intent(in) :: horz_only, use_dqdt, advect_density
+        
+        real, dimension(ims:ime,kms:kme,jms:jme) :: w_met
+        real, dimension(ims:ime+1,kms:kme,jms:jme) :: u_met
+        real, dimension(ims:ime,kms:kme,jms:jme+1) :: v_met
+        real, dimension(ims:ime,kms:kme-1,jms:jme) :: rho_i
+        logical :: horz, dqdt, adv_den
+        integer :: i, j, k
+
+        horz = .False.
+        if (present(horz_only)) horz=horz_only
+        dqdt = .False.
+        if (present(use_dqdt)) dqdt=use_dqdt
+        adv_den = .True.
+        if (present(advect_density)) adv_den=advect_density
+
+        associate( &
+            u => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+            v => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+            w => domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+            u_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+            v_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+            w_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+            jaco => domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, &
+            jaco_u => domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, &
+            jaco_v => domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, &
+            jaco_w => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d, &
+            rho => domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, &
+            dz => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
+            mf_my_u => domain%mapfac_my_u, &
+            mf_mx_v => domain%mapfac_mx_v, &
+            mf_mxy  => domain%mapfac_mxy, &
+            dx => domain%dx &
+        )
+
+        !$acc data present(div, u, v, w, dz, jaco, jaco_u, jaco_v, jaco_w, rho, dx, &
+        !$acc              mf_my_u, mf_mx_v, mf_mxy) create(rho_i, u_met, v_met, w_met)
+
+        !Multiplication of U/V by metric terms, converting jacobian to staggered-grid where possible, otherwise making assumption of
+        !Constant jacobian at edges
+        
+
+        if (adv_den) then
+            if (dqdt) then
+                !$acc parallel async(0)
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme
+                    do k = kms, kme
+                    do i = ims+1, ime
+                        u_met(i,k,j) = u_dqdt_3d(i,k,j) * jaco_u(i,k,j) * (rho(i-1,k,j) + rho(i,k,j))/2
+                    enddo
+                    enddo
+                enddo
+                !$acc loop gang vector collapse(3)
+                do j = jms+1, jme
+                    do k = kms, kme
+                    do i = ims, ime
+                        v_met(i,k,j) = v_dqdt_3d(i,k,j) * jaco_v(i,k,j) * (rho(i,k,j-1) + rho(i,k,j))/2
+                    enddo
+                    enddo
+                enddo
+                !Handle edges assuming constant density gradient
+                !$acc loop gang vector collapse(2)
+                do j = jms, jme
+                do k = kms, kme
+                    u_met(ims,k,j) = u_dqdt_3d(ims,k,j) * jaco_u(ims,k,j) * (1.5*rho(ims,k,j) - 0.5*rho(ims+1,k,j))
+                    u_met(ime+1,k,j) = u_dqdt_3d(ime+1,k,j) * jaco_u(ime+1,k,j) * (1.5*rho(ime,k,j) - 0.5*rho(ime-1,k,j))
+                enddo
+                enddo
+                !$acc loop gang vector collapse(2)
+                do k = kms, kme
+                do i = ims, ime
+                    v_met(i,k,jms) = v_dqdt_3d(i,k,jms) * jaco_v(i,k,jms) * (1.5*rho(i,k,jms) - 0.5*rho(i,k,jms+1))
+                    v_met(i,k,jme+1) = v_dqdt_3d(i,k,jme+1) * jaco_v(i,k,jme+1) * (1.5*rho(i,k,jme) - 0.5*rho(i,k,jme-1))
+                enddo
+                enddo
+                !$acc end parallel
+            else ! else if not using dqdt, just apply metric terms to get face-staggered winds
+                !$acc parallel async(0)
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme
+                    do k = kms, kme
+                    do i = ims+1, ime
+                        u_met(i,k,j) = u(i,k,j) * jaco_u(i,k,j) * (rho(i-1,k,j) + rho(i,k,j))/2
+                    enddo
+                    enddo
+                enddo
+                !$acc loop gang vector collapse(3)
+                do j = jms+1, jme
+                    do k = kms, kme
+                    do i = ims, ime
+                        v_met(i,k,j) = v(i,k,j) * jaco_v(i,k,j) * (rho(i,k,j-1) + rho(i,k,j))/2
+                    enddo
+                    enddo
+                enddo
+                !Handle edges assuming constant density gradient
+                !$acc loop gang vector collapse(2)
+                do j = jms, jme
+                do k = kms, kme
+                    u_met(ims,k,j) = u(ims,k,j) * jaco_u(ims,k,j) * (1.5*rho(ims,k,j) - 0.5*rho(ims+1,k,j))
+                    u_met(ime+1,k,j) = u(ime+1,k,j) * jaco_u(ime+1,k,j) * (1.5*rho(ime,k,j) - 0.5*rho(ime-1,k,j))
+                enddo
+                enddo
+                !$acc loop gang vector collapse(2)
+                do k = kms, kme
+                do i = ims, ime
+                    v_met(i,k,jms) = v(i,k,jms) * jaco_v(i,k,jms) * (1.5*rho(i,k,jms) - 0.5*rho(i,k,jms+1))
+                    v_met(i,k,jme+1) = v(i,k,jme+1) * jaco_v(i,k,jme+1) * (1.5*rho(i,k,jme) - 0.5*rho(i,k,jme-1))
+                enddo
+                enddo
+                !$acc end parallel
+            endif ! end if use_dqdt
+            ! rho_i here is only read by the w_met / vertical-divergence block below,
+            ! which is gated on (.NOT. horz).  In the horz_only path (every per-step
+            ! balance_uvw call) this kernel's output is never consumed — skip it.
+            if (.not. horz) then
+                !$acc parallel loop gang vector collapse(3) async(0)
+                do j = jms, jme
+                    do k = kms, kme-1
+                    do i = ims, ime
+                        !Interpolate density to w grid
+                        rho_i(i,k,j) = ( rho(i,k,j)*dz(i,k+1,j) + rho(i,k+1,j)*dz(i,k,j) ) / (dz(i,k,j)+dz(i,k+1,j))
+                    enddo
+                    enddo
+                enddo
+            endif
+        else ! else if not advecting density, just apply metric terms to get face-staggered winds
+            if (dqdt) then
+                !$acc parallel async(0)
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme
+                    do k = kms, kme
+                    do i = ims, ime+1
+                        u_met(i,k,j) = u_dqdt_3d(i,k,j)
+                    enddo
+                    enddo
+                enddo
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme+1
+                    do k = kms, kme
+                    do i = ims, ime
+                        v_met(i,k,j) = v_dqdt_3d(i,k,j)
+                    enddo
+                    enddo
+                enddo
+                !$acc end parallel
+            else
+                !$acc parallel async(0)
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme
+                    do k = kms, kme
+                    do i = ims, ime+1
+                        u_met(i,k,j) = u(i,k,j) * jaco_u(i,k,j)
+                    enddo
+                    enddo
+                enddo
+                !$acc loop gang vector collapse(3)
+                do j = jms, jme+1
+                    do k = kms, kme
+                    do i = ims, ime
+                        v_met(i,k,j) = v(i,k,j) * jaco_v(i,k,j)
+                    enddo
+                    enddo
+                enddo
+                !$acc end parallel
+            endif ! end if use_dqdt
+        end if ! end if advect_density
+
+
+        ! Map factors (finite-volume form on the projected grid): each face
+        ! flux is divided by its transverse factor (true face length =
+        ! dx/m) and the cell sum is multiplied by the cell-area factor
+        ! m_x*m_y. The vertical term below needs no factor — m is
+        ! column-constant, so it cancels between the top and bottom faces.
+        ! All factors are exactly 1.0 when use_map_factors is off.
+        !$acc parallel loop gang vector collapse(3) async(1) wait(0)
+        do j = jms, jme
+            do k = kms, kme
+            do i = ims, ime
+                div(i,k,j) = mf_mxy(i,j) * &
+                             (u_met(i+1, k, j)/mf_my_u(i+1,j) - u_met(i, k, j)/mf_my_u(i,j) + &
+                              v_met(i, k, j+1)/mf_mx_v(i,j+1) - v_met(i, k, j)/mf_mx_v(i,j)) / dx
+
+            enddo
+            enddo
+        enddo
+
+        if (.NOT.(horz)) then
+            if (adv_den) then
+                if (dqdt) then
+                    !$acc parallel async(1)
+                    !$acc loop gang vector collapse(3)
+                    do j = jms, jme
+                        do k = kms, kme-1
+                        do i = ims, ime
+                            !Interpolate density to w grid
+                            w_met(i,k,j) = w_dqdt_3d(i,k,j) * jaco_w(i,k,j) * rho_i(i,k,j)
+                        enddo
+                        enddo
+                    enddo
+                    !$acc loop gang vector collapse(2)
+                    do j = jms,jme
+                    do i = ims,ime
+                        w_met(i,kme,j) = w_dqdt_3d(i,kme,j) * jaco_w(i,kme,j) * rho(i,kme,j)
+                    enddo
+                    enddo
+                    !$acc end parallel
+                else
+                    !$acc parallel async(1)
+                    !$acc loop gang vector collapse(3)
+                    do j = jms, jme
+                        do k = kms, kme-1
+                        do i = ims, ime
+                            !Interpolate density to w grid
+                            w_met(i,k,j) = w(i,k,j) * jaco_w(i,k,j) * rho_i(i,k,j)
+                        enddo
+                        enddo
+                    enddo
+                    !$acc loop gang vector collapse(2)
+                    do j = jms,jme
+                    do i = ims,ime
+                        w_met(i,kme,j) = w(i,kme,j) * jaco_w(i,kme,j) * rho(i,kme,j)
+                    enddo
+                    enddo
+                    !$acc end parallel
+                endif ! end if use_dqdt
+            else
+                if (dqdt) then
+                    !$acc parallel loop gang vector collapse(3) async(1)
+                    do j = jms, jme
+                        do k = kms, kme
+                            do i = ims, ime
+                                w_met(i,k,j) = w_dqdt_3d(i,k,j) * jaco_w(i,k,j)
+                            enddo
+                        enddo
+                    enddo
+                else
+                    !$acc parallel loop gang vector collapse(3) async(1)
+                    do j = jms, jme
+                        do k = kms, kme
+                            do i = ims, ime
+                                w_met(i,k,j) = w(i,k,j) * jaco_w(i,k,j)
+                            enddo
+                        enddo
+                    enddo
+                endif ! end if use_dqdt
+            end if
+
+            !$acc parallel loop gang vector collapse(3) async(1)
+            do j = jms,jme
+            do k = kms,kme
+            do i = ims,ime
+                if (k == kms) then
+                    div(i, k, j) = div(i, k, j) + w_met(i, k, j)/(dz(i, k, j))
+                else
+                    div(i, k, j) = div(i, k, j) + &
+                                   (w_met(i,k,j)-w_met(i,k-1,j))/(dz(i,k,j))
+                endif
+                div(i, k, j) = div(i, k, j) / jaco(i,k,j)
+
+            enddo
+            enddo
+            enddo
+        endif
+
+        !$acc wait(1)
+        !$acc end data
+        end associate
+
+    end subroutine calc_divergence
+    
+
+    !>------------------------------------------------------------
+    !! Correct for a grid that is locally rotated with respect to EW,NS
+    !!
+    !! Assumes forcing winds are EW, NS relative, not grid relative.
+    !!
+    !!------------------------------------------------------------
+    subroutine make_winds_grid_relative(u, v, sintheta, costheta)
+        real, intent(inout)             :: u(ims:ime+1,kms:kme,jms:jme), v(ims:ime,kms:kme,jms:jme+1)
+        real, intent(in)    :: sintheta(ims:ime,jms:jme), costheta(ims:ime,jms:jme)
+        
+        real, dimension(ims+1:ime,kms:kme,jms:jme) :: v_ustag
+        real, dimension(ims:ime,kms:kme,jms+1:jme) :: u_vstag
+        
+        real, dimension(ims+1:ime,jms:jme) :: costheta_ustag, sintheta_ustag
+        real, dimension(ims:ime,jms+1:jme) :: costheta_vstag, sintheta_vstag
+        integer :: i, j, k
+
+        !$acc data present(u, v, sintheta, costheta) create(v_ustag, u_vstag, costheta_ustag, sintheta_ustag, costheta_vstag, sintheta_vstag)
+
+        !$acc kernels
+        v_ustag = (v(ims:ime-1,:,jms:jme)+v(ims+1:ime,:,jms:jme)+v(ims:ime-1,:,jms+1:jme+1)+v(ims+1:ime,:,jms+1:jme+1))/4
+        u_vstag = (u(ims:ime,:,jms:jme-1)+u(ims:ime,:,jms+1:jme)+u(ims+1:ime+1,:,jms:jme-1)+u(ims+1:ime+1,:,jms+1:jme))/4
+        
+        costheta_ustag = (costheta(ims+1:ime,jms:jme)+costheta(ims:ime-1,jms:jme))/2
+        sintheta_ustag = (sintheta(ims+1:ime,jms:jme)+sintheta(ims:ime-1,jms:jme))/2
+        
+        costheta_vstag = (costheta(ims:ime,jms+1:jme)+costheta(ims:ime,jms:jme-1))/2
+        sintheta_vstag = (sintheta(ims:ime,jms+1:jme)+sintheta(ims:ime,jms:jme-1))/2
+
+        do k = kms,kme
+            u(ims,k,:)       = u(ims,k,:) * costheta_ustag(ims+1,:) + v_ustag(ims+1,k,:) * sintheta_ustag(ims+1,:)
+            u(ime+1,k,:)     = u(ime+1,k,:) * costheta_ustag(ime,:) + v_ustag(ime,k,:) * sintheta_ustag(ime,:)
+        
+            v(:,k,jms)       = v(:,k,jms) * costheta_vstag(:,jms+1) + u_vstag(:,k,jms+1) * sintheta_vstag(:,jms+1)
+            v(:,k,jme+1)     = v(:,k,jme+1) * costheta_vstag(:,jme) + u_vstag(:,k,jme) * sintheta_vstag(:,jme)
+            
+            u(ims+1:ime,k,:) = u(ims+1:ime,k,:) * costheta_ustag - v_ustag(:,k,:) * sintheta_ustag
+            v(:,k,jms+1:jme) = v(:,k,jms+1:jme) * costheta_vstag + u_vstag(:,k,:) * sintheta_vstag
+        enddo
+        !$acc end kernels
+        !$acc end data
+    end subroutine
+
+    !>------------------------------------------------------------
+    !! Apply the base wind field from the forcing data
+    !!!! This subroutine applies the wind forcing data to the model domain.
+    !! It handles both the initial application of the wind field and subsequent updates
+    !! based on the specified update time interval.
+    !! !!------------------------------------------------------------
+    subroutine apply_base_from_forcing(domain, w_var_given, wind_update_dt)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        logical, intent(in) :: w_var_given
+        real, intent(in) :: wind_update_dt
+
+        integer :: i, j, k
+
+        associate(u => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+                  v => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+                  w => domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
+                  fu => domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%data_3d, &
+                  fv => domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%data_3d, &
+                  u_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                  v_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                  fu_dqdt_3d => domain%forcing_hi(domain%forcing_var_indx(kVARS%u)%v)%dqdt_3d, &
+                  fv_dqdt_3d => domain%forcing_hi(domain%forcing_var_indx(kVARS%v)%v)%dqdt_3d)
+        
+        !$acc data present(u, v, w, u_dqdt_3d, v_dqdt_3d, fu, fv, fu_dqdt_3d, fv_dqdt_3d)
+
+        if (.not.(w_var_given)) then
+            !If we have not read in W_real from forcing, set target w_real to 0.0. This minimizes vertical motion in solution
+            !$acc parallel loop gang vector collapse(3)
+            do j = jms, jme
+                do k = kms, kme
+                    do i = ims,ime
+                        w(i,k,j) = 0.0
+                    enddo
+                enddo
+            enddo
+        end if
+        !Compute the forcing wind field at the next update step, assuming a linear interpolation through time
+        if (first_wind) then
+            !Compute the forcing wind field at the current step
+
+            !$acc parallel
+            !$acc loop gang vector collapse(3)
+            do j = jms, jme
+                do k = kms, kme
+                    do i = ims,ime+1
+                        u_dqdt_3d(i,k,j) = fu(i,k,j)
+                    enddo
+                enddo
+            enddo
+            !$acc loop gang vector collapse(3)
+            do j = jms, jme+1
+                do k = kms, kme
+                    do i = ims,ime
+                        v_dqdt_3d(i,k,j) = fv(i,k,j)
+                    enddo
+                enddo
+            enddo
+            !$acc end parallel
+
+            if (w_var_given) then
+                associate(fw => domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d)
+                !$acc parallel loop gang vector collapse(3) present(fw)
+                do j = jms, jme
+                    do k = kms, kme
+                        do i = ims,ime
+                            w(i,k,j) = fw(i,k,j)
+                        enddo
+                    enddo
+                enddo
+                end associate
+            endif
+        else
+            !Compute the forcing wind field at the next update step, assuming a linear interpolation through time
+            !$acc parallel
+            !$acc loop gang vector collapse(3)
+            do i = ims,ime+1
+                do k = kms, kme
+                    do j = jms, jme
+                        u_dqdt_3d(i,k,j) = fu(i,k,j)+fu_dqdt_3d(i,k,j)*wind_update_dt
+                    enddo
+                enddo
+            enddo
+            !$acc loop gang vector collapse(3)
+            do i = ims,ime
+                do k = kms, kme
+                    do j = jms, jme+1
+                        v_dqdt_3d(i,k,j) = fv(i,k,j)+fv_dqdt_3d(i,k,j)*wind_update_dt
+                    enddo
+                enddo
+            enddo
+            !$acc end parallel
+
+            if (w_var_given) then
+                associate(fw => domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%data_3d, &
+                          fw_dqdt_3d => domain%forcing_hi(domain%forcing_var_indx(kVARS%w_real)%v)%dqdt_3d)
+                !$acc parallel loop gang vector collapse(3) present(fw, fw_dqdt_3d)
+                do i = ims,ime
+                    do k = kms, kme
+                        do j = jms, jme
+                            w(i,k,j) = fw(i,k,j)+fw_dqdt_3d(i,k,j)*wind_update_dt
+                        enddo
+                    enddo
+                enddo
+                end associate
+            endif
+        endif
+        !$acc end data
+        end associate
+
+        end subroutine apply_base_from_forcing
+
+    !>------------------------------------------------------------
+    !! Apply wind field physics and adjustments
+    !!
+    !! This will call the linear wind module if necessary, otherwise it just updates for
+    !! This should ONLY be called once for each forcing step, otherwise effects will be additive.
+    !!
+    !!------------------------------------------------------------
+    subroutine update_winds(domain, options)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        type(options_t),intent(in)    :: options
+
+        real, allocatable, dimension(:,:,:) :: div
+        integer :: nx, ny, nz, it
+        integer :: i, j, k
+        logical :: w_var_given, update
+        real :: wind_dt_seconds, alpha_const_val
+
+        w_var_given = (options%forcing%wvar/="")
+        wind_dt_seconds = options%wind%update_dt%seconds() - domain%forcing_elapsed
+        alpha_const_val = options%wind%alpha_const
+        
+        ! if this is a restart run, we have already read in the winds, so do not do anything
+        if (first_wind .and. options%restart%restart) then
+            first_wind = .False.
+            return
+        endif
+
+        !do this now, so that we will have some values in data_3d when calling update_stability
+        if (options%general%debug) call domain_check_winds(domain, "Pre update_winds::apply_base_from_forcing",dqdt=.True.)
+        call apply_base_from_forcing(domain, w_var_given, wind_dt_seconds)
+        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::apply_base_from_forcing",dqdt=.True.)
+
+        if (( (options%wind%alpha_const<=0 .and. (options%physics%windtype==kITERATIVE_WINDS)) .or. options%wind%Sx) ) then
+            call update_stability(domain, options)
+        endif
+
+
+        ! rotate winds from cardinal directions to grid orientation (e.g. u is grid relative not truly E-W)
+        call make_winds_grid_relative(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, domain%vars_2d(domain%var_indx(kVARS%sintheta)%v)%data_2d, domain%vars_2d(domain%var_indx(kVARS%costheta)%v)%data_2d)
+        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::make_winds_grid_relative",dqdt=.True.)
+
+        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
+        call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::make_winds_grid_relative_exch",dqdt=.True.)
+
+        if (options%wind%Sx) then
+            call apply_Sx(domain%vars_4d(domain%var_indx(kVARS%Sx)%v)%data_4d,domain%vars_2d(domain%var_indx(kVARS%TPI)%v)%data_2d, &
+                    domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                    domain%vars_3d(domain%var_indx(kVARS%blk_ri)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, &
+                    domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d, ims, ime, kms, kme, jms, jme, its, ite, jts, jte)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::apply_Sx",dqdt=.True.)
+        endif 
+
+        if (options%wind%thermal) then
+            !Since this is an update call and the sensible heat fluxes can now be quite variable/patch, exchange sensible heat so that corrections are consistent
+            call domain%halo_2d_send()
+            call domain%halo_2d_retrieve()
+
+            ! If model is running with a pbl scheme that supplies a 3D K_h, pass that here
+            if (options%physics%boundarylayer == kPBL_YSU) then
+                call apply_thermal_winds(domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,  &
+                                     domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dz)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,&
+                                     domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%coeff_heat_exchange_3d)%v)%data_3d)
+            else
+                call apply_thermal_winds(domain%vars_2d(domain%var_indx(kVARS%skin_temperature)%v)%data_2d,domain%vars_3d(domain%var_indx(kVARS%exner)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d,  &
+                                     domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dz)%v)%data_3d,                                                       &
+                                     domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d)
+            endif
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::apply_thermal_winds",dqdt=.True.)
+        endif 
+
+        ! linear winds
+        if (options%wind%linear_theory) then
+            call linear_perturb(domain,options,options%lt%vert_smooth,.False.,options%adv%advect_density, update=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::linear_perturb",dqdt=.True.)
+        endif
+            
+        if (options%physics%windtype==kITERATIVE_WINDS) then
+            allocate(div(ims:ime,kms:kme,jms:jme))
+            associate(wind_alpha => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v))
+            !$acc data create(div)
+            if (alpha_const_val>0) then
+                associate(wind_alpha => domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d)
+                !$acc parallel loop gang vector collapse(3) present(wind_alpha)
+                do j = jms,jme
+                    do k = kms,kme
+                        do i = ims,ime
+                            wind_alpha(i,k,j) = alpha_const_val
+                        enddo
+                    enddo
+                enddo
+                end associate
+            else
+                call calc_alpha(domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%froude)%v)%data_3d)
+
+                ! smooth alpha to avoid sharp transitions
+                call smooth_array(domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v),windowsize=2,ydim=3,nsmooths=3,halo=domain%halo)
+            endif
+
+            ! Build the grid-w predictor from the forcing w_real. The
+            ! elliptic operator is calibrated to the exact composition
+            ! A = 2*D o G by probing; the probe REQUIRES the solver
+            ! workspace (x_sol etc.), which the FIRST calc_iter_winds call
+            ! allocates. Ordering therefore matters:
+            !   first-ever update: solve (analytic operator) -> calibrate
+            !                      -> polishing solve;
+            !   later updates:     re-probe up front when the Froude-
+            !                      dependent alpha changed, then a single
+            !                      solve (the historical wind_iterations
+            !                      loop compensated for operator mismatch
+            !                      and is no longer needed).
+            call calc_idealized_wgrid(domain)
+
+            if (alpha_const_val <= 0 .and. operator_calibrated(min(domain%nest_indx, size(operator_calibrated)))) then
+                call calibrate_projection_operator(domain, options, div)
+            endif
+
+            call calc_divergence(div,domain,horz_only=.False.,use_dqdt=.True.)
+
+            call calc_iter_winds(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
+            !Exchange the corrected fields, since the outer points are not updated in above function
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+            call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%w)%v),do_dqdt=.True.,corners=.True.)
+
+            if (.not. operator_calibrated(min(domain%nest_indx, size(operator_calibrated)))) then
+                call calibrate_projection_operator(domain, options, div)
+                operator_calibrated(min(domain%nest_indx, size(operator_calibrated))) = .true.
+                ! Polish this first update with the exact operator
+                call calc_divergence(div,domain,horz_only=.False.,use_dqdt=.True.)
+                call calc_iter_winds(domain,domain%vars_3d(domain%var_indx(kVARS%wind_alpha)%v)%data_3d,div,options%adv%advect_density)
+                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.True.,corners=.True.)
+                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.True.,corners=.True.)
+                call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%w)%v),do_dqdt=.True.,corners=.True.)
+            endif
+
+            !$acc end data
+            end associate
+
+            if (options%general%debug) call domain_check_winds(domain, "Post update_winds::iterative_winds",dqdt=.True.)
+        endif
+    ! elseif (options%physics%windtype==kOBRIEN_WINDS) then
+    !     call Obrien_winds(domain, options, update_in=.True.)
+    ! elseif (options%physics%windtype==kLINEAR_OBRIEN_WINDS) then
+    !     call linear_perturb(domain,options,options%lt%vert_smooth,.False.,options%adv%advect_density, update=.False.)
+    !     call Obrien_winds(domain, options, update_in=.True.)
+
+        call balance_uvw(domain,options%adv%advect_density,update_in=.True.)
+        
+        !reset w_real back to the original forcing field
+        call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d,  &
+                domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d,      &
+                domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d,      &
+                domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
+                domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, &
+                domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, &
+                domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d,   &
+                domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
+                domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
+
+        !If not an update, then transfer the dqdt fields to data_3d
+        if (first_wind) then
+            associate(u_data_3d => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+                    v_data_3d => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+                    w_data_3d => domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+                    u_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                    v_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                    w_dqdt_3d => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+            !$acc data present(u_data_3d, v_data_3d, w_data_3d, u_dqdt_3d, v_dqdt_3d, w_dqdt_3d)
+            !$acc parallel
+            !$acc loop gang vector collapse(3)
+            do i = ims,ime+1
+                do k = kms, kme
+                    do j = jms, jme
+                        u_data_3d(i,k,j) = u_dqdt_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
+            !$acc loop gang vector collapse(3)
+            do i = ims,ime
+                do k = kms, kme
+                    do j = jms, jme+1
+                        v_data_3d(i,k,j) = v_dqdt_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
+            !$acc loop gang vector collapse(3)
+            do i = ims,ime
+                do k = kms, kme
+                    do j = jms, jme
+                        w_data_3d(i,k,j) = w_dqdt_3d(i,k,j)
+                    enddo
+                enddo
+            enddo
+            !$acc end parallel
+            !$acc end data
+            end associate
+        endif
+
+        first_wind = .False.
+        
+        if (options%general%debug) call domain_check_winds(domain, "Post update_winds::balance_uvw",dqdt=.True.)
+
+    end subroutine update_winds
+    
+    subroutine update_wind_dqdt(domain, dt)
+        implicit none
+        type(domain_t), intent(inout)  :: domain
+        real, intent(in)                :: dt
+
+        integer :: i, j, k
+
+        associate(u_data => domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, &
+                  u_dqdt => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                  v_data => domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, &
+                  v_dqdt => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d)
+
+        !$acc parallel present(u_data, u_dqdt, v_data, v_dqdt)
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime+1
+                    u_dqdt(i,k,j) = (u_dqdt(i,k,j)-u_data(i,k,j))/dt
+                enddo
+            enddo
+        enddo
+        
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme+1
+            do k = kms, kme
+                do i = ims, ime
+                    v_dqdt(i,k,j) = (v_dqdt(i,k,j)-v_data(i,k,j))/dt
+                enddo
+            enddo
+        enddo
+        !$acc end parallel
+        end associate
+
+        !If we are not using advect density, then balance_uvw will not be called every physics step, so compute a tendancy here
+        ! if (.not.(options%adv%advect_density)) then
+        !     domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d = (domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d-domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d)/options%wind%update_dt%seconds()
+        ! endif
+
+    end subroutine
+
+    !>------------------------------------------------------------
+    !! Helper function to calculate the w_grid we should expect
+    !! given some perscribed w_real field, which is assumed to be
+    !! stored in the domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d
+    !! field at the time of this function call.
+    !!
+    !!------------------------------------------------------------
+    subroutine calc_idealized_wgrid(domain)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+
+        real, allocatable, dimension(:,:,:) :: zero_arr
+
+        integer :: i, j, k
+
+        allocate(zero_arr(ims:ime,kms:kme,jms:jme))
+        zero_arr = 0.0
+        !$acc data copyin(zero_arr)
+        !Call this, passing 0 for w_grid, to get vertical components of vertical motion
+        call calc_w_real(domain%vars_3d(domain%var_indx(kVARS%u)%v) %dqdt_3d,      &
+                        domain%vars_3d(domain%var_indx(kVARS%v)%v) %dqdt_3d,      &
+                        zero_arr,      &
+                        domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d,      &
+                        domain%vars_3d(domain%var_indx(kVARS%dzdx_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdx)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%dzdy)%v)%data_3d,   &
+                        domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
+        !$acc end data
+
+
+        associate(w => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d, &
+                  w_real => domain%vars_3d(domain%var_indx(kVARS%w_real)%v)%data_3d, &
+                  advection_dz => domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, &
+                  jacobian_w => domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d)
+
+        !$acc data present(w, w_real, advection_dz, jacobian_w)
+        !apply any w_real
+        !$acc parallel loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims,ime
+                    w(i,k,j) = (w_real(i,k,j)-w(i,k,j))
+                enddo
+            enddo
+        enddo
+        !stagger w, which was just calculated at the mass points, to the vertical k-levels, so that we can calculate divergence with it
+        !$acc parallel loop gang collapse(2)
+        do i = ims,ime
+            do j = jms, jme
+                !$acc loop seq
+                do k = kms, kme-1
+                    w(i,k,j) = (w(i,k,j)*advection_dz(i,k+1,j) + w(i,k+1,j)*advection_dz(i,k,j))/ &
+                                        (advection_dz(i,k,j)+advection_dz(i,k+1,j))
+                    w(i,k,j) = w(i,k,j) / jacobian_w(i,k,j)
+                enddo
+            enddo
+        enddo
+
+        !$acc parallel loop gang vector collapse(2)
+        do i = ims,ime
+            do j = jms, jme
+                w(i,kme,j) = 0.0
+            enddo
+        enddo
+        !$acc end data
+        end associate
+
+    end subroutine calc_idealized_wgrid
+    
+    !>------------------------------------------------------------
+    !! Calibrate the elliptic operator to the exact discrete
+    !! composition A = 2*D o G by lattice probing (27 colorings; see
+    !! wind_iterative.F90). Used by BOTH wind solvers: the RANS path
+    !! probes once per nest (alpha == 1, constant); the diagnostic
+    !! path re-probes whenever its Froude-dependent alpha field is
+    !! refreshed (the operator depends on alpha through the w
+    !! correction). The u/v/w dqdt workspace is preserved across the
+    !! probe scratch usage.
+    !!------------------------------------------------------------
+    subroutine calibrate_projection_operator(domain, options, div)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        type(options_t),intent(in)    :: options
+        real,           intent(inout) :: div(ims:ime,kms:kme,jms:jme)
+
+        integer :: ca, cb, cc, i, j, k
+        real :: max_leak
+        real, allocatable :: us(:,:,:), vs(:,:,:), ws(:,:,:)
+
+        allocate(us(ims:ime+1,kms:kme,jms:jme))
+        allocate(vs(ims:ime,kms:kme,jms:jme+1))
+        allocate(ws(ims:ime,kms:kme,jms:jme))
+        associate(u_dqdt => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                  v_dqdt => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                  w_dqdt => domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d)
+        !$acc enter data create(us, vs, ws)
+        !$acc parallel default(present)
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime+1
+                    us(i,k,j) = u_dqdt(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme+1
+            do k = kms, kme
+                do i = ims, ime
+                    vs(i,k,j) = v_dqdt(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    ws(i,k,j) = w_dqdt(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc end parallel
+
+        max_leak = 0.0
+        do cc = 0, 2
+            do cb = 0, 2
+                do ca = 0, 2
+                    call probe_lambda_pattern(ca, cb, cc)
+                    call probe_zero_corrections(domain)
+                    call probe_apply_corrections(domain, options%adv%advect_density)
+                    call calc_divergence(div, domain, advect_density=options%adv%advect_density, &
+                                         horz_only=.False., use_dqdt=.True.)
+                    !$acc update host(div)
+                    call probe_record(domain, div, ca, cb, cc, max_leak)
+                enddo
+            enddo
+        enddo
+        call probe_finalize(max_leak)
+
+        !$acc parallel default(present)
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime+1
+                    u_dqdt(i,k,j) = us(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme+1
+            do k = kms, kme
+                do i = ims, ime
+                    v_dqdt(i,k,j) = vs(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    w_dqdt(i,k,j) = ws(i,k,j)
+                enddo
+            enddo
+        enddo
+        !$acc end parallel
+        end associate
+        !$acc exit data delete(us, vs, ws)
+        deallocate(us, vs, ws)
+    end subroutine calibrate_projection_operator
+
+
+    subroutine calc_alpha(alpha, froude)
+        implicit none
+        real,    intent(in)    :: froude(ims:ime,kms:kme,jms:jme)
+        real,    intent(inout) :: alpha(ims:ime,kms:kme,jms:jme)
+
+        real :: alpha_min, alpha_max
+        integer :: i, j, k
+
+        alpha_min = 0.2
+        alpha_max = 2.0
+        
+        !$acc data present(alpha, froude)
+
+        !Following Moussiopoulos, et al. (1988). Bounding low Fr to avoid /0 error and negative Fr
+
+        !$acc kernels
+        alpha = 1.0 - 0.5*max((1.0/froude)**4,0.00001)*(sqrt(1.0+4.0/max((1.0/froude)**4,0.00001)) - 1.0) 
+        alpha = sqrt(max(alpha,0.00001))
+        alpha = min(max(alpha,alpha_min),alpha_max)
+
+        !set alpha at top of domain to 0.2 to limit flux accross upper boundary
+        alpha(:,kme,:) = alpha_min
+
+        !$acc end kernels
+
+        ! Ensure that there are no sharp transitions in alpha at boundary, 
+        ! which can leak boundary effects into model (very high w_grid values result)
+        if (jms==jds) then
+            !$acc parallel loop gang vector collapse(3)
+            do j = jms, jts-1
+            do k = kms, kme
+            do i = ims, ime
+                alpha(i,k,j) = alpha(i,k,jts)
+            enddo
+            enddo
+            enddo
+        end if
+        if (ims==ids) then
+            !$acc parallel loop gang vector collapse(3)
+            do j = jms, jme
+            do k = kms, kme
+            do i = ims, its-1
+                alpha(i,k,j) = alpha(its,k,j)
+            enddo
+            enddo
+            enddo
+        end if
+        if (jme==jde) then
+            !$acc parallel loop gang vector collapse(3)
+            do j = jte+1, jme
+            do k = kms, kme
+            do i = ims, ime
+                alpha(i,k,j) = alpha(i,k,jte)
+            enddo
+            enddo
+            enddo
+        end if
+        if (ime==ide) then
+            !$acc parallel loop gang vector collapse(3)
+            do j = jms, jme
+            do k = kms, kme
+            do i = ite+1, ime
+                alpha(i,k,j) = alpha(ite,k,j)
+            enddo
+            enddo
+            enddo
+        end if
+
+        !$acc end data
+
+
+    end subroutine calc_alpha
+    
+    subroutine calc_w_real(u,v,w_grid,w_real,dzdx_u,dzdy_v,dzdx,dzdy,jaco)
+
+        implicit none
+        real, intent(in), dimension(ims:ime,kms:kme,jms:jme)    :: w_grid, jaco, dzdx, dzdy
+        real, intent(in), dimension(ims:ime+1,kms:kme,jms:jme)  :: u, dzdx_u
+        real, intent(in), dimension(ims:ime,kms:kme,jms:jme+1)  :: v, dzdy_v
+        real, intent(inout), dimension(ims:ime,kms:kme,jms:jme) :: w_real
+        
+        integer :: k, i, j
+                
+        real, dimension(ims:ime,kms:kme+1,jms:jme)   :: w_grid_ext
+        real, dimension(ims:ime,jms:jme)   :: currw
+        real, dimension(ims:ime+1,jms:jme) :: uw
+        real, dimension(ims:ime,jms:jme+1) :: vw
+
+
+        !$acc data present(u, v, w_grid, w_real, dzdx_u, dzdy_v, dzdx, dzdy, jaco) create(w_grid_ext)
+
+        !calculate the real vertical motions (including U*dzdx + V*dzdy)
+        !$acc kernels
+        w_grid_ext(:,kms,:) = 0
+        w_grid_ext(:,kms+1:kme+1,:) = w_grid*jaco
+        !$acc end kernels
+
+        !$acc parallel loop gang vector collapse(3)
+        do j = jms, jme
+        do k = kms, kme
+        do i = ims, ime
+
+            ! compute the U * dz/dx component of vertical motion
+            ! uw    =   u(ims:ime+1,k,jms:jme) !* dzdx_u(ims:ime+1,k,jms:jme) *
+
+            ! ! compute the V * dz/dy component of vertical motion
+            ! vw    =   v(ims:ime,k,jms:jme+1) !* dzdy_v(ims:ime,k,jms:jme+1)
+
+            ! ! the W grid relative motion
+            ! currw = w_grid(ims:ime, k, jms:jme) !* jaco_w(ims:ime, k, jms:jme)
+
+            ! if (options%physics%convection>0) then
+            !     currw = currw + domain%w_cu(2:nx-1,z,2:ny-1) * domain%dz_inter(2:nx-1,z,2:ny-1) / domain%dx
+            ! endif
+            
+            ! compute the real vertical velocity of air by combining the different components onto the mass grid
+            ! includes vertical interpolation between w_z-1/2 and w_z+1/2
+            w_real(i, k, j) = (u(i,k,j)*dzdx_u(i,k,j) + u(i+1,k,j)*dzdx_u(i+1,k,j))*0.5 &
+                                                 +(v(i,k,j)*dzdy_v(i,k,j) + v(i,k,j+1)*dzdy_v(i,k,j+1))*0.5 &
+                                                 +(w_grid_ext(i, k, j) + w_grid_ext(i, k+1, j)) * 0.5
+        end do
+        end do
+        end do
+        !$acc end data
+
+    end subroutine calc_w_real
+    
+    ! >------------------------------------------------------------
+    !! O'Brien wind adjustment method
+    !!
+    !! SLATED FOR DEPRECATION - use iterative winds instead
+    !!------------------------------------------------------------
+    ! subroutine Obrien_winds(domain, options, update_in)
+    !     implicit none
+    !     type(domain_t), intent(inout) :: domain
+    !     type(options_t),intent(in)    :: options
+    !     logical, optional, intent(in) :: update_in
+
+    !     ! interal parameters
+    !     real, dimension(ims:ime,kms:kme,jms:jme)   :: div, ADJ,ADJ_coef, U_cor, V_cor, current_w
+    !     real, dimension(ims:ime+1,kms:kme,jms:jme) :: current_u
+    !     real, dimension(ims:ime,kms:kme,jms:jme+1) :: current_v
+    !     real    :: corr_factor
+    !     integer :: it, wind_k
+    !     logical :: update
+
+    !     update=.False.
+    !     if (present(update_in)) update=update_in
+
+    !     !If we are doing an update, we need to swap meta data into data_3d fields so it can be exchanged while balancing
+    !     !First, we save a copy of the current data_3d so that we can substitute it back in later
+    !     if (update) then
+    !          current_u = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d
+    !          current_v = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d
+    !          current_w = domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d
+
+    !          domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d = domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d
+    !          domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d = domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d
+    !          domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d = domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d
+    !     endif
+
+    !     !Do an initial exchange to make sure the U and V grids are similar for calculating w
+    !     call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.False.,corners=.True.)
+    !     call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.False.,corners=.True.)
+
+    !     !First call bal_uvw to generate an initial-guess for vertical winds
+    !     call balance_uvw(domain, options%adv%advect_density)
+
+    !     ! Calculate and apply correction to w-winds
+    !     wind_k = kme
+    !     ! previously this code was solving for 0 vertical motion at the flat z height instead of the top boundary.
+    !     ! left in for now as it could be useful to implement something similar in the future.
+    !     ! however, this was also creating weird artifacts above the flat z height that need to be fixed if re-implementing.
+    !     ! do k = kms,kme
+    !     !     if (sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(ims,1:k,jms)) > domain%smooth_height) then
+    !     !         wind_k = k
+    !     !         exit
+    !     !     endif
+    !     ! enddo
+    !     ! domain%smooth_height = sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(ims,:,jms))
+    !     !Compute relative correction factors for U and V based on input speeds
+    !     U_cor = ABS(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(ims:ime,:,jms:jme))/ &
+    !             (ABS(domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(ims:ime,:,jms:jme))+ABS(domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(ims:ime,:,jms:jme)))
+
+    !     do i = ims,ime
+    !         do j = jms,jme
+    !             domain%smooth_height = sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,:,j)) !
+    !             do k = kms,kme
+    !                 corr_factor = ((sum(domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d(i,1:k,j)))/domain%smooth_height)
+    !                 corr_factor = min(corr_factor,1.0)
+    !                 domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j) = domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,k,j) - corr_factor * (domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d(i,wind_k,j))
+
+    !                 !if ( (domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(i,k,j)+domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(i,k,j)) == 0) U_cor(i,k,j) = 0.5
+    !             enddo
+    !         enddo
+    !     enddo
+
+    !     do k = kms,kme
+    !         ! Compute this now, since it wont change in the loop
+    !         ADJ_coef(:,k,:) = -2/domain%dx
+    !     enddo
+
+    !     !V_cor = 1 - U_cor
+
+
+    !     U_cor = 0.5
+    !     V_cor = 0.5
+
+    !     ! Now, fixing w-winds, iterate over U/V to reduce divergence with new w-winds
+    !     do it = 0,options%wind%wind_iterations
+    !         !Compute divergence in new wind field
+    !         call calc_divergence(div, domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d, &
+    !                             domain%vars_3d(domain%var_indx(kVARS%jacobian)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_u)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_v)%v)%data_3d, domain%vars_3d(domain%var_indx(kVARS%jacobian_w)%v)%data_3d,    &
+    !                             domain%vars_3d(domain%var_indx(kVARS%advection_dz)%v)%data_3d, domain%dx, domain%vars_3d(domain%var_indx(kVARS%density)%v)%data_3d, options%adv%advect_density)
+    !         !Compute adjustment based on divergence
+    !         ADJ = div/ADJ_coef
+
+    !         !Distribute divergence among the U and V fields
+    !         domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(its+1:ite+1,:,jts:jte) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(its+1:ite+1,:,jts:jte) + &
+    !                                                     (ADJ(its:ite,:,jts:jte) * U_cor(its+1:ite+1,:,jts:jte))
+
+    !         domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(its+1:ite+1,:,jts:jte) = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d(its+1:ite+1,:,jts:jte) - &
+    !                                                     (ADJ(its+1:ite+1,:,jts:jte) * U_cor(its+1:ite+1,:,jts:jte))
+
+    !         domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(its:ite,:,jts+1:jte+1) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(its:ite,:,jts+1:jte+1) + &
+    !                                                     (ADJ(its:ite,:,jts:jte) * V_cor(its:ite,:,jts+1:jte+1))
+
+    !         domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(its:ite,:,jts+1:jte+1) = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d(its:ite,:,jts+1:jte+1) - &
+    !                                                     (ADJ(its:ite,:,jts+1:jte+1) * V_cor(its:ite,:,jts+1:jte+1))
+    !         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%u)%v),do_dqdt=.False.,corners=.True.)
+    !         call domain%halo%exch_var(domain%vars_3d(domain%var_indx(kVARS%v)%v),do_dqdt=.False.,corners=.True.)
+
+    !     enddo
+
+    !     !If an update loop, swap dqdt and data_3d fields back
+    !     if (update) then
+    !         domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d = domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d
+    !         domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d = domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d
+    !         domain%vars_3d(domain%var_indx(kVARS%w)%v)%dqdt_3d = domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d
+
+    !         domain%vars_3d(domain%var_indx(kVARS%u)%v)%data_3d = current_u
+    !         domain%vars_3d(domain%var_indx(kVARS%v)%v)%data_3d = current_v
+    !         domain%vars_3d(domain%var_indx(kVARS%w)%v)%data_3d = current_w
+    !     endif
+
+    ! end subroutine Obrien_winds
+
+    !>------------------------------------------------------------
+    !! Setup initial fields (i.e. grid relative rotation fields)
+    !!
+    !!------------------------------------------------------------
+    subroutine init_winds(domain,options,context_chng)
+        type(domain_t),  intent(inout) :: domain
+        type(options_t), intent(in)    :: options
+        logical, optional, intent(in) :: context_chng
+
+        logical :: context_change
+
+        if (present(context_chng)) then
+            context_change = context_chng
+        else
+            context_change = .false.
+        endif
+
+        if (.not.(context_change)) first_wind = .True.
+
+        call set_module_indices(domain)
+        
+        if (.not.(context_change) .and. first_wind) call allocate_winds(domain, options)
+
+        if (options%wind%linear_theory) then
+            call setup_linwinds(domain, options, .False., options%adv%advect_density)
+        endif
+        if (options%physics%windtype==kITERATIVE_WINDS) then
+            call init_iter_winds(domain,options)
+        endif
+
+        if (options%wind%thermal) call init_thermal_winds(domain, options)
+
+    end subroutine init_winds
+
+    subroutine set_module_indices(domain)
+        type(domain_t), intent(in) :: domain
+
+        ids = domain%ids ; ide = domain%ide ; jds = domain%jds ; jde = domain%jde ; kds = domain%kds ; kde = domain%kde
+        ims = domain%ims ; ime = domain%ime ; jms = domain%jms ; jme = domain%jme ; kms = domain%kms ; kme = domain%kme
+        its = domain%its ; ite = domain%ite ; jts = domain%jts ; jte = domain%jte ; kts = domain%kts ; kte = domain%kte
+
+        ! i_s = its-1
+        ! i_e = ite+1
+        ! j_s = jts-1
+        ! j_e = jte+1
+        
+        ! if (ims==ids) i_s = ims
+        ! if (ime==ide) i_e = ime
+        ! if (jms==jds) j_s = jms
+        ! if (jme==jde) j_e = jme
+
+    end subroutine set_module_indices
+
+    !>------------------------------------------------------------
+    !! Allocate memory used in various wind related routines
+    !!
+    !!------------------------------------------------------------
+    subroutine allocate_winds(domain, options)
+        type(domain_t), intent(inout) :: domain
+        type(options_t), intent(in) :: options
+        
+        if (options%wind%Sx .and. (domain%var_indx(kVARS%Sx)%v > 0)) then
+            if (STD_OUT_PE) write(*,*) "    Calculating Sx and TPI for wind modification"
+            call calc_Sx(domain, options)
+        endif
+        
+        if (options%wind%alpha_const<0 .and. (options%physics%windtype==kITERATIVE_WINDS)) then
+            call compute_terrain_blocking_heights(domain)
+        endif
+
+    end subroutine allocate_winds
+    
+    subroutine update_stability(domain, options)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        type(options_t), intent(in) :: options
+
+        real, dimension(ims:ime,kms:kme,jms:jme) :: wind_speed, temp_froude, u_m, v_m, u_shear, v_shear, winddir, stability
+        integer, dimension(ims:ime,kms:kme,jms:jme) :: dir_indices
+        integer, dimension(ims:ime,jms:jme) :: Ri_k_max
+
+        integer :: n, ob_k
+        integer :: i, j, k
+        real :: z_top, z_bot, th_top, th_bot, obstacle_height, RI_Z_MAX
+        integer :: ymin, ymax, xmin, xmax, n_smoothing_passes, nsmooth_gridcells, ubound_terrain
+        
+        RI_Z_MAX = 100.0
+        n_smoothing_passes = 5
+        nsmooth_gridcells = 20 !int(500 / domain%dx)
+
+        associate(u => domain%vars_3d(domain%var_indx(kVARS%u)%v)%dqdt_3d, &
+                  v => domain%vars_3d(domain%var_indx(kVARS%v)%v)%dqdt_3d, &
+                  froude => domain%vars_3d(domain%var_indx(kVARS%froude)%v)%data_3d, &
+                  blk_ri => domain%vars_3d(domain%var_indx(kVARS%blk_ri)%v)%data_3d, &
+                  z => domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d, &
+                  potential_temperature => domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d)
+        !$acc data present(u, v, froude, blk_ri, z, potential_temperature) create(u_m,v_m,u_shear,v_shear,winddir,wind_speed,stability,Ri_k_max,dir_indices,temp_froude)
+
+        ! Compute per-column Ri_k_max: find the vertical level ~RI_Z_MAX meters above ground
+        !$acc parallel loop gang vector collapse(2)
+        do j = jms, jme
+            do i = ims, ime
+                Ri_k_max(i,j) = kme
+                do k = kms+1, kme
+                    if (z(i,k,j) - z(i,kms,j) > RI_Z_MAX) then
+                        Ri_k_max(i,j) = max(2, k-1)
+                        exit
+                    endif
+                enddo
+            enddo
+        enddo
+
+        !$acc kernels
+        u_m(ims:ime,kms:kme,jms:jme) = (u(ims:ime,kms:kme,jms:jme) + &
+                                        u(ims+1:ime+1,kms:kme,jms:jme))/2
+        v_m(ims:ime,kms:kme,jms:jme) = (v(ims:ime,kms:kme,jms:jme) + &
+                                        v(ims:ime,kms:kme,jms+1:jme+1))/2
+        
+        u_shear(:,kms,:) = u_m(:,kms+4,:)
+        u_shear(:,kms+1:kme,:) = u_m(:,kms+1:kme,:) - u_m(:,kms:kme-1,:)
+        v_shear(:,kms,:) = v_m(:,kms+4,:)
+        v_shear(:,kms+1:kme,:) = v_m(:,kms+1:kme,:) - v_m(:,kms:kme-1,:)
+        !$acc end kernels
+        
+        !Since we will loop up to nz-1, we set all Fr to 0.1, which will leave the upper layer as very stable
+        !Since we will loop up to nz-1, we set all Ri here to 10
+
+        !$acc parallel loop gang vector collapse(3)
+        do j = jms, jme
+            do k = kms, kme
+                do i = ims, ime
+                    wind_speed(i,k,j) = sqrt( (u_m(i,k,j))**2 + (v_m(i,k,j))**2 )
+                    froude(i,k,j) = 0.1
+                    blk_ri(i,k,j) = 10.0
+                enddo
+            enddo
+        enddo
+
+        !$acc parallel loop gang vector collapse(3)
+        do j = jms, jme
+            do k=kms, kme-1
+                do i = ims, ime
+                    th_bot = potential_temperature(i,kms,j)
+                    th_top = potential_temperature(i,Ri_k_max(i,j),j)
+                    z_bot  = z(i,kms,j)
+                    z_top  = z(i,Ri_k_max(i,j),j)
+                    stability(i,k,j) = calc_dry_stability(th_top, th_bot, z_top, z_bot) 
+                    
+                    blk_ri(i,k,j) =  calc_Ri(stability(i,k,j), u_shear(i,kms,j), v_shear(i,kms,j), (z_top-z_bot))
+                enddo
+            enddo
+        enddo
+
+
+        if (options%wind%alpha_const<0 .and. (options%physics%windtype==kITERATIVE_WINDS)) then
+
+            associate(froude_terrain => domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d)
+            ubound_terrain = ubound(froude_terrain,4)
+            !Compute wind direction for each cell on mass grid
+            !$acc parallel loop gang vector collapse(3)
+            do j = jms, jme
+                do k=kms, kme
+                    do i = ims, ime
+                        winddir(i,k,j) = ATAN(-u_m(i,k,j),-v_m(i,k,j))*rad2deg
+                        if(winddir(i,k,j) <= 0.0) winddir(i,k,j) = winddir(i,k,j)+360
+                        if(winddir(i,k,j) == 360.0) winddir(i,k,j) = 0.0
+                        dir_indices(i,k,j) = max(min(int(winddir(i,k,j)/5)+1,ubound_terrain),1)                 
+                    enddo
+                end do
+            end do
+            !$acc update self(dir_indices)
+
+            !Build grid of Sx values based on wind direction at that cell
+            do j = jms, jme
+                do k = kms, kme
+                    do i = ims, ime
+                        temp_froude(i,k,j) = froude_terrain(i,k,j,dir_indices(i,k,j))
+                    enddo
+                end do
+            end do
+
+            !$acc update device(temp_froude)
+            !$acc parallel loop gang vector collapse(3)
+            do j = jms, jme
+                do k=kms, kme-1
+                    do i = ims, ime
+
+                        th_bot = potential_temperature(i,k,j)
+                        th_top = potential_temperature(i,k+1,j)
+                        z_bot  = z(i,k,j)
+                        z_top  = z(i,k+1,j)
+
+                        ! If we have an upwind obstacle, use the obstacle height to calculate a bulk Froude Number over the column
+                        ! If there is nothing blocking, we calculate a local bulk Froude Number, using the local th and z indexed 
+                        ! above
+                        !if (.not.(temp_froude(i,k,j) == DEFAULT_FR_L)) then
+                        !The height of the obstacle is calculated from the blocking terrain height (z_obst-z_loc+1000)
+                        !    obstacle_height = temp_froude(i,k,j)-DEFAULT_FR_L+z_bot
+                        !
+                        !    do ob_k = k+1,kme
+                        !        if (domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i,ob_k,j) > obstacle_height) exit
+                        !    enddo
+                        !    ob_k = min(ob_k,kme)
+                        !    th_top = domain%vars_3d(domain%var_indx(kVARS%potential_temperature)%v)%data_3d(i,ob_k,j)
+                        !    z_top  = domain%vars_3d(domain%var_indx(kVARS%z)%v)%data_3d(i,ob_k,j)
+                        !endif
+                        stability(i,k,j) = calc_dry_stability(th_top, th_bot, z_top, z_bot, potential_temperature(i,kms,j)) 
+
+                        froude(i,k,j) = calc_froude(stability(i,k,j), temp_froude(i,k,j), wind_speed(i,k,j))
+                    enddo
+                enddo
+            enddo
+            end associate
+        endif
+        !$acc end data
+        end associate
+    end subroutine update_stability
+
+    !>-----------------------------------------
+    !> Compute a smoothed terrain varience field for use in Froude number calculation
+    !>
+    !------------------------------------------
+    subroutine compute_terrain_blocking_heights(domain) !froude_terrain, terrain)
+        implicit none
+        type(domain_t), intent(inout) :: domain
+        real, dimension(1:72,ims:ime,kms:kme,jms:jme)   :: temp_ft_array
+        integer           :: ang, is, js, is_min, is_max, js_min, js_max
+        integer           :: i, j, k
+        integer           :: rear_ang, fore_ang, test_ang, rear_ang_diff, fore_ang_diff, ang_diff, k_max, window_rear, window_fore, window_width
+        integer :: x, y, azm_index, search_radius
+        integer :: xs,xe, ys,ye, n, np
+        real              :: pt_height, temp_ft, maxFTVal, azm
+                
+        temp_ft_array = -100000.0
+        search_radius = domain%neighborhood_max
+
+        ! then compute the range of terrain (max-min) in a given window
+        do i=ims, ime
+            do j=jms, jme
+                ! Per-cell symmetric search window, clamped to available neighbor data
+                is_min = max(i - search_radius, domain%ihs)
+                is_max = min(i + search_radius, domain%ihe)
+                js_min = max(j - search_radius, domain%jhs)
+                js_max = min(j + search_radius, domain%jhe)
+
+                do k=kms,kme
+                    if (k == kms) then
+                        pt_height = domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(i,j)
+                    else if (k > kms) then
+                        pt_height = pt_height + domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d(i,k,j)
+                    end if
+
+                    do is = is_min, is_max
+                        do js = js_min, js_max
+                        
+                            !Compute azimuth ind of point
+                            azm = atan2(1.0*(is-i),1.0*(js-j))*rad2deg
+                            if(azm < 0) then
+                                azm = 360+azm
+                            else if(azm >= 360.0) then
+                                azm=0.0
+                            endif
+                            azm_index = int(azm/5)+1
+                        
+                            temp_ft = domain%vars_2d(domain%var_indx(kVARS%neighbor_terrain)%v)%data_2d(is,js) - pt_height
+                            
+                            if (temp_ft > temp_ft_array(azm_index,i,k,j)) then
+                                                        
+                                !Only save scale length if it is greater than the default -- otherwise copy that over
+                                if (temp_ft > DEFAULT_FR_L) then
+                                    temp_ft_array(azm_index,i,k,j) = temp_ft
+                                else
+                                    temp_ft_array(azm_index,i,k,j) = DEFAULT_FR_L
+                                end if
+                            end if
+                        enddo
+                    enddo
+
+                    !After finding Fr-Terrain in each absolute direction around grid cell, 
+                    !Pick max for each 20º window and perform interpolation to other directions if necesarry
+                    
+                    rear_ang = 1 
+                    fore_ang = 1
+                    
+                    if (.not.( all((temp_ft_array(:,i,k,j) <= -100000.0)) )) then
+                    
+                        !Perform 20º window max search
+                        window_width = 2
+                        do ang = 1, 72
+                            window_rear = ang-window_width
+                            window_fore = ang+window_width
+                        
+                            if (ang <= window_width) then
+                                window_rear = 72-(window_width-ang)
+                                
+                                maxFTVal = maxval(temp_ft_array(window_rear:72,i,k,j))
+
+                                if (maxval(temp_ft_array(1:window_fore,i,k,j)) > maxFTVal) then
+                                    maxFTVal = maxval(temp_ft_array(1:window_fore,i,k,j))
+                                end if
+                                
+                            else if ( ang >= (72-(window_width-1)) ) then
+                                window_fore = window_width-(72-ang)
+                                
+                                maxFTVal = maxval(temp_ft_array(window_rear:72,i,k,j))
+
+                                if (maxval(temp_ft_array(1:window_fore,i,k,j)) > maxFTVal) then
+                                    maxFTVal = maxval(temp_ft_array(1:window_fore,i,k,j))
+                                end if
+                            else
+                                maxFTVal = maxval(temp_ft_array(window_rear:window_fore,i,k,j))
+                            end if
+                            domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(i,k,j,ang) = maxFTVal
+                        end do                    
+                    
+                        do ang = 1, 72
+                            !Determine indices for interpolation
+                            if ( (ang==fore_ang) ) then
+                                !Update indices for interpolated Fr-Terrain's
+                                rear_ang = ang
+                            
+                                fore_ang = ang+1
+                                if (fore_ang > 72) fore_ang = 1
+                                
+                                do while (domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(i,k,j,fore_ang) <= -100000.0)
+                                    fore_ang = fore_ang+1
+                                    if (fore_ang > 72) fore_ang = 1
+                                end do
+                            
+                            end if
+                            
+                            if (ang==1) then
+                                rear_ang = 72
+                                do while(domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(i,k,j,rear_ang) <= -100000.0)
+                                    rear_ang = rear_ang-1
+                                end do
+                            end if
+                    
+                            !If we did not calculate Fr-Terrain for a given direction
+                            if (domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(i,k,j,ang) == -100000.0) then
+                                !Weight the two surrounding Fr-Terrain values based on our angular-distance to them
+                                rear_ang_diff = ang-rear_ang
+                                fore_ang_diff = fore_ang-ang
+                                ang_diff = fore_ang-rear_ang
+                        
+                                !Handle wrap-around case
+                                if (ang > fore_ang) then
+                                    fore_ang_diff = fore_ang+(72-ang)
+                                    ang_diff = fore_ang+(72-rear_ang)
+                                end if
+                        
+                                !Interpolation, linearly-weighted by angular-distance from values
+                                domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(i,k,j,ang) = (domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(i,k,j,rear_ang)*fore_ang_diff + &
+                                                    domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(i,k,j,fore_ang)*rear_ang_diff)/ang_diff
+
+                            end if
+                        end do
+
+                    else
+                        !IF we only have -100000 for all entries, set to dz
+                        domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(i,k,j,:) = domain%vars_3d(domain%var_indx(kVARS%dz_interface)%v)%data_3d(i,k,j)
+                    end if
+                enddo
+
+            enddo
+        enddo
+                                                               
+        if (domain%jms==(domain%jds)) domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(:,:,jms,:) = &
+                                        domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(:,:,jms+1,:)
+                        
+        if (domain%ims==(domain%ids)) domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(ims,:,:,:) = &
+                                        domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(ims+1,:,:,:)
+
+        if (domain%jme==(domain%jde)) domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(:,:,jme,:) = &
+                                        domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(:,:,jme-1,:)
+
+        if (domain%ime==(domain%ide)) domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(ime,:,:,:) = &
+                                        domain%vars_4d(domain%var_indx(kVARS%froude_terrain)%v)%data_4d(ime-1,:,:,:)
+                                 
+
+    end subroutine compute_terrain_blocking_heights
+
+
+    !>------------------------------------------------------------
+    !! Provides a routine to deallocate memory allocated in allocate_winds
+    !!
+    !!------------------------------------------------------------
+    ! subroutine finalize_winds(domain)
+    !     type(domain_t), intent(inout) :: domain
+    !
+    !     if (allocated(domain%sintheta)) then
+    !         deallocate(domain%sintheta)
+    !     endif
+    !     if (allocated(domain%costheta)) then
+    !         deallocate(domain%costheta)
+    !     endif
+    !     if (allocated(domain%dzdx)) then
+    !         deallocate(domain%dzdx)
+    !     endif
+    !     if (allocated(domain%dzdy)) then
+    !         deallocate(domain%dzdy)
+    !     endif
+    !
+    ! end subroutine finalize_winds
+end module wind

@@ -1,0 +1,34 @@
+# Post a commit status — the required-check signal main's ruleset reads.
+# The caller must check out the repo first (local action).
+name: Sign commit status
+description: Post a commit status (state/context/description) on a given SHA.
+inputs:
+  sha:
+    description: Commit SHA to post the status on.
+    required: true
+  context:
+    description: Status context name (e.g. hicar-full-test).
+    required: true
+  description:
+    description: Human-readable status description.
+    required: true
+  state:
+    description: success | failure | pending | error.
+    required: false
+    default: success
+  token:
+    description: GitHub token with statuses:write.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        gh api -X POST "/repos/${{ github.repository }}/statuses/${{ inputs.sha }}" \
+          -f state="${{ inputs.state }}" \
+          -f context="${{ inputs.context }}" \
+          -f description="${{ inputs.description }}" \
+          -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        echo "Signed ${{ inputs.sha }} as ${{ inputs.context }}=${{ inputs.state }}"

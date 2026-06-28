@@ -1,0 +1,422 @@
+submodule(grid_interface) grid_implementation
+    use assertions_mod, only : assert, assertions
+    use iso_fortran_env
+    implicit none
+
+contains
+
+    !> -------------------------------
+    !! Return the dimensions of this grid as an n element array
+    !!
+    !! -------------------------------
+    module function get_dims(this) result(dims)
+        class(grid_t), intent(in) :: this
+        integer, allocatable :: dims(:)
+
+        if (this%is1d) then
+            allocate(dims(1))
+            dims(1) = this%kme - this%kms + 1
+        elseif (this%is2d) then
+            allocate(dims(2))
+            dims(1) = this%ime - this%ims + 1
+            dims(2) = this%jme - this%jms + 1
+        elseif (this%is3d) then
+            allocate(dims(3))
+            dims(1) = this%ime - this%ims + 1
+            dims(2) = this%kme - this%kms + 1
+            dims(3) = this%jme - this%jms + 1
+        elseif (this%is4d) then
+            allocate(dims(4))
+            dims(1) = this%ime - this%ims + 1
+            dims(2) = this%kme - this%kms + 1
+            dims(3) = this%jme - this%jms + 1
+            dims(4) = this%n_4d
+        else
+            write(*,*) "ERROR: grid is not 1D, 2D, 3D or 4D"
+            stop
+        endif
+    end function
+    
+
+    !> -------------------------------
+    !! Decompose the domain into as even a set of tiles as possible in two dimensions
+    !!
+    !! Searches through possible numbers of x and y tiles that multiple evenly to
+    !! give the total number of images requested.
+    !!
+    !! For each x/y split compute the number of grid cells in both dimensions in each tile
+    !! return the split that provides the closest match between the number of x and y grid cells
+    !!
+    !! -------------------------------
+    module subroutine domain_decomposition(this, nx, ny, nimages, image, ratio)
+        class(grid_t),  intent(inout) :: this
+        integer,        intent(in)    :: nx, ny, nimages
+        integer,        intent(in)    :: image
+        real,           intent(in), optional :: ratio
+        real    :: multiplier
+        integer :: ysplit, xsplit, xs, ys, i
+        real    :: best, current, x, y
+
+        multiplier=1
+        if (present(ratio)) multiplier = ratio
+
+        xsplit = 1
+        ysplit = nimages
+        xs = xsplit
+        ys = ysplit
+
+        x = (nx/real(xsplit))
+        y = (ny/real(ysplit))
+
+        if (y > (multiplier*x)) then
+            best = abs(1 - ( y / (multiplier*x) ))
+        else
+            best = abs(1 - ( (multiplier*x) / y ))
+        endif
+
+        do i=nimages,1,-1
+            if (mod(nimages,i)==0) then
+                ysplit = i
+                xsplit = nimages / i
+
+                x = (nx/float(xsplit))
+                y = (ny/float(ysplit))
+
+                if (y > (multiplier*x)) then
+                    current = abs(1 - ( y / (multiplier*x) ))
+                else
+                    current = abs(1 - ( (multiplier*x) / y ))
+                endif
+
+                if (current < best) then
+                    best = current
+                    xs = xsplit
+                    ys = ysplit
+                endif
+            endif
+        enddo
+
+        this%ximages = xs
+        this%yimages = ys
+
+        this%ximg = mod(image-1,  this%ximages)+1
+        y = 100 * (real(image-1+epsilon) / real(this%ximages))
+        this%yimg = (floor(y+1)/100)+1
+
+        x = (nx/float(xs))
+        y = (ny/float(ys))
+
+        if (assertions) call assert((xs*ys) == nimages, "Number of tiles does not sum to number of images")
+        ! if (image==1) print*, "ximgs=",xs, "yimgs=",ys
+
+    end subroutine domain_decomposition
+
+    !> -------------------------------
+    !! Compute the number of grid cells in the current image along a dimension
+    !!
+    !! This takes care of the fact that generally the number of images will not evenly divide the number of grid cells
+    !! In this case the extra grid cells need to be evenly distributed among all images
+    !!
+    !! n_global should be the full domain size of the dimension
+    !! me should be this images image number along this dimension
+    !! nimg should be the number of images this dimension will be divided into
+    !!
+    !! -------------------------------
+    function my_n(n_global, me, nimg) result(n_local)
+       integer, intent(in) :: n_global, me, nimg
+       integer :: n_local
+
+       ! add 1 if this image is less than the remainder that need an extra grid cell
+       n_local = n_global / nimg + merge(1,0,me <= mod(n_global,nimg)  )
+    end function
+
+    !> -------------------------------
+    !! Return the starting coordinate in the global domain coordinate system for a given image (me)
+    !!
+    !! -------------------------------
+    function my_start(n_global, me, nimg) result(memory_start)
+        implicit none
+        integer, intent(in) :: n_global, me, nimg
+        integer :: memory_start
+        integer :: base_n
+
+        base_n = n_global / nimg
+
+        memory_start = (me-1)*(base_n) + min(me-1,mod(n_global,nimg)) + 1
+
+    end function my_start
+    
+    !> -------------------------------
+    !! Generate the domain decomposition mapping and compute the indicies for local memory
+    !!
+    !! -------------------------------
+    module subroutine set_grid_dimensions(this, nx, ny, nz, n_4d, image, comms, global_nz, adv_order, nx_extra, ny_extra)
+      class(grid_t),   intent(inout) :: this
+      integer,         intent(in)    :: nx, ny, nz
+      integer, optional, intent(in)  :: n_4d, image
+      type(MPI_Comm), optional, intent(in)    :: comms
+      integer, optional, intent(in)    :: global_nz, adv_order, nx_extra, ny_extra
+
+      integer :: halo_size, ierr, tile_size_estimate, comms_size
+
+      halo_size = kDEFAULT_HALO_SIZE
+      if (present(adv_order)) halo_size = ceiling(adv_order/2.0)
+
+
+      this%nx_e = 0
+      this%ny_e = 0
+      if (present(nx_extra)) this%nx_e = nx_extra ! used to add 1 to the u-field staggered grid
+      if (present(ny_extra)) this%ny_e = ny_extra ! used to add 1 to the v-field staggered grid
+      this%nz         = nz                                            ! note nz is both global and local
+      this%halo_nz    = this%nz    ! used by the batch halo path (atm-only)
+      ! halo_win_nz sizes the single-variable exch_var windows and buffers
+      ! (halo_obj.F90 _in_win/_in_buffer allocations). When global_nz is
+      ! passed it is the unified max_halo_nz across all grids — so any grid
+      ! whose nz exceeds nz_global (e.g. snow grids with kSNOW_GRID_Z >
+      ! nz_global) still has a window deep enough to hold a Put of its data.
+      ! Batch halo (atmospheric-only) keeps using halo_nz = this%nz.
+      if (present(global_nz)) then
+          this%halo_win_nz = max(this%nz, global_nz)
+      else
+          this%halo_win_nz = this%nz
+      endif
+
+      this%halo_size = halo_size
+
+      this%kms        = 1
+      this%kme        = this%nz
+
+      ! Now define the tile of data to process in physics routines
+      this%kts = this%kms
+      this%kte = this%kme
+
+      ! The entire model domain begins at 1 and ends at nx,y,z
+      this%ny_global  = ny + this%ny_e                                     ! global model domain grid size
+      this%nx_global  = nx + this%nx_e                                     ! global model domain grid size
+
+      this%ids = 1
+      this%jds = 1
+      this%kds = 1
+      this%ide = this%nx_global
+      this%jde = this%ny_global
+      this%kde = this%nz
+
+      this%ims = 1
+      this%jms = 1
+      this%ime = this%nx_global
+      this%jme = this%ny_global
+
+      if (nx == 0 .and. ny == 0 .and. nz > 1) then
+        this%is1d = .True.
+        return ! no need to do domain decomposition
+      else if (nx > 0 .and. ny > 0 .and. nz < 1) then
+        this%is2d = .True.
+      else if (nx > 0 .and. ny > 0 .and. nz > 0) then
+        if (present(n_4d)) then
+            this%is4d = .True.
+        else
+            this%is3d = .True.
+        endif
+    endif
+    if ( .not.(present(comms) .and. present(image)) ) return
+
+      ! get the number of processes in this communicator
+      call MPI_Comm_size(comms, comms_size, ierr)
+
+      !! Check if we have an inefficient number of processors, or are degenerate
+      ! get estimate for number of processors per side for a square tile
+      tile_size_estimate = ceiling(sqrt(real(nx*ny)/real(comms_size)))
+
+      ! check if we actually have more halo space than tile space
+      if (tile_size_estimate <= halo_size) then
+        if (STD_OUT_PE) write(*,*) '------------------------------------------------------------------------------------------'
+        if (STD_OUT_PE) write(*,*) 'WARNING: For domain of horizontal size ',nx,'x',ny
+        if (STD_OUT_PE) write(*,*) 'WARNING: Size of a processing tile is near the size of the halo.'
+        if (STD_OUT_PE) write(*,*) 'WARNING: This usually results from running a small domain with a large number of processors'
+        if (STD_OUT_PE) write(*,*) 'WARNING: For better computational efficiency, try changing the number of processes'
+        if (STD_OUT_PE) write(*,*) 'WARNING: used in combination with this domain'
+        if (STD_OUT_PE) write(*,*) '------------------------------------------------------------------------------------------'
+      else if(tile_size_estimate <= 1) then
+        if (STD_OUT_PE) write(*,*) '------------------------------------------------------------------------------------------'
+        if (STD_OUT_PE) write(*,*) 'WARNING: For domain of horizontal size ',nx,'x',ny
+        if (STD_OUT_PE) write(*,*) 'ERROR: Size of a processing tile is less than 1.'
+        if (STD_OUT_PE) write(*,*) 'ERROR: Domain decomposition is degenerate.'
+        if (STD_OUT_PE) write(*,*) 'ERROR: Change the number of processes this simulation is run with'
+        if (STD_OUT_PE) write(*,*) '------------------------------------------------------------------------------------------'
+        stop
+      endif
+
+
+      call this%domain_decomposition(nx, ny, comms_size, image=image)
+
+      this%nz         = nz                                            ! note nz is both global and local
+      this%nx         = my_n(nx, this%ximg, this%ximages) ! local grid size
+      this%ny         = my_n(ny, this%yimg, this%yimages) ! local grid size
+      if (present(n_4d)) this%n_4d       = n_4d
+
+      if (this%nx <= halo_size .or. this%ny <= halo_size) then
+          write(*,*) 'ERROR: tile size too small for halo size'
+          write(*,*) 'ERROR: this usually results from an unfavorable domain decomposition'
+          write(*,*) 'ERROR: number of images in x direction: ',this%ximages
+          write(*,*) 'ERROR: number of images in y direction: ',this%yimages
+          write(*,*) 'ERROR: try changing the number of processes used in combination with this domain'
+          stop
+        endif
+
+      ! define the bounds needed for memory to store the data local to this image
+      this%ims        = my_start(nx, this%ximg, this%ximages)
+      this%ime        = this%ims + this%nx + this%nx_e - 1
+
+      this%jms        = my_start(ny, this%yimg, this%yimages)
+      this%jme        = this%jms + this%ny + this%ny_e - 1
+
+      call update_with_halos(this, halo_size)
+
+      this%ns_halo_nx = nx / this%ximages + 1 + 2*this%halo_size  ! number of grid cells in x in the ns halo
+      this%ew_halo_ny = ny / this%yimages + 1 + 2*this%halo_size  ! number of grid cells in y in the ew halo
+
+      ! define the halo needed to manage communications between images
+      ! perhaps this should be defined in exchangeable instead though?
+      !this%ns_halo_nx = this%nx_global / this%ximages + 1 + this%nx_e  ! number of grid cells in x in the ns halo
+      !this%ew_halo_ny = this%ny_global / this%yimages + 1 + this%ny_e  ! number of grid cells in y in the ew halo
+
+    if (.not.(comms==MPI_COMM_NULL)) then
+        !call MPI_Allreduce(this%nx,this%ns_halo_nx,1,MPI_INT,MPI_MAX,comms,ierr)
+        !call MPI_Allreduce(this%ny,this%ew_halo_ny,1,MPI_INT,MPI_MAX,comms,ierr)
+
+        ! When global_nz is passed it is the unified max_halo_nz across all
+        ! grids (set in domain_obj). By construction this%nz <= global_nz,
+        ! so the subarray types are always valid and we never need the
+        ! MPI_DATATYPE_NULL fallback that used to sit here.
+        if (present(global_nz)) then
+            call create_MPI_types(this, win_nz=global_nz)
+        else
+                ! Initialize MPI types to NULL when no global_nz is provided,
+                ! since we do not know the size of the global z dimension used for the windows
+                ! uninitialized handles causing undefined behavior downstream
+                this%NS_halo = MPI_DATATYPE_NULL
+                this%EW_halo = MPI_DATATYPE_NULL
+                this%corner_halo = MPI_DATATYPE_NULL
+                this%NS_win_halo = MPI_DATATYPE_NULL
+                this%EW_win_halo = MPI_DATATYPE_NULL
+                this%corner_win_halo = MPI_DATATYPE_NULL
+        endif
+      else
+        !                 global nx           to acommodate staggered grids  
+        !                 |                   |   to account for halo in both directions
+        !                 |                   |   |                              
+        this%ns_halo_nx = nx / this%ximages + 1 + 2*this%halo_size  ! number of grid cells in x in the ns halo
+        this%ew_halo_ny = ny / this%yimages + 1 + 2*this%halo_size  ! number of grid cells in y in the ew halo
+      endif
+      !if (image >= 30 .and. ((this%nx_e+this%ny_e)==0) .and. this%nz==20) then
+      !  write(*,*) 'image: ',image
+      !  write(*,*) this%ns_halo_nx
+      !  write(*,*) this%ew_halo_ny
+      !  write(*,*) this%ximages
+      !  write(*,*) this%yimages
+      !  write(*,*) nx
+      !  write(*,*) ny
+      !  write(*,*) 'its: ',this%its
+      !  write(*,*) 'ite: ',this%ite
+      !  write(*,*) 'ims: ',this%ims
+      !  write(*,*) 'ime: ',this%ime
+      !  write(*,*) 'jts: ',this%jts
+      !  write(*,*) 'jte: ',this%jte
+      !  write(*,*) 'jms: ',this%jms
+      !  write(*,*) 'jme: ',this%jme
+
+
+      !endif
+
+  end subroutine
+
+  !> -------------------------------
+  !! updates the grid memory dimensions with halo sizes if necessary
+  !!
+  !! -------------------------------
+  subroutine update_with_halos(grid, halo_size)
+      type(grid_t), intent(inout)   :: grid
+      integer,      intent(in)      :: halo_size
+
+      logical :: north_boundary, south_boundary, &
+                 east_boundary,  west_boundary
+
+      north_boundary = (grid%yimg == grid%yimages)
+      south_boundary = (grid%yimg == 1)
+      east_boundary  = (grid%ximg == grid%ximages)
+      west_boundary  = (grid%ximg == 1)
+
+      ! if this is on a given boundary, then add 0, if it is not a boundary than add/subtract halo_size
+      !grid%ims = grid%its - merge(0, halo_size, west_boundary)
+      !grid%ime = grid%ite + merge(0, halo_size, east_boundary)
+      !grid%jms = grid%jts - merge(0, halo_size, south_boundary)
+      !grid%jme = grid%jte + merge(0, halo_size, north_boundary)
+
+      grid%ims = grid%ims - merge(0, halo_size, west_boundary)
+      grid%ime = grid%ime + merge(0, halo_size, east_boundary)
+      grid%jms = grid%jms - merge(0, halo_size, south_boundary)
+      grid%jme = grid%jme + merge(0, halo_size, north_boundary)
+
+      ! if this is on a boundary, we should skip 1 grid cell (the boundary conditions) else we should skip the halo
+      grid%its = grid%ims + halo_size !merge(1, halo_size, west_boundary)
+      grid%ite = grid%ime - halo_size !merge(1, halo_size, east_boundary)
+      grid%jts = grid%jms + halo_size !merge(1, halo_size, south_boundary)
+      grid%jte = grid%jme - halo_size !merge(1, halo_size, north_boundary)
+
+
+      grid%nx = grid%ime - grid%ims + 1
+      grid%ny = grid%jme - grid%jms + 1
+
+  end subroutine
+
+  subroutine create_MPI_types(grid, win_nz)
+      type(grid_t), intent(inout)   :: grid
+      integer, optional, intent(in) :: win_nz
+
+      integer :: nz_win, loc_nz
+
+      nz_win = grid%nz
+      if (present(win_nz)) nz_win = win_nz
+      loc_nz = max(1,grid%nz)
+
+      if (grid%is3d) then
+        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [(grid%ite-grid%its+1), loc_nz, grid%halo_size+1], &
+                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_halo)
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny], [grid%halo_size+1, loc_nz, (grid%jte-grid%jts+1)], &
+                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_halo)
+        call MPI_Type_create_subarray(3, [grid%nx, nz_win, grid%ny], [grid%halo_size+grid%nx_e, loc_nz, grid%halo_size+grid%ny_e], &
+                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_halo)
+
+        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [(grid%ite-grid%its+1), loc_nz, grid%halo_size+1], &
+                [grid%halo_size,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_win_halo)
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny], [grid%halo_size+1, loc_nz, (grid%jte-grid%jts+1)], &
+                [0,0,grid%halo_size], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_win_halo)
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%halo_size+1], [grid%halo_size+grid%nx_e, loc_nz, grid%halo_size+grid%ny_e], &
+                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_win_halo)
+
+      else
+        call MPI_Type_create_subarray(2, [grid%ns_halo_nx, grid%halo_size+1], [(grid%ite-grid%its+1), grid%halo_size+1], &
+                [0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_halo)
+        call MPI_Type_create_subarray(2, [grid%halo_size+1, grid%ew_halo_ny], [grid%halo_size+1, (grid%jte-grid%jts+1)], &
+                [0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_halo)
+        call MPI_Type_create_subarray(2, [grid%nx, grid%ny], [grid%halo_size+grid%nx_e, grid%halo_size+grid%ny_e], &
+                [0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_halo)
+
+        call MPI_Type_create_subarray(3, [grid%ns_halo_nx, nz_win, grid%halo_size+1], [(grid%ite-grid%its+1), 1, grid%halo_size+1], &
+                [grid%halo_size,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%NS_win_halo)
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%ew_halo_ny], [grid%halo_size+1, 1, (grid%jte-grid%jts+1)], &
+                [0,0,grid%halo_size], MPI_ORDER_FORTRAN, MPI_REAL, grid%EW_win_halo)
+        call MPI_Type_create_subarray(3, [grid%halo_size+1, nz_win, grid%halo_size+1], [grid%halo_size+grid%nx_e, 1, grid%halo_size+grid%ny_e], &
+                [0,0,0], MPI_ORDER_FORTRAN, MPI_REAL, grid%corner_win_halo)
+
+      endif
+      call MPI_Type_commit(grid%NS_halo)
+      call MPI_Type_commit(grid%NS_win_halo)
+      call MPI_Type_commit(grid%EW_halo)
+      call MPI_Type_commit(grid%EW_win_halo)
+      call MPI_Type_commit(grid%corner_halo)
+      call MPI_Type_commit(grid%corner_win_halo)
+
+  end subroutine
+
+end submodule

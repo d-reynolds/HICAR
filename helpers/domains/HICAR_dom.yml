@@ -1,0 +1,25 @@
+name: HICAR_dom
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - matplotlib
+  - xarray
+  - xesmf==0.8.8
+  - netcdf4
+  - dask
+  - pandas
+  - scipy
+  - numpy
+  - esmpy==8.7.0
+  - pyproj
+  - cython
+  - embree
+  - geographiclib
+  - skyfield
+  - ipython
+  - setuptools
+  - tqdm
+  - pillow
+  - requests
+  - tbb-devel

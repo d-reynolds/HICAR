@@ -1,0 +1,1837 @@
+!>------------------------------------------------------------
+!!  Handles reading boundary conditions from the forcing file(s)
+!!
+!!  @author
+!!  Ethan Gutmann (gutmann@ucar.edu)
+!!
+!!------------------------------------------------------------
+submodule(boundary_interface) boundary_implementation
+    use array_utilities,        only : interpolate_in_z, array_offset_x, array_offset_y, array_offset_y_2d, array_offset_x_2d
+    use io_routines,            only : io_getdims, io_read, io_maxDims, io_variable_is_present, io_write, io_var_reversed
+    use time_io,                only : read_times, find_timestep_in_filelist
+    use string,                 only : str, as_string
+    use mod_atm_utilities,      only : rh_to_mr, relative_humidity, compute_3d_p, compute_3d_z, exner_function
+    use geo,                    only : standardize_latlon, geo_interp, geo_lut, longitude_system_name
+    use vertical_interpolation, only : vLUT, vinterp
+    use timer_interface,    only : timer_t
+    use debug_module,           only : check_ncdf
+    use mod_wrf_constants,      only : gravity
+    use variable_interface,     only : variable_t
+    use meta_data_interface, only : meta_data_t
+    use icar_constants,         only : STD_OUT_PE, kMAX_FILE_LENGTH, kVARS, kFM_GRID_Z
+    use output_metadata,        only : get_varmeta
+
+    implicit none
+contains
+
+    !>------------------------------------------------------------
+    !! Set default component values
+    !! Reads initial conditions from the forcing file into image 1
+    !!
+    !! Distributes initial conditions to all other images
+    !!
+    !!------------------------------------------------------------
+    module subroutine init_boundary(this, options, domain_lat, domain_lon, parent_options)
+        class(boundary_t),    intent(inout) :: this
+        type(options_t),      intent(inout) :: options
+        real, dimension(:,:), intent(in)    :: domain_lat
+        real, dimension(:,:), intent(in)    :: domain_lon
+        type(options_t), optional, intent(in)    :: parent_options
+
+        type(Time_type) :: strt_time
+        character(len=kMAX_NAME_LENGTH), allocatable :: vars_to_read(:)
+        integer,                         allocatable :: var_indx(:)
+        type(dim_arrays_type),           allocatable :: var_dimensions(:)
+        integer :: lon_sys
+
+        ! The longitude convention was resolved to a concrete value (Maintain/Prime/Dateline)
+        ! while the domain was initialised; reuse it so the forcing is put on the same system.
+        lon_sys = options%domain%longitude_system
+
+
+        ! the parameters option type can't contain allocatable arrays because it is a coarray
+        ! so we need to allocate the vars_to_read and var_dimensions outside of the options type
+        call setup_variable_lists(options%forcing%vars_to_read, options%forcing%dim_list, options, vars_to_read, var_dimensions, var_indx)
+
+        strt_time = options%general%start_time
+        if (options%restart%restart) strt_time = options%restart%restart_time
+
+        ! Read through forcing variable names stored in "options"
+        ! needs to read each one to find the grid information for it
+        ! then create grid and initialize a variable...
+        ! also need to explicitly save lat and lon data
+        ! if (STD_OUT_PE) then
+        if (present(parent_options)) then
+            call this%init_local_asnest(vars_to_read, var_dimensions, var_indx,   &
+                                    domain_lat,        &
+                                    domain_lon,       &
+                                    parent_options,    &
+                                    lon_sys)
+        else
+            call this%init_local(options%forcing,                           &
+                                    vars_to_read, var_dimensions, var_indx,  &
+                                    strt_time,                      &
+                                    domain_lat,        &
+                                    domain_lon,        &
+                                    lon_sys)
+
+            ! sanity-check the user's forcing options against the actual forcing data
+            ! (root/forcing path only -- nests get their state from the parent)
+            call check_forcing_options(this, options)
+        endif
+        ! endif
+        ! call this%distribute_initial_conditions()
+
+
+        call setup_boundary_geo(this)
+
+    end subroutine init_boundary
+
+
+    !>------------------------------------------------------------
+    !! Sanity-check user-supplied forcing options against the actual forcing data.
+    !!
+    !! Emits warnings (never fatal) when a namelist option looks inconsistent with
+    !! the values found in the forcing file(s). These are heuristics meant to catch
+    !! common unit/configuration mistakes (geopotential vs geometric height, missing
+    !! temperature offset, pressure unit errors, static vs time-varying z).
+    !!
+    !! Only STD_OUT_PE reads the forcing for these checks and prints the warnings,
+    !! and it runs once at start-up, so the extra I/O is negligible.
+    !!------------------------------------------------------------
+    subroutine check_forcing_options(this, options)
+        implicit none
+        class(boundary_t), intent(in) :: this
+        type(options_t),   intent(in) :: options
+
+        real, allocatable :: z1(:,:,:), z2(:,:,:)
+        type(Time_type), allocatable :: times1(:), times2(:)
+        type(time_delta_t) :: dt
+        character(len=kMAX_FILE_LENGTH) :: second_file
+        real    :: hgt_min, hgt_max, z_min, z_max, z_lo_max, z_hi_max, z_first_max
+        real    :: t_min, t_max, p_min, p_max, pb_min, pb_max, q_min, q_max
+        real    :: model_top, eff_tmin, eff_pmax, zdiff, ztol, lev_lo, lev_hi
+        real    :: actual_dt, expected_dt
+        real    :: t_lev1, t_levN, p_lev1, p_levN, pb_lev1, pb_levN, t_bottom, t_top, dT_lapse
+        logical :: ok, okb, okp, bottom_is_lev1, test1, test1_ok, test2, test2_ok, evaluable
+        logical :: looks_geopotential, looks_height, z_changes, have_second_z
+
+        real, parameter :: GEOP_HGT_RATIO   = 2.0      ! terrain vs near-surface z level
+        real, parameter :: GEOP_TOP_RATIO   = 3.0      ! model top vs max forcing z
+        real, parameter :: MIN_PLAUSIBLE_P  = 50000.0  ! [Pa] minimum believable max pressure
+        real, parameter :: MAX_PLAUSIBLE_QV = 0.05     ! [kg/kg] ceiling for mixing ratio / specific humidity
+        real, parameter :: POT_T_MARGIN     = 2.0      ! [K] min top-vs-bottom T diff to classify the profile
+
+        ! Only image 1 reads the forcing for these checks and prints warnings.
+        if (.not. STD_OUT_PE) return
+
+        ! -----------------------------------------------------------------
+        ! z_is_geopotential
+        ! Genuine geopotential height is ~g (9.8x) larger than geometric height,
+        ! so the forcing z is far larger than the terrain and the model top when it
+        ! is geopotential. Both ratio tests therefore FAIL when z is geopotential.
+        ! -----------------------------------------------------------------
+        if ( (.not. options%forcing%compute_z) .and. (trim(options%forcing%zvar) /= "") ) then
+            call read_atmos_extremes(this%firstfile, options%forcing%zvar, this%firststep, ok, &
+                                     z_min, z_max, z_lo_max, z_hi_max)
+            if (ok) then
+                ! the near-surface level has the smaller heights; pick it robustly
+                ! regardless of whether the forcing z axis is flipped top-to-bottom
+                z_first_max = min(z_lo_max, z_hi_max)
+
+                ! test1: terrain max within a factor of the near-surface z level max
+                test1    = .false.
+                test1_ok = .false.
+                if (trim(options%forcing%hgtvar) /= "") then
+                    call read_surface_extremes(this%firstfile, options%forcing%hgtvar, this%firststep, &
+                                               test1_ok, hgt_min, hgt_max)
+                    if (test1_ok) test1 = within_factor(hgt_max, z_first_max, GEOP_HGT_RATIO)
+                end if
+
+                ! test2 (only consulted if test1 did not already indicate geometric height):
+                ! model top within a factor of the max forcing z
+                model_top = forcing_model_top(options)
+                test2    = .false.
+                test2_ok = .false.
+                if ( (.not. test1) .and. (model_top > 0.0) .and. (z_max > 0.0) ) then
+                    test2_ok = .true.
+                    test2 = within_factor(model_top, z_max, GEOP_TOP_RATIO)
+                end if
+
+                evaluable          = test1_ok .or. test2_ok
+                looks_geopotential = evaluable .and. (.not. test1) .and. (.not. test2)
+                looks_height       = test1 .or. test2
+
+                if (looks_geopotential .and. (.not. options%forcing%z_is_geopotential)) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  Forcing height '"//trim(options%forcing%zvar)//"' looks like GEOPOTENTIAL height,"
+                    write(*,*) "  but z_is_geopotential = .False. in the namelist."
+                    write(*,*) "    max forcing z          : ", z_max
+                    write(*,*) "    near-surface z (max)   : ", z_first_max
+                    if (test1_ok) write(*,*) "    forcing terrain (max)  : ", hgt_max
+                    if (test2_ok) write(*,*) "    model top height [m]   : ", model_top
+                    write(*,*) "  These values are ~g (9.8x) larger than expected for geometric height."
+                    write(*,*) "  If '"//trim(options%forcing%zvar)//"' is geopotential height, set z_is_geopotential = .True."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                else if (looks_height .and. options%forcing%z_is_geopotential) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  z_is_geopotential = .True. but forcing height '"//trim(options%forcing%zvar)//"'"
+                    write(*,*) "  looks like geometric (m) height, not geopotential."
+                    write(*,*) "    max forcing z          : ", z_max
+                    write(*,*) "    near-surface z (max)   : ", z_first_max
+                    if (test1_ok) write(*,*) "    forcing terrain (max)  : ", hgt_max
+                    if (test2_ok) write(*,*) "    model top height [m]   : ", model_top
+                    write(*,*) "  If '"//trim(options%forcing%zvar)//"' is already in meters, set z_is_geopotential = .False."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                end if
+            end if
+        end if
+
+        ! -----------------------------------------------------------------
+        ! time_varying_z
+        ! Compare the forcing height field across two forcing steps (the next step in
+        ! the same file, else the first step of the next file). If it changes, z is
+        ! time-varying and time_varying_z should be .True. (and vice-versa).
+        ! -----------------------------------------------------------------
+        if ( (.not. options%forcing%compute_z) .and. (trim(options%forcing%zvar) /= "") ) then
+            call read_atmos_full(this%firstfile, options%forcing%zvar, this%firststep, z1, ok)
+            if (ok) then
+                have_second_z = .false.
+
+                ! prefer the next time step within the same file
+                if (this%firststep + 1 <= var_ntimes(this%firstfile, options%forcing%zvar)) then
+                    call read_atmos_full(this%firstfile, options%forcing%zvar, this%firststep + 1, z2, have_second_z)
+                end if
+
+                ! otherwise fall back to the first step of the next forcing file
+                if (.not. have_second_z .and. allocated(options%forcing%boundary_files)) then
+                    second_file = next_forcing_file(options%forcing%boundary_files, this%firstfile)
+                    if (trim(second_file) /= "") then
+                        call read_atmos_full(second_file, options%forcing%zvar, 1, z2, have_second_z)
+                    end if
+                end if
+
+                if (have_second_z) then
+                    if ( all(shape(z1) == shape(z2)) ) then
+                        zdiff     = maxval(abs(z2 - z1))
+                        ztol      = 1.0e-4 * max(1.0, maxval(abs(z1)))
+                        z_changes = (zdiff > ztol)
+
+                        if (z_changes .and. (.not. options%forcing%time_varying_z)) then
+                            write(*,*) "  "
+                            write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                            write(*,*) "  Forcing height '"//trim(options%forcing%zvar)//"' changes between forcing steps"
+                            write(*,*) "  but time_varying_z = .False. in the namelist."
+                            write(*,*) "    max |dz| between steps : ", zdiff
+                            write(*,*) "  If the forcing vertical coordinate varies in time, set time_varying_z = .True."
+                            write(*,*) "  ---------------------------------------------------------------------------"
+                        else if ((.not. z_changes) .and. options%forcing%time_varying_z) then
+                            write(*,*) "  "
+                            write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                            write(*,*) "  time_varying_z = .True. but forcing height '"//trim(options%forcing%zvar)//"'"
+                            write(*,*) "  is identical between the first two forcing steps."
+                            write(*,*) "  time_varying_z = .True. is likely unnecessary (and adds runtime cost)."
+                            write(*,*) "  ---------------------------------------------------------------------------"
+                        end if
+                    end if
+                end if
+            end if
+        end if
+
+        ! -----------------------------------------------------------------
+        ! t_offset
+        ! Temperature in HICAR is absolute (Kelvin, > 0). Negative values (after any
+        ! t_offset) imply the forcing T is in Celsius or relative to a base temperature.
+        ! -----------------------------------------------------------------
+        if (trim(options%forcing%tvar) /= "") then
+            call read_atmos_extremes(this%firstfile, options%forcing%tvar, this%firststep, ok, &
+                                     t_min, t_max, lev_lo, lev_hi)
+            if (ok) then
+                eff_tmin = t_min + options%forcing%t_offset
+                if (eff_tmin < 0.0) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  Forcing temperature '"//trim(options%forcing%tvar)//"' has negative values (interpreted as K)."
+                    write(*,*) "    min temperature        : ", t_min
+                    if (options%forcing%t_offset /= 0.0) &
+                        write(*,*) "    min after t_offset     : ", eff_tmin
+                    write(*,*) "  HICAR expects absolute temperature (Kelvin, > 0)."
+                    write(*,*) "  If your forcing T is in Celsius or relative to a base temperature, use t_offset"
+                    write(*,*) "  to convert it (e.g. t_offset = 273.15 for Celsius, or 300.0 for WRF perturbation T)."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                end if
+            end if
+        end if
+
+        ! -----------------------------------------------------------------
+        ! t_is_potential
+        ! Air temperature decreases with height (column top colder than bottom);
+        ! potential temperature increases with height (top warmer). The bottom of the
+        ! column is the level with the highest TOTAL pressure, so pressure anchors
+        ! "top vs bottom" robustly -- independent of the forcing's vertical storage
+        ! order. A constant t_offset / p_multiplier does not change the gradient sign.
+        ! -----------------------------------------------------------------
+        if ( (trim(options%forcing%tvar) /= "") .and. (trim(options%forcing%pvar) /= "") ) then
+            call read_level_means(this%firstfile, options%forcing%tvar, this%firststep, ok,  t_lev1, t_levN)
+            call read_level_means(this%firstfile, options%forcing%pvar, this%firststep, okb, p_lev1, p_levN)
+            ! add base pressure if the forcing splits pressure into perturbation + base,
+            ! so the orientation anchor uses TOTAL (monotonic) pressure
+            if (okb .and. (trim(options%forcing%pbvar) /= "")) then
+                call read_level_means(this%firstfile, options%forcing%pbvar, this%firststep, okp, pb_lev1, pb_levN)
+                if (okp) then
+                    p_lev1 = p_lev1 + pb_lev1
+                    p_levN = p_levN + pb_levN
+                end if
+            end if
+
+            ! Guard with magnitude bounds (not x==x NaN idioms, which -ffast-math may
+            ! drop): real temperatures are < 1000 in any units (K/Celsius/perturbation),
+            ! so a fill-contaminated mean is rejected. Require a pressure field that
+            ! looks like total pressure -- both end levels positive, plausibly bounded,
+            ! and differing by >30% (true for a real column, false for perturbation-only
+            ! pressure, whose top/bottom ordering is meaningless).
+            if ( ok .and. okb .and. &
+                 (abs(t_lev1) < 1000.0) .and. (abs(t_levN) < 1000.0) .and. &
+                 (p_lev1 > 0.0) .and. (p_levN > 0.0) .and. &
+                 (p_lev1 < 1.0e7) .and. (p_levN < 1.0e7) .and. &
+                 (max(p_lev1, p_levN) > 1.3 * min(p_lev1, p_levN)) ) then
+
+                ! the higher-pressure end level is the bottom of the column
+                bottom_is_lev1 = (p_lev1 > p_levN)
+                if (bottom_is_lev1) then
+                    t_bottom = t_lev1;  t_top = t_levN
+                else
+                    t_bottom = t_levN;  t_top = t_lev1
+                end if
+                dT_lapse = t_top - t_bottom
+
+                if ( (dT_lapse < -POT_T_MARGIN) .and. options%forcing%t_is_potential ) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  Forcing temperature '"//trim(options%forcing%tvar)//"' COOLS with height (column top"
+                    write(*,*) "  colder than bottom) -- this looks like AIR temperature, but t_is_potential = .True."
+                    write(*,*) "    bottom-level mean T    : ", t_bottom
+                    write(*,*) "    top-level mean T       : ", t_top
+                    write(*,*) "  If this field is air temperature, set t_is_potential = .False."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                else if ( (dT_lapse > POT_T_MARGIN) .and. (.not. options%forcing%t_is_potential) ) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  Forcing temperature '"//trim(options%forcing%tvar)//"' WARMS with height (column top"
+                    write(*,*) "  warmer than bottom) -- this looks like POTENTIAL temperature, but t_is_potential = .False."
+                    write(*,*) "    bottom-level mean T    : ", t_bottom
+                    write(*,*) "    top-level mean T       : ", t_top
+                    write(*,*) "  If this field is potential temperature, set t_is_potential = .True."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                end if
+            end if
+        end if
+
+        ! -----------------------------------------------------------------
+        ! p_multiplier
+        ! A maximum forcing pressure well below ~1e5 Pa implies the pressure is in
+        ! units other than Pa (e.g. hPa); p_multiplier rescales it.
+        ! -----------------------------------------------------------------
+        if (trim(options%forcing%pvar) /= "") then
+            call read_atmos_extremes(this%firstfile, options%forcing%pvar, this%firststep, ok, &
+                                     p_min, p_max, lev_lo, lev_hi)
+            if (ok) then
+                ! include base pressure if the forcing splits pressure into perturbation + base
+                pb_max = 0.0
+                if (trim(options%forcing%pbvar) /= "") then
+                    call read_atmos_extremes(this%firstfile, options%forcing%pbvar, this%firststep, okb, &
+                                             pb_min, pb_max, lev_lo, lev_hi)
+                    if (.not. okb) pb_max = 0.0
+                end if
+
+                eff_pmax = (p_max + pb_max) * options%forcing%p_multiplier
+                if (eff_pmax < MIN_PLAUSIBLE_P) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  Forcing pressure '"//trim(options%forcing%pvar)//"' has an implausibly low maximum."
+                    write(*,*) "    max pressure [Pa]      : ", eff_pmax
+                    write(*,*) "  Expected near-surface pressure is ~1e5 Pa; your pressure may be in other units."
+                    write(*,*) "  e.g. for hPa set p_multiplier = 100.0 to convert to Pa."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                end if
+            end if
+        end if
+
+        ! -----------------------------------------------------------------
+        ! qv_is_relative_humidity / qv_is_spec_humidity
+        ! Water vapor mixing ratio and specific humidity are both small (< ~0.05 kg/kg)
+        ! and are numerically indistinguishable from each other (q = w/(1+w) differ by
+        ! < ~4% over the same range). Relative humidity is far larger -- O(1) as a
+        ! fraction or O(100) as a percent -- so only the RH-vs-(mixing ratio/specific
+        ! humidity) distinction is reliably detectable from the data.
+        ! -----------------------------------------------------------------
+        if (trim(options%forcing%qvvar) /= "") then
+            call read_atmos_extremes(this%firstfile, options%forcing%qvvar, this%firststep, ok, &
+                                     q_min, q_max, lev_lo, lev_hi)
+            if (ok) then
+                if ( (q_max > MAX_PLAUSIBLE_QV) .and. (.not. options%forcing%qv_is_relative_humidity) ) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  Forcing humidity '"//trim(options%forcing%qvvar)//"' looks like RELATIVE HUMIDITY"
+                    if (q_max > 2.0) then
+                        write(*,*) "  (in percent), but qv_is_relative_humidity = .False. in the namelist."
+                    else
+                        write(*,*) "  (as a fraction), but qv_is_relative_humidity = .False. in the namelist."
+                    end if
+                    write(*,*) "    max qv                 : ", q_max
+                    write(*,*) "  Mixing ratio / specific humidity are < ~0.05 kg/kg (or your qv may be in g/kg)."
+                    write(*,*) "  If this field is relative humidity, set qv_is_relative_humidity = .True."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                else if ( (q_max <= MAX_PLAUSIBLE_QV) .and. options%forcing%qv_is_relative_humidity ) then
+                    write(*,*) "  "
+                    write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                    write(*,*) "  qv_is_relative_humidity = .True. but forcing humidity '"//trim(options%forcing%qvvar)//"'"
+                    write(*,*) "  has a maximum of ", q_max, " -- far smaller than relative humidity (O(1) or O(100))."
+                    write(*,*) "  This looks like mixing ratio or specific humidity. If so, set"
+                    write(*,*) "  qv_is_relative_humidity = .False. (and qv_is_spec_humidity as appropriate)."
+                    write(*,*) "  ---------------------------------------------------------------------------"
+                end if
+                ! NOTE: specific humidity vs mixing ratio cannot be distinguished from the
+                ! data, so qv_is_spec_humidity is not validated beyond the RH check above.
+            end if
+        end if
+
+        ! -----------------------------------------------------------------
+        ! inputinterval
+        ! Compare the namelist forcing interval against the actual spacing of the
+        ! forcing time stamps (the next time in the same file, else the first time of
+        ! the next file).
+        ! -----------------------------------------------------------------
+        if (trim(options%forcing%time_var) /= "") then
+            actual_dt = -1.0
+            call read_times(this%firstfile, options%forcing%time_var, times1)
+            if (allocated(times1)) then
+                if (size(times1) >= this%firststep + 1) then
+                    ! two time stamps available within the first forcing file
+                    dt = times1(this%firststep+1) - times1(this%firststep)
+                    actual_dt = real( dt%seconds() )
+                else if (allocated(options%forcing%boundary_files)) then
+                    ! only one time in this file -- compare against the next forcing file
+                    second_file = next_forcing_file(options%forcing%boundary_files, this%firstfile)
+                    if (trim(second_file) /= "") then
+                        call read_times(second_file, options%forcing%time_var, times2)
+                        if (allocated(times2)) then
+                            if (size(times2) >= 1) then
+                                dt = times2(1) - times1(this%firststep)
+                                actual_dt = real( dt%seconds() )
+                            end if
+                        end if
+                    end if
+                end if
+            end if
+
+            expected_dt = options%forcing%inputinterval
+            if ( (actual_dt > 0.0) .and. &
+                 (abs(actual_dt - expected_dt) > max(1.0, 1.0e-3 * expected_dt)) ) then
+                write(*,*) "  "
+                write(*,*) "  --------------------------------- WARNING ---------------------------------"
+                write(*,*) "  inputinterval does not match the forcing data time stamps."
+                write(*,*) "    inputinterval [s]      : ", expected_dt
+                write(*,*) "    forcing data dt [s]    : ", actual_dt
+                write(*,*) "  Set inputinterval to the actual spacing of the forcing time stamps."
+                write(*,*) "  ---------------------------------------------------------------------------"
+            end if
+        end if
+
+    end subroutine check_forcing_options
+
+
+    !>------------------------------------------------------------
+    !! Read a full 3D atmospheric forcing field. Handles 3D (x,y,z) and
+    !! 4D (x,y,z,t) variables (selecting time index 'step'). ok=.false. if the
+    !! variable is missing or has an unexpected rank.
+    !!------------------------------------------------------------
+    subroutine read_atmos_full(file, varname, step, a3, ok)
+        implicit none
+        character(len=*),  intent(in)  :: file, varname
+        integer,           intent(in)  :: step
+        real, allocatable, intent(out) :: a3(:,:,:)
+        logical,           intent(out) :: ok
+        integer, allocatable :: dims(:)
+
+        ok = .false.
+        if (.not. io_variable_is_present(file, varname)) return
+        call io_getdims(file, varname, dims)
+        if (size(dims) == 3) then
+            call io_read(file, varname, a3)
+            ok = .true.
+        else if (size(dims) == 4) then
+            call io_read(file, varname, a3, extradim_start=step)
+            ok = .true.
+        end if
+    end subroutine read_atmos_full
+
+
+    !>------------------------------------------------------------
+    !! Read a 3D atmospheric forcing field and return its extremes plus the per-level
+    !! max of the first and last vertical level. Vertical is dim 3 in the file layout.
+    !!------------------------------------------------------------
+    subroutine read_atmos_extremes(file, varname, step, ok, fmin, fmax, lo_lev_max, hi_lev_max)
+        implicit none
+        character(len=*), intent(in)  :: file, varname
+        integer,          intent(in)  :: step
+        logical,          intent(out) :: ok
+        real,             intent(out) :: fmin, fmax, lo_lev_max, hi_lev_max
+        real, allocatable :: a3(:,:,:)
+
+        call read_atmos_full(file, varname, step, a3, ok)
+        if (.not. ok) return
+        fmin       = minval(a3)
+        fmax       = maxval(a3)
+        lo_lev_max = maxval(a3(:,:,1))
+        hi_lev_max = maxval(a3(:,:,size(a3,3)))
+    end subroutine read_atmos_extremes
+
+
+    !>------------------------------------------------------------
+    !! Read a 3D atmospheric forcing field and return the horizontal MEAN of its
+    !! first and last vertical levels (vertical is dim 3). NaN/fill values propagate
+    !! into the mean so callers can reject them. ok=.false. if the var is missing.
+    !!------------------------------------------------------------
+    subroutine read_level_means(file, varname, step, ok, lev1_mean, levN_mean)
+        implicit none
+        character(len=*), intent(in)  :: file, varname
+        integer,          intent(in)  :: step
+        logical,          intent(out) :: ok
+        real,             intent(out) :: lev1_mean, levN_mean
+        real, allocatable :: a3(:,:,:)
+        real    :: npts
+        integer :: nz
+
+        call read_atmos_full(file, varname, step, a3, ok)
+        if (.not. ok) return
+        nz        = size(a3,3)
+        npts      = real(size(a3,1) * size(a3,2))
+        lev1_mean = sum(a3(:,:,1))  / npts
+        levN_mean = sum(a3(:,:,nz)) / npts
+    end subroutine read_level_means
+
+
+    !>------------------------------------------------------------
+    !! Read a 2D surface forcing field, returning its min/max. Handles 2D (x,y)
+    !! and 3D (x,y,t) variables (selecting time index 'step').
+    !!------------------------------------------------------------
+    subroutine read_surface_extremes(file, varname, step, ok, fmin, fmax)
+        implicit none
+        character(len=*), intent(in)  :: file, varname
+        integer,          intent(in)  :: step
+        logical,          intent(out) :: ok
+        real,             intent(out) :: fmin, fmax
+        real, allocatable :: a2(:,:)
+        integer, allocatable :: dims(:)
+
+        ok = .false.
+        if (.not. io_variable_is_present(file, varname)) return
+        call io_getdims(file, varname, dims)
+        if (size(dims) == 2) then
+            call io_read(file, varname, a2)
+            ok = .true.
+        else if (size(dims) == 3) then
+            call io_read(file, varname, a2, extradim_start=step)
+            ok = .true.
+        end if
+        if (ok) then
+            fmin = minval(a2)
+            fmax = maxval(a2)
+        end if
+    end subroutine read_surface_extremes
+
+
+    !>------------------------------------------------------------
+    !! Number of time records for a variable (1 if it has no trailing time dimension).
+    !!------------------------------------------------------------
+    integer function var_ntimes(file, varname)
+        implicit none
+        character(len=*), intent(in) :: file, varname
+        integer, allocatable :: dims(:)
+
+        var_ntimes = 1
+        if (.not. io_variable_is_present(file, varname)) return
+        call io_getdims(file, varname, dims)
+        if (size(dims) == 4) var_ntimes = dims(4)
+    end function var_ntimes
+
+
+    !>------------------------------------------------------------
+    !! Return the forcing file that follows 'current' in file_list, or "" if 'current'
+    !! is absent or is the last file in the list.
+    !!------------------------------------------------------------
+    function next_forcing_file(file_list, current) result(nextfile)
+        implicit none
+        character(len=*), intent(in) :: file_list(:)
+        character(len=*), intent(in) :: current
+        character(len=kMAX_FILE_LENGTH) :: nextfile
+        integer :: i
+
+        nextfile = ""
+        do i = 1, size(file_list) - 1
+            if (trim(file_list(i)) == trim(current)) then
+                nextfile = file_list(i+1)
+                return
+            end if
+        end do
+    end function next_forcing_file
+
+
+    !>------------------------------------------------------------
+    !! Height above ground of the model top [m], or -1 if it cannot be determined.
+    !!------------------------------------------------------------
+    real function forcing_model_top(options)
+        implicit none
+        type(options_t), intent(in) :: options
+
+        forcing_model_top = -1.0
+        if (options%domain%auto_level > 0) then
+            forcing_model_top = options%domain%model_top_height
+        else if (allocated(options%domain%dz_levels)) then
+            if (size(options%domain%dz_levels) > 0) forcing_model_top = sum(options%domain%dz_levels)
+        end if
+    end function forcing_model_top
+
+
+    !>------------------------------------------------------------
+    !! .true. if a and b are within a factor 'f' of each other (both strictly > 0).
+    !!------------------------------------------------------------
+    logical function within_factor(a, b, f)
+        implicit none
+        real, intent(in) :: a, b, f
+
+        within_factor = .false.
+        if (a > 0.0 .and. b > 0.0) within_factor = (max(a,b) <= f * min(a,b))
+    end function within_factor
+
+
+    subroutine read_latlon(file,latvar,lonvar,lat_out,lon_out,longitude_system,modified)
+        implicit none
+        character(len=*), intent(in) :: file, latvar, lonvar
+        real, allocatable, intent(out) :: lat_out(:,:), lon_out(:,:)
+        integer, optional, intent(in) :: longitude_system
+        logical, optional, intent(out) :: modified
+        real, allocatable :: lat_1d(:), lon_1d(:), temp_3d(:,:,:)
+        integer, allocatable :: lat_dims(:), lon_dims(:)
+
+        integer :: i, x_len, y_len
+        logical :: data_flipped
+
+        !See if lat and lon are 1D or 2D
+        call io_getdims(file, latvar, lat_dims)
+        call io_getdims(file, lonvar, lon_dims)
+
+        if (size(lat_dims) == 1) then
+            call io_read(file, latvar, lat_1d)
+
+            !This will always be the case for 1D or 2D lon
+            x_len = lon_dims(1)
+
+            allocate(lat_out(1:x_len,1:lat_dims(1)))
+            do i=1,x_len
+                lat_out(i,:) = lat_1d
+            end do
+        elseif (size(lat_dims) == 2) then
+            call io_read(file, latvar, lat_out)
+        elseif (size(lat_dims) == 3) then
+            !Third dimension is time, so we just subset to the first index
+            call io_read(file, latvar, temp_3d)
+            lat_out = temp_3d(:,:,1)
+        else
+            write(*,*) 'ERROR: lat dimension on forcing data is not 1D or 2D'
+            stop
+        endif
+
+        if (size(lon_dims) == 1) then
+            call io_read(file, lonvar, lon_1d)
+
+            if (size(lat_dims) == 1) then
+                y_len = lat_dims(1)
+            else
+                y_len = lat_dims(2)
+            endif
+
+            allocate(lon_out(1:lon_dims(1),1:y_len))
+            do i=1,y_len
+                lon_out(:,i) = lon_1d
+            end do
+        elseif (size(lon_dims) == 2) then
+            call io_read(file, lonvar, lon_out)
+        elseif (size(lon_dims) == 3) then
+            !Third dimension is time, so we just subset to the first index
+            call io_read(file, lonvar, temp_3d)
+            lon_out = temp_3d(:,:,1)
+        else
+            write(*,*) 'ERROR: lon dimension on forcing data is not 1D or 2D'
+            stop
+        endif
+
+        data_flipped = io_var_reversed(file, latvar)
+
+        if (data_flipped) then
+            lat_out = lat_out(:,size(lat_out,2):1:-1)
+            lon_out = lon_out(:,size(lon_out,2):1:-1)
+        endif
+
+        if (present(modified)) modified = .false.
+        if (present(longitude_system)) call standardize_latlon(lat_out, lon_out, longitude_system, modified=modified)
+
+    end subroutine read_latlon
+
+    !>------------------------------------------------------------
+    !! Set default component values
+    !! Reads initial conditions from the forcing file
+    !!
+    !!------------------------------------------------------------
+    module subroutine init_local(this, options, var_list, dim_list, var_indx, start_time, domain_lat, domain_lon, longitude_system)
+        implicit none
+        class(boundary_t),               intent(inout)  :: this
+        type(forcing_options_type),      intent(inout)  :: options
+        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list (:)
+        type(dim_arrays_type),           intent(in)     :: dim_list (:)
+        integer,                         intent(in)     :: var_indx (:)
+        type(Time_type),                 intent(in)     :: start_time
+        real, dimension(:,:),            intent(in)     :: domain_lat
+        real, dimension(:,:),            intent(in)     :: domain_lon
+        integer,                         intent(in)     :: longitude_system
+
+        type(variable_t)  :: zvar
+        real, allocatable :: temp_3d(:,:,:), temp_z_trans(:,:,:), temp_lat(:,:), temp_lon(:,:), temp_1d(:)
+        integer, allocatable :: qv_dims(:)
+        real :: neg_z
+        integer :: i, nx, ny, nz
+        logical :: z_staggered, data_flipped, lon_modified
+        integer, allocatable :: z_dims(:), start_3d(:), count_3d(:)
+        integer :: full_nz
+
+        ! figure out while file and timestep contains the requested start_time
+        call set_firstfile_firststep(this, start_time, options%boundary_files, options%time_var)
+
+        call read_latlon(this%firstfile, options%latvar, options%lonvar, temp_lat, temp_lon, longitude_system, modified=lon_modified)
+        if (lon_modified .and. STD_OUT_PE) then
+            write(*,*) "  NOTE: forcing longitudes converted to "//longitude_system_name(longitude_system)// &
+                       " to match the domain (longitude_system)"
+        endif
+
+        if (minval(domain_lat) < minval(temp_lat) .or. maxval(domain_lat) > maxval(temp_lat)) then
+            write(*,*) 'ERROR: First domain not contained within forcing data'
+            write(*,*) 'Lat min/max of domain on process: ',minval(domain_lat),' ',maxval(domain_lat)
+            write(*,*) 'Lat min/max of forcing data:         ',minval(temp_lat),' ',maxval(temp_lat)
+            stop
+        endif
+        if (minval(domain_lon) < minval(temp_lon) .or. maxval(domain_lon) > maxval(temp_lon)) then
+            write(*,*) 'ERROR: First domain not contained within forcing data'
+            write(*,*) 'Lon min/max of domain on process: ',minval(domain_lon),' ',maxval(domain_lon)
+            write(*,*) 'Lon min/max of forcing data:         ',minval(temp_lon),' ',maxval(temp_lon)
+            write(*,*) 'If the domain and forcing use different longitude conventions, set longitude_system (Domain).'
+            stop
+        endif
+
+        !Here we should begin the sub-setting:
+        !domain object should be fed in as an argument
+        !The lat/lon bounds of the domain object are used to find the appropriate indexes of the forcing data
+        !These bounds are then extended by 1 in each direction to accomodate bilinear interpolation
+        
+        call set_boundary_image(this, temp_lat, temp_lon, domain_lat, domain_lon)
+
+        !After finding forcing image indices, subset the lat/lon variables
+        allocate(this%lat((this%ite-this%its+1),(this%jte-this%jts+1)))
+        allocate(this%lon((this%ite-this%its+1),(this%jte-this%jts+1)))
+
+        this%lat = temp_lat(this%its:this%ite,this%jts:this%jte)
+        this%lon = temp_lon(this%its:this%ite,this%jts:this%jte)
+
+
+        ! read in the u and v lat and lon data if specified
+        if (options%ulat /= "" .and. options%ulon /= "") then
+            call io_getdims(this%firstfile, options%uvar, z_dims)
+            if (.not.(z_dims(1) == this%ide+1 .and. z_dims(2) == this%jde)) then
+                write(*,*) "ERROR: forcing variable uvar is not on the staggered u-grid, but lat/lon data for this grid (ulat and ulon) has been provided."
+                write(*,*) "ERROR: please make the dimensions of uvar and ulat/ulon consistent"
+                write(*,*) "       uvar size: ", z_dims(1), " ", z_dims(2)
+                write(*,*) "       lat/lon size: ", this%ide, " ", this%jde
+                stop
+            endif
+
+            allocate(this%ulat((this%ite-this%its+2),(this%jte-this%jts+1)))
+            allocate(this%ulon((this%ite-this%its+2),(this%jte-this%jts+1)))
+            call read_latlon(this%firstfile, options%ulat, options%ulon, temp_lat, temp_lon, longitude_system)
+
+            this%ulat = temp_lat(this%its:this%ite+1,this%jts:this%jte)
+            this%ulon = temp_lon(this%its:this%ite+1,this%jts:this%jte)
+        elseif(options%ulat == "" .and. options%ulon == "") then
+            !ensure that uvar has the same dimensions at lat and lon
+            !read in uvar
+            call io_getdims(this%firstfile, options%uvar, z_dims)
+            if (.not.(z_dims(1) == this%ide .and. z_dims(2) == this%jde)) then
+                write(*,*) "ERROR: forcing variable uvar is not on the mass-grid, and no lat/lon data for this grid (ulat and ulon) has been provided"
+                write(*,*) "       uvar size: ", z_dims(1), " ", z_dims(2)
+                write(*,*) "       lat/lon size: ", this%ide, " ", this%jde
+                stop
+            endif
+        else
+            write(*,*) "ERROR: ulat and ulon must both be set or both be unset for forcing data"
+            stop
+        endif
+
+        if (options%vlat /= "" .and. options%vlon /= "") then
+
+            call io_getdims(this%firstfile, options%vvar, z_dims)
+            if (.not.(z_dims(1) == this%ide .and. z_dims(2) == this%jde+1)) then
+                write(*,*) "ERROR: forcing variable vvar is not on the staggered v-grid, but lat/lon data for this grid (vlat and vlon) has been provided."
+                write(*,*) "ERROR: please make the dimensions of vvar and vlat/vlon consistent"
+                write(*,*) "       vvar size: ", z_dims(1), " ", z_dims(2)
+                write(*,*) "       lat/lon size: ", this%ide, " ", this%jde
+                stop
+            endif
+
+            allocate(this%vlat((this%ite-this%its+1),(this%jte-this%jts+2)))
+            allocate(this%vlon((this%ite-this%its+1),(this%jte-this%jts+2)))
+
+            call read_latlon(this%firstfile, options%vlat, options%vlon, temp_lat, temp_lon, longitude_system)
+
+            this%vlat = temp_lat(this%its:this%ite,this%jts:this%jte+1)
+            this%vlon = temp_lon(this%its:this%ite,this%jts:this%jte+1)
+        elseif(options%vlat == "" .and. options%vlon == "") then
+            !ensure that vvar has the same dimensions at lat and lon
+            !read in vvar
+            call io_getdims(this%firstfile, options%vvar, z_dims)
+            if (.not.(z_dims(1) == this%ide .and. z_dims(2) == this%jde)) then
+                write(*,*) "ERROR: forcing variable vvar is not on the mass-grid, and no lat/lon data for this grid (vlat and vlon) has been provided"
+                write(*,*) "       vvar size: ", z_dims(1), " ", z_dims(2)
+                write(*,*) "       lat/lon size: ", this%ide, " ", this%jde
+                stop
+            endif
+        else
+            write(*,*) "ERROR: vlat and vlon must both be set or both be unset for forcing data"
+            stop
+        endif
+
+        !get number of dimensions of qv_var to size the z array
+        call io_getdims(this%firstfile, options%qvvar, qv_dims)
+
+        if (size(qv_dims) == 4 .or. size(qv_dims) == 3) then
+            !qv is 3D, read normally...
+            nx = qv_dims(1)
+            ny = qv_dims(2)
+            nz = qv_dims(3)
+        elseif (size(qv_dims) == 1 .or. size(qv_dims) == 2) then
+            !qv is 1D, read and expand to 3D
+            if (STD_OUT_PE) write(*,*) '    Using Z dimension from qv variable in forcing data to construct forcing height coordinate...'
+            if (STD_OUT_PE) write(*,*) '    qv variable is 1D or 2D, assuming it is spatially 1D in the vertical...'
+            
+            nz = qv_dims(1)
+        else
+            write(*,*) 'ERROR: qv dimension on forcing data is not spatially 1D or 3D'
+            stop
+        endif
+        if (allocated(this%z)) then
+            !$acc exit data delete(this%z)
+            deallocate(this%z)
+        endif
+        allocate(this%z((this%ite-this%its+1),nz,(this%jte-this%jts+1)))
+        !$acc enter data create(this%z)
+
+        this%kts = 1
+        this%kte = nz
+
+        if (this%ite < this%its) write(*,*) ' its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%kte < this%kts) write(*,*) ' its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        if (this%jte < this%jts) write(*,*) ' its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+
+        ! call assert(size(var_list) == size(dim_list), "list of variable dimensions must match list of variables")
+        do i=1, size(var_list)
+            call add_var_to_dict(this, var_list(i), var_indx(i), dim_list(i)%num_dims, dim_list(i)%dims)
+        end do
+            
+        if (.not. options%compute_z) then
+            z_staggered = .False.
+
+            call io_getdims(this%firstfile, options%zvar, z_dims)
+            if (size(z_dims) >= 3) then
+                full_nz = z_dims(3)
+                if (size(z_dims)==4) then
+                    ! Set up start and count for reading subset
+                    start_3d = [this%its, this%jts, 1, this%firststep]
+                    count_3d = [(this%ite-this%its+1), (this%jte-this%jts+1), full_nz, 1]
+                elseif (size(z_dims)==3) then
+                    ! Set up start and count for reading subset
+                    start_3d = [this%its, this%jts, 1]
+                    count_3d = [(this%ite-this%its+1), (this%jte-this%jts+1), full_nz]
+                endif
+            else
+                write(*,*) "ERROR: zvar does not have at least 3 dimensions"
+                stop
+            endif
+
+            ! handle case that height is staggered in z dimension
+            if (full_nz == nz+1) then
+                z_staggered = .True.
+            elseif(full_nz == nz) then
+                z_staggered = .False.
+            else
+                !error
+                write(*,*) "ERROR: Incompatible vertical dimension sizes on forcing variable: ",options%zvar
+                write(*,*) "  Expected: ", nz, " or ", nz+1, " Found: ", full_nz
+                stop
+            endif
+                                    
+            ! Read subset of data directly using netCDF Fortran API
+            
+            call io_read(this%firstfile, options%zvar,   temp_3d,   extradim_start=this%firststep, &
+                         starts=start_3d, counts=count_3d)
+            nx = size(temp_3d,1)
+            ny = size(temp_3d,2)
+            nz = size(temp_3d,3)
+            
+            allocate(temp_z_trans(1:nx,1:nz,1:ny))
+            
+            temp_z_trans(1:nx,1:nz,1:ny) = reshape(temp_3d, shape=[nx,nz,ny], order=[1,3,2])
+
+            data_flipped = io_var_reversed(this%firstfile, options%zvar)
+            if (data_flipped) then
+                temp_z_trans = temp_z_trans(:,:,size(temp_z_trans,3):1:-1)
+            endif
+
+            if (z_staggered) call interpolate_in_z(temp_z_trans)
+
+            zvar = this%variables%get_var(kVARS%z)
+            zvar%data_3d = temp_z_trans
+            call this%variables%add_var(kVARS%z, zvar)
+        endif
+
+    end subroutine
+
+    !>------------------------------------------------------------
+    !! Set default component values
+    !! Reads initial conditions from the forcing file
+    !!
+    !!------------------------------------------------------------
+    module subroutine init_local_asnest(this, var_list, dim_list, var_indx, domain_lat, domain_lon, parent_options, longitude_system)
+        class(boundary_t),               intent(inout)  :: this
+        character(len=kMAX_NAME_LENGTH), intent(in)     :: var_list(:)
+        integer,                         intent(in)     :: var_indx(:)
+        type(dim_arrays_type),           intent(in)     :: dim_list (:)
+        real, dimension(:,:),            intent(in)     :: domain_lat
+        real, dimension(:,:),            intent(in)     :: domain_lon
+        type(options_t),                 intent(in)     :: parent_options
+        integer,                         intent(in)     :: longitude_system
+
+        integer :: i
+        logical :: lon_modified
+        real, allocatable, dimension(:,:) :: parent_nest_lat, parent_nest_lon
+
+        !Here we should begin the sub-setting:
+        !domain object should be fed in as an argument
+        !The lat/lon bounds of the domain object are used to find the appropriate indexes of the forcing data
+        !These bounds are then extended by 1 in each direction to accomodate bilinear interpolation
+
+        !  read in latitude and longitude coordinate data
+        call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%lat_hi, parent_options%domain%lon_hi, parent_nest_lat, parent_nest_lon, longitude_system, modified=lon_modified)
+        if (lon_modified .and. STD_OUT_PE) then
+            write(*,*) "  NOTE: parent-nest forcing longitudes converted to "//longitude_system_name(longitude_system)// &
+                       " to match the nested domain (longitude_system)"
+        endif
+
+        if (minval(domain_lat) < minval(parent_nest_lat) .or. maxval(domain_lat) > maxval(parent_nest_lat)) then
+            write(*,*) 'ERROR: Nested domain not contained within parent domain: ',trim(parent_options%domain%init_conditions_file)
+            write(*,*) 'Lat min/max of nested domain: ',minval(domain_lat),' ',maxval(domain_lat)
+            write(*,*) 'Lat min/max of parent domain:               ',minval(parent_nest_lat),' ',maxval(parent_nest_lat)
+            stop
+        endif
+        if (minval(domain_lon) < minval(parent_nest_lon) .or. maxval(domain_lon) > maxval(parent_nest_lon)) then
+            write(*,*) 'ERROR: Nested domain not contained within parent domain: ',trim(parent_options%domain%init_conditions_file)
+            write(*,*) 'Lon min/max of nested domain: ',minval(domain_lon),' ',maxval(domain_lon)
+            write(*,*) 'Lon min/max of parent domain:               ',minval(parent_nest_lon),' ',maxval(parent_nest_lon)
+            stop
+        endif
+
+        call set_boundary_image(this, parent_nest_lat, parent_nest_lon, domain_lat, domain_lon)
+
+        !After finding forcing image indices, subset the lat/lon variables
+        allocate(this%lat((this%ite-this%its+1),(this%jte-this%jts+1)))
+        allocate(this%lon((this%ite-this%its+1),(this%jte-this%jts+1)))
+
+        this%lat = parent_nest_lat(this%its:this%ite,this%jts:this%jte)
+        this%lon = parent_nest_lon(this%its:this%ite,this%jts:this%jte)
+
+        allocate(this%ulat((this%ite-this%its+2),(this%jte-this%jts+1)))
+        allocate(this%ulon((this%ite-this%its+2),(this%jte-this%jts+1)))
+
+        !see if ulat and ulon were given to parent domain
+        if (parent_options%domain%ulon_hi /= "" .and. parent_options%domain%ulat_hi /= "") then
+            call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%ulat_hi, parent_options%domain%ulon_hi, parent_nest_lat, parent_nest_lon, longitude_system)
+
+            this%ulat = parent_nest_lat(this%its:this%ite+1,this%jts:this%jte)
+            this%ulon = parent_nest_lon(this%its:this%ite+1,this%jts:this%jte)
+        else
+            call array_offset_x_2d(this%lon, this%ulon)
+            call array_offset_x_2d(this%lat, this%ulat)
+        endif
+
+        allocate(this%vlat((this%ite-this%its+1),(this%jte-this%jts+2)))
+        allocate(this%vlon((this%ite-this%its+1),(this%jte-this%jts+2)))
+
+        !see if vlat and vlon were given to parent domain
+        if (parent_options%domain%vlon_hi /= "" .and. parent_options%domain%vlat_hi /= "") then
+            call read_latlon(parent_options%domain%init_conditions_file, parent_options%domain%vlat_hi, parent_options%domain%vlon_hi, parent_nest_lat, parent_nest_lon, longitude_system)
+
+            this%vlat = parent_nest_lat(this%its:this%ite,this%jts:this%jte+1)
+            this%vlon = parent_nest_lon(this%its:this%ite,this%jts:this%jte+1)
+        else
+            call array_offset_y_2d(this%lon, this%vlon)
+            call array_offset_y_2d(this%lat, this%vlat)
+        endif
+
+        ! Get the height coordinate of the parent nest
+        this%kts = 1
+        this%kte = parent_options%domain%nz
+
+        if (allocated(this%z)) then
+            !$acc exit data delete(this%z)
+            deallocate(this%z)
+        endif
+        allocate(this%z((this%ite-this%its+1),this%kte,(this%jte-this%jts+1)))
+        this%z = 0.0 !parent_nest_z(this%its:this%ite,1:this%kte,this%jts:this%jte)
+        !$acc enter data copyin(this%z)
+
+        ! if (this%ite < this%its) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        ! if (this%kte < this%kts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+        ! if (this%jte < this%jts) write(*,*) 'image: ',PE_RANK_GLOBAL+1,'  its: ',this%its,'  ite: ',this%ite,'  jts: ',this%jts,'  jte: ',this%jte
+
+        ! call assert(size(var_list) == size(dim_list), "list of variable dimensions must match list of variables")
+        do i=1, size(var_list)
+            call add_var_to_dict(this, var_list(i), var_indx(i), dim_list(i)%num_dims, dim_list(i)%dims)
+        end do
+
+    end subroutine
+
+    !>------------------------------------------------------------
+    !! Set the boundary data structure to the correct time step / file in the list of files
+    !!
+    !! Reads the time_var from each file successively until it finds a timestep that matches time
+    !!------------------------------------------------------------
+    subroutine set_firstfile_firststep(this, time, file_list, time_var)
+        implicit none
+        class(boundary_t),  intent(inout) :: this
+        type(Time_type),    intent(in) :: time
+        character(len=*),   intent(in) :: file_list(:)
+        character(len=*),   intent(in) :: time_var
+
+        character(len=kMAX_FILE_LENGTH) :: filename
+        integer          :: error, n
+
+        this%firststep = find_timestep_in_filelist(file_list, time_var, time, this%firstfile, forward=.False., error=error)
+        
+        if (error==1) then
+            if (STD_OUT_PE) write(*,*) 'ERROR: Could not find the first time step in forcing files'
+            if (STD_OUT_PE) write(*,*) 'ERROR: Time: ',as_string(time)
+            if (STD_OUT_PE) write(*,*) 'ERROR: step returned was: ',this%firststep
+            stop "Ran out of files to process while searching for matching time variable!"
+        endif
+
+    end subroutine
+
+    !>------------------------------------------------------------
+    !! Determine image location for boundary object within forcing data
+    !!
+    !!------------------------------------------------------------
+
+    subroutine set_boundary_image(this, temp_lat, temp_lon, domain_lat, domain_lon)
+        implicit none
+        type(boundary_t), intent(inout)   :: this
+        real, dimension(:,:), intent(in)  :: temp_lat, temp_lon, domain_lat, domain_lon
+        
+        real, allocatable, dimension(:,:) ::  LL_d, UR_d
+        real :: LLlat, LLlon, URlat, URlon
+        real, dimension(4) :: lat_corners, lon_corners
+        integer, dimension(2) :: temp_inds
+        integer :: nx, ny, d_ims, d_ime, d_jms, d_jme
+        
+        d_ims = lbound(domain_lat,1)
+        d_ime = ubound(domain_lat,1)
+        d_jms = lbound(domain_lat,2)
+        d_jme = ubound(domain_lat,2)
+
+        nx = size(temp_lat,1)
+        ny = size(temp_lat,2)
+        
+        allocate(LL_d(nx,ny))
+        allocate(UR_d(nx,ny))
+
+        ! get lower left and upper right lat/lon pairs from domain
+        lat_corners(1) = domain_lat(d_ims,d_jms)
+        lat_corners(2) = domain_lat(d_ime,d_jms)
+        lat_corners(3) = domain_lat(d_ims,d_jme)
+        lat_corners(4) = domain_lat(d_ime,d_jme)
+        
+        lon_corners(1) = domain_lon(d_ims,d_jms)
+        lon_corners(2) = domain_lon(d_ime,d_jms)
+        lon_corners(3) = domain_lon(d_ims,d_jme)
+        lon_corners(4) = domain_lon(d_ime,d_jme)
+        
+        LLlat = minval(lat_corners)
+        LLlon = minval(lon_corners)
+        URlat = maxval(lat_corners)
+        URlon = maxval(lon_corners)
+
+        ! calculate distance from LL/UR lat/lon for boundary lat/lons
+        LL_d = ((temp_lat-LLlat)**2+(temp_lon-LLlon)**2)
+        UR_d = ((temp_lat-URlat)**2+(temp_lon-URlon)**2)
+
+        ! find minimum distances to determine boundary image indices
+        temp_inds = minloc(LL_d)
+        this%its = temp_inds(1); this%jts = temp_inds(2)
+        temp_inds = minloc(UR_d)
+        this%ite = temp_inds(1); this%jte = temp_inds(2)
+
+        ! increase boundary image indices by 5 as buffer to allow for interpolation
+        this%its = max(this%its - 2,1)
+        this%ite = min(this%ite + 2,nx)
+        this%jts = max(this%jts - 2,1)
+        this%jte = min(this%jte + 2,ny)
+        this%ids = lbound(temp_lat,1)
+        this%ide = ubound(temp_lat,1)
+        this%jds = lbound(temp_lon,2)
+        this%jde = ubound(temp_lon,2)
+
+        if (minval(temp_lat(this%its:this%ite,this%jts:this%jte)) > LLlat) then
+            write(*,*) 'WARNING: Lower left latitude of domain not contained within forcing data, set_boundary_image method failed'
+            write(*,*) 'minval(domain_lat): ',minval(domain_lat),'  minval(forcing_lat): ',minval(temp_lat)
+            write(*,*) 'maxval(domain_lat): ',maxval(domain_lat),'  maxval(forcing_lat): ',maxval(temp_lat)
+            stop
+        endif
+        if (minval(temp_lon(this%its:this%ite,this%jts:this%jte)) > LLlon) then
+            write(*,*) 'WARNING: Lower left longitude of domain not contained within forcing data, set_boundary_image method failed'
+            write(*,*) 'minval(domain_lon): ',minval(domain_lon),'  minval(forcing_lon): ',minval(temp_lon)
+            write(*,*) 'maxval(domain_lon): ',maxval(domain_lon),'  maxval(forcing_lon): ',maxval(temp_lon)
+            stop
+        endif
+        if (maxval(temp_lat(this%its:this%ite,this%jts:this%jte)) < URlat) then
+            write(*,*) 'WARNING: Upper right latitude of domain not contained within forcing data, set_boundary_image method failed'
+            write(*,*) 'minval(domain_lat): ',minval(domain_lat),'  minval(forcing_lat): ',minval(temp_lat)
+            write(*,*) 'maxval(domain_lat): ',maxval(domain_lat),'  maxval(forcing_lat): ',maxval(temp_lat)
+            stop
+        endif
+        if (maxval(temp_lon(this%its:this%ite,this%jts:this%jte)) < URlon) then
+            write(*,*) 'WARNING: Upper right longitude of domain not contained within forcing data, set_boundary_image method failed'
+            write(*,*) 'minval(domain_lon): ',minval(domain_lon),'  minval(forcing_lon): ',minval(temp_lon)
+            write(*,*) 'maxval(domain_lon): ',maxval(domain_lon),'  maxval(forcing_lon): ',maxval(temp_lon)
+            stop
+        endif
+
+    end subroutine set_boundary_image
+
+
+    !>------------------------------------------------------------
+    !! Setup the main geo structure in the boundary structure
+    !!
+    !!------------------------------------------------------------
+    subroutine setup_boundary_geo(this)
+        implicit none
+        type(boundary_t), intent(inout) :: this
+
+        if (allocated(this%geo%lat)) deallocate(this%geo%lat)
+        allocate( this%geo%lat, source=this%lat)
+
+        if (allocated(this%geo%lon)) deallocate(this%geo%lon)
+        allocate( this%geo%lon, source=this%lon)
+
+        if (allocated(this%ulat) .and. allocated(this%ulon)) then
+            if (allocated(this%geo_u%lat)) deallocate(this%geo_u%lat)
+            allocate( this%geo_u%lat, source=this%ulat)
+
+            if (allocated(this%geo_u%lon)) deallocate(this%geo_u%lon)
+            allocate( this%geo_u%lon, source=this%ulon)
+        else
+            this%geo_u   = this%geo
+        endif
+
+        if (allocated(this%vlat) .and. allocated(this%vlon)) then
+            if (allocated(this%geo_v%lat)) deallocate(this%geo_v%lat)
+            allocate( this%geo_v%lat, source=this%vlat)
+
+            if (allocated(this%geo_v%lon)) deallocate(this%geo_v%lon)
+            allocate( this%geo_v%lon, source=this%vlon)
+        else
+            this%geo_v   = this%geo
+        endif
+
+        this%geo_agl = this%geo
+
+    end subroutine
+
+
+
+    !>------------------------------------------------------------
+    !! Reads and adds a variable into the variable dictionary
+    !!
+    !! Given a filename, varname, number of dimensions (2,3) and timestep
+    !! Read the timestep of varname from filename and stores the result in a variable structure
+    !!
+    !! Variable is then added to a master variable dictionary
+    !!
+    !!------------------------------------------------------------
+    subroutine add_var_to_dict(this, var_name, indx, ndims, dims)
+        implicit none
+        type(boundary_t), intent(inout) :: this
+        character(len=*), intent(in)    :: var_name
+        integer,          intent(in)    :: ndims, indx
+        integer,          intent(in)    :: dims(3)
+
+        real, allocatable :: temp_2d_data(:,:)
+        real, allocatable :: temp_3d_data(:,:,:)
+        type(variable_t)  :: new_variable
+        logical :: computed_flag, is_fm
+        integer :: nx, ny, nz
+        type(meta_data_t) :: var_meta
+
+        ! these variables are computed (e.g. pressure from height or height from pressure)
+        computed_flag = (len_trim(var_name) > 9 .and. var_name(max(1,len_trim(var_name)-8):len_trim(var_name)) == "_computed")
+
+        ! Fine-mesh (blowing-snow) variables live on their own vertical stack (kFM_GRID_Z levels),
+        ! not the atmospheric nz. Size the boundary buffer accordingly so parent-to-child packing,
+        ! scattering, and horizontal interpolation all agree on the z extent.
+        var_meta = get_varmeta(indx)
+        is_fm = (size(var_meta%dimensions) >= 2 .and. trim(var_meta%dimensions(2)) == "level_fm")
+
+        nx = (this%ite - this%its + 1)
+        nz = this%kte
+        if (is_fm) nz = kFM_GRID_Z
+        ny = (this%jte - this%jts + 1)
+        
+        !handle staggered variables
+        if (.not.(computed_flag)) then
+
+            !if we read in the data from a forcing file, dims should be set:
+            if (dims(1) == this%ide+1) nx = nx+1
+            if (dims(2) == this%jde+1) ny = ny+1
+
+            ! if we are setting up the boundary for a nest, dims will be set to 0. In this case,
+            ! check the variable associated with indx in kVARS to see if it is a staggered variable
+            if (sum(dims) == 0) then
+                !add stagger, if present
+                if (dims(1) == 0) nx = nx+var_meta%xstag
+                if (dims(2) == 0) ny = ny+var_meta%ystag
+            endif
+        endif
+
+        if (ndims==2) then
+            call new_variable%initialize( indx, [nx,ny] )
+            call this%variables%add_var(indx, new_variable)
+
+        elseif (ndims==3) then
+            call new_variable%initialize( indx, [nx,nz,ny] )
+            call this%variables%add_var(indx, new_variable)
+        elseif (computed_flag) then
+            call new_variable%initialize( indx, [nx,nz,ny] )
+            new_variable%computed = .True.
+
+            call this%variables%add_var(indx, new_variable)
+        endif
+
+    end subroutine
+
+    module subroutine setup_z(this, options)
+        implicit none
+        class(boundary_t),   intent(inout)   :: this
+        type(options_t),     intent(in)      :: options
+
+        type(interpolable_type) :: input_geo
+        real, allocatable :: temp_3d(:,:,:)
+        real :: neg_z
+        integer :: id, err, z_idx
+
+        ! Device data is authoritative after receive() — sync to host before reading
+        z_idx = this%variables%get_var_idx(kVARS%z)
+        !$acc update self(this%variables%var_list(z_idx)%var%data_3d)
+
+        if (.not.(this%variables%var_list(z_idx)%var%computed)) then
+
+            if (allocated(this%z)) then
+                !$acc exit data delete(this%z)
+                deallocate(this%z)
+            endif
+            allocate(this%z, source=this%variables%var_list(z_idx)%var%data_3d)
+            !$acc enter data copyin(this%z)
+        endif
+
+        if (.not.(allocated(this%original_geo%z)) )  then
+
+            ! geo%z will be interpolated from this%z to the high-res grids for vinterp in domain... not a great separation
+            ! here we save the original z dataset so that it can be used to interpolate varying z through time.
+            allocate( this%original_geo%z, source=this%z)
+
+            this%mass_to_u%lat = this%geo%lat
+            this%mass_to_u%lon = this%geo%lon
+            this%mass_to_v%lat = this%geo%lat
+            this%mass_to_v%lon = this%geo%lon
+
+            if (options%general%debug) then
+                ! These will likely always complain. The below function is intended to generate an interpolation table for moving
+                ! between a high-res and low-res grid. Here we use it to generate an interpolation table between the staggered and non-staggered grids.
+                ! since the staggered grid will always be offset by half a grid cell, this will likely always complain that the high-res data is not contained
+                ! in the low-res data.
+                call geo_LUT(this%geo_u, this%mass_to_u, err_msg='Hi-res: forcing%geo_u     Low-res: forcing%mass_to_u')
+                call geo_LUT(this%geo_v, this%mass_to_v, err_msg='Hi-res: forcing%geo_v     Low-res: forcing%mass_to_v')
+            else
+                call geo_LUT(this%geo_u, this%mass_to_u)
+                call geo_LUT(this%geo_v, this%mass_to_v)
+            endif
+            
+            if (allocated(this%original_geo_u%z)) deallocate(this%original_geo_u%z)
+            if (allocated(this%original_geo_v%z)) deallocate(this%original_geo_v%z)
+            allocate(this%original_geo_u%z(lbound(this%geo_u%lon,1):ubound(this%geo_u%lon,1), this%kts:this%kte, lbound(this%geo_u%lon,2):ubound(this%geo_u%lon,2)))            
+            allocate(this%original_geo_v%z(lbound(this%geo_v%lat,1):ubound(this%geo_v%lat,1), this%kts:this%kte, lbound(this%geo_v%lat,2):ubound(this%geo_v%lat,2)))     
+
+            call geo_interp(this%original_geo_u%z,   this%z, this%mass_to_u%geolut)
+            call geo_interp(this%original_geo_v%z,   this%z, this%mass_to_v%geolut)
+        endif
+
+    end subroutine setup_z
+
+    module subroutine interpolate_original_levels(this, options)
+        implicit none
+        class(boundary_t),   intent(inout)   :: this
+        type(options_t),     intent(in)      :: options
+
+        type(interpolable_type) :: input_geo, input_geo_u, input_geo_v
+        real, allocatable :: temp_3d(:,:,:)
+        integer :: i
+
+        call this%setup_z(options)
+
+        allocate(input_geo%z, source=this%z)
+        allocate(input_geo_u%z(lbound(this%geo_u%lon,1):(ubound(this%geo_u%lon,1)),lbound(this%z,2):ubound(this%z,2),lbound(this%geo_u%lon,2):ubound(this%geo_u%lon,2)))
+        allocate(input_geo_v%z(lbound(this%geo_v%lat,1):ubound(this%geo_v%lat,1),lbound(this%z,2):ubound(this%z,2),lbound(this%geo_v%lat,2):(ubound(this%geo_v%lat,2))))
+
+        call geo_interp(input_geo_u%z, input_geo%z, this%mass_to_u%geolut)
+        call geo_interp(input_geo_v%z, input_geo%z, this%mass_to_v%geolut)
+
+        ! create a vertical interpolation look up table for the current time step
+        call vLUT(this%original_geo, input_geo)
+        call vLUT(this%original_geo_u, input_geo_u)
+        call vLUT(this%original_geo_v, input_geo_v)
+
+        associate(list => this%variables)
+
+        ! loop through the list of variables that were read in and might need to be interpolated in 3D
+        do i = 1, list%n_vars
+            if (list%var_list(i)%var%three_d) then
+                ! need to vinterp this dataset to the original vertical levels (if necessary)
+
+                temp_3d = list%var_list(i)%var%data_3d
+
+                if (size(temp_3d,1) == (this%ite-this%its+2)) then
+                    call vinterp(list%var_list(i)%var%data_3d, temp_3d, input_geo_u%vert_lut)
+                elseif (size(temp_3d,3) == (this%jte-this%jts+2)) then
+                    call vinterp(list%var_list(i)%var%data_3d, temp_3d, input_geo_v%vert_lut)
+                else
+                    call vinterp(list%var_list(i)%var%data_3d, temp_3d, input_geo%vert_lut)
+                endif
+
+                !$acc update self(list%var_list(i)%var%data_3d)
+            endif
+        enddo
+        end associate
+
+    end subroutine
+
+
+    module subroutine update_computed_vars(this, options)
+        implicit none
+        class(boundary_t),   intent(inout)   :: this
+        type(options_t),     intent(in)      :: options
+
+        integer           :: err
+        integer :: p_idx, t_idx, pb_idx, iz_idx
+
+        integer :: nx,ny,nz, i
+        real, allocatable :: temp_z(:,:,:)
+        logical :: z_is_computed = .False.
+
+        associate(list => this%variables)
+
+
+        !Add base pressure to pressure, if provided
+        pb_idx = list%get_var_idx(kVARS%pressure_base, err)
+        if (err == 0) then
+            p_idx = list%get_var_idx(kVARS%pressure)
+            associate(p_data => list%var_list(p_idx)%var%data_3d, pb_data => list%var_list(pb_idx)%var%data_3d)
+            !$acc kernels present(p_data, pb_data)
+            p_data = p_data + pb_data
+            !$acc end kernels
+            end associate
+        endif
+
+        if (options%forcing%p_multiplier /= 1.0) then
+            p_idx = list%get_var_idx(kVARS%pressure)
+            associate(p_data => list%var_list(p_idx)%var%data_3d)
+            !$acc kernels present(p_data)
+            p_data = p_data * options%forcing%p_multiplier
+            !$acc end kernels
+            end associate
+        endif
+
+        if (options%forcing%qv_is_relative_humidity) then
+            call compute_mixing_ratio_from_rh(list, options)
+        endif
+
+        if (options%forcing%qv_is_spec_humidity) then
+            call compute_mixing_ratio_from_sh(list, options)
+        endif
+
+        if (options%forcing%t_offset /= 0) then
+            t_idx = list%get_var_idx(kVARS%potential_temperature)
+            associate(t_data => list%var_list(t_idx)%var%data_3d)
+            !$acc kernels present(t_data)
+            t_data = t_data + options%forcing%t_offset
+            !$acc end kernels
+            end associate
+        endif
+
+        ! loop through the list of variables checking for computed fields
+        do i = 1, list%n_vars
+            if (list%var_list(i)%var%computed) then
+                if (list%var_list(i)%id == kVARS%z) then
+                    call compute_z_update(this, list, options)
+                    z_is_computed = .True.
+                endif
+
+                if (list%var_list(i)%id == kVARS%pressure) then
+                    call compute_p_update(this, list, options)
+                endif
+            endif
+        enddo
+
+        if (.not.options%forcing%t_is_potential) then
+            t_idx = list%get_var_idx(kVARS%potential_temperature)
+            p_idx = list%get_var_idx(kVARS%pressure)
+            associate(t_data => list%var_list(t_idx)%var%data_3d, p_data => list%var_list(p_idx)%var%data_3d)
+            !$acc kernels present(t_data, p_data)
+            t_data = t_data / exner_function(p_data)
+            !$acc end kernels
+            end associate
+        endif
+
+        if (options%forcing%limit_rh) call limit_rh(list, options)
+        !limit sea surface temperature to be >= 273.15 (i.e. cannot freeze)
+        call limit_2d_var(list, kVARS%sst, min_val=273.15)
+
+        iz_idx = list%get_var_idx(kVARS%z)
+
+        if (.not.(list%var_list(iz_idx)%var%computed)) then
+            if (options%forcing%z_is_geopotential) then
+                associate(z_data => list%var_list(iz_idx)%var%data_3d)
+                ! see if the user has provided a base geopotential height field
+                pb_idx = list%get_var_idx(kVARS%geopotential_base, err)
+                if (err == 0) then
+                    associate(pb_data => list%var_list(pb_idx)%var%data_3d)
+                    !$acc kernels present(z_data, pb_data)
+                    z_data = z_data + pb_data
+                    !$acc end kernels
+                    end associate
+                endif
+                !$acc kernels present(z_data)
+                z_data = z_data / gravity
+                !$acc end kernels
+                end associate
+            endif
+        endif
+
+        ! interpolate_original_levels is host-only (uses vinterp, geo_interp).
+        ! Only sync when needed.
+        if (options%forcing%time_varying_z) then
+            ! Sync device->host for host-based vertical interpolation
+            do i = 1, this%variables%n_vars
+                if (this%variables%var_list(i)%var%two_d) then
+                    !$acc update self(this%variables%var_list(i)%var%data_2d)
+                else if (this%variables%var_list(i)%var%three_d) then
+                    !$acc update self(this%variables%var_list(i)%var%data_3d)
+                endif
+            enddo
+
+            call this%interpolate_original_levels(options)
+
+            ! Sync host->device after host-based interpolation
+            do i = 1, this%variables%n_vars
+                if (this%variables%var_list(i)%var%two_d) then
+                    !$acc update device(this%variables%var_list(i)%var%data_2d)
+                else if (this%variables%var_list(i)%var%three_d) then
+                    !$acc update device(this%variables%var_list(i)%var%data_3d)
+                endif
+            enddo
+        endif
+
+        end associate
+
+    end subroutine update_computed_vars
+
+
+    subroutine compute_mixing_ratio_from_rh(list, options)
+        implicit none
+        type(var_dict_t),   intent(inout)   :: list
+        type(options_t),    intent(in)      :: options
+
+        integer :: t_idx, p_idx, q_idx, i, j, k
+        real    :: maxq
+
+        t_idx = list%get_var_idx(kVARS%potential_temperature)
+        p_idx = list%get_var_idx(kVARS%pressure)
+        q_idx = list%get_var_idx(kVARS%water_vapor)
+
+        if (list%var_list(p_idx)%var%computed) stop "Need pressure as input to compute mixing ratio from relative humidity"
+
+        associate(tvar => list%var_list(t_idx)%var%data_3d, &
+                  pvar => list%var_list(p_idx)%var%data_3d, &
+                  qvar => list%var_list(q_idx)%var%data_3d)
+
+        ! GPU reduction to check if values are in percent
+        maxq = 0.0
+        !$acc parallel loop collapse(3) reduction(max:maxq) present(qvar)
+        do j = lbound(qvar,3), ubound(qvar,3)
+            do k = lbound(qvar,2), ubound(qvar,2)
+                do i = lbound(qvar,1), ubound(qvar,1)
+                    maxq = max(maxq, qvar(i,k,j))
+                enddo
+            enddo
+        enddo
+
+        if (maxq > 2) then
+            !$acc kernels present(qvar)
+            qvar = qvar / 100.0
+            !$acc end kernels
+        endif
+
+        if (options%forcing%t_is_potential) then
+            !$acc kernels present(qvar, tvar, pvar)
+            qvar = rh_to_mr(qvar, tvar * exner_function(pvar), pvar)
+            !$acc end kernels
+        else
+            !$acc kernels present(qvar, tvar, pvar)
+            qvar = rh_to_mr(qvar, tvar, pvar)
+            !$acc end kernels
+        endif
+
+        end associate
+
+    end subroutine compute_mixing_ratio_from_rh
+
+
+    subroutine limit_rh(list, options)
+        implicit none
+        type(var_dict_t),   intent(inout)   :: list
+        type(options_t),    intent(in)      :: options
+
+        integer :: t_idx, p_idx, q_idx
+        real :: rh, t
+        integer :: i,j,k
+
+        t_idx = list%get_var_idx(kVARS%potential_temperature)
+        p_idx = list%get_var_idx(kVARS%pressure)
+        q_idx = list%get_var_idx(kVARS%water_vapor)
+
+        associate(tvar => list%var_list(t_idx)%var%data_3d, &
+                  pvar => list%var_list(p_idx)%var%data_3d, &
+                  qvar => list%var_list(q_idx)%var%data_3d)
+
+        !$acc parallel loop gang vector collapse(3) present(tvar, pvar, qvar)
+        do j = lbound(tvar, 3), ubound(tvar, 3)
+            do k = lbound(tvar, 2), ubound(tvar, 2)
+                do i = lbound(tvar, 1), ubound(tvar, 1)
+
+                    t = tvar(i,k,j) * exner_function(pvar(i,k,j))
+
+                    rh = relative_humidity(t, qvar(i,k,j), pvar(i,k,j))
+
+                    if (rh > 1.0) then
+                        qvar(i,k,j) = rh_to_mr(1.0, t, pvar(i,k,j))
+                    endif
+
+                enddo
+            enddo
+        enddo
+        !$acc end parallel loop
+
+        end associate
+
+    end subroutine limit_rh
+
+    ! set minimum and/or maximum values on any 2D forcing variable (e.g. sst_var, rain_var)
+    subroutine limit_2d_var(list, var_id, min_val, max_val)
+        implicit none
+        type(var_dict_t),   intent(inout)   :: list
+        integer,            intent(in)      :: var_id
+        real, optional,     intent(in)      :: min_val
+        real, optional,     intent(in)      :: max_val
+
+        integer :: v_idx, err
+
+        v_idx = list%get_var_idx(var_id, err=err)
+
+        if (err > 0) return
+
+        associate(var => list%var_list(v_idx)%var%data_2d)
+        if (present(min_val)) then
+            !$acc kernels present(var)
+            where(var < min_val) var = min_val
+            !$acc end kernels
+        endif
+
+        if (present(max_val)) then
+            !$acc kernels present(var)
+            where(var > max_val) var = max_val
+            !$acc end kernels
+        endif
+        end associate
+
+    end subroutine limit_2d_var
+
+    subroutine compute_mixing_ratio_from_sh(list, options)
+        implicit none
+        type(var_dict_t),   intent(inout)   :: list
+        type(options_t),    intent(in)      :: options
+
+        integer :: q_idx
+
+        q_idx = list%get_var_idx(kVARS%water_vapor)
+
+        associate(q_data => list%var_list(q_idx)%var%data_3d)
+        !$acc kernels present(q_data)
+        q_data = q_data / (1 - q_data)
+        !$acc end kernels
+        end associate
+
+    end subroutine compute_mixing_ratio_from_sh
+
+
+    subroutine compute_z_update(this, list, options)
+        implicit none
+        class(boundary_t),  intent(inout)   :: this
+        type(var_dict_t),   intent(inout)   :: list
+        type(options_t),    intent(in)      :: options
+
+        integer :: err, q_idx, t_idx, pr_idx, ps_idx, z_idx, hgt_idx
+
+        real, allocatable :: t(:,:,:)
+
+        q_idx  = list%get_var_idx(kVARS%water_vapor)
+        t_idx  = list%get_var_idx(kVARS%potential_temperature)
+        pr_idx = list%get_var_idx(kVARS%pressure)
+
+        ps_idx = list%get_var_idx(kVARS%sea_surface_pressure, err)
+
+        associate(qvar  => list%var_list(q_idx)%var%data_3d,  &
+                  tvar  => list%var_list(t_idx)%var%data_3d,  &
+                  prvar => list%var_list(pr_idx)%var%data_3d)
+
+        allocate(t, mold=tvar)
+        !$acc enter data create(t)
+
+        if (options%forcing%t_is_potential) then
+            !$acc kernels present(t, prvar, tvar)
+            t = exner_function(prvar) * tvar
+            !$acc end kernels
+        else
+            !$acc kernels present(t, tvar)
+            t = tvar
+            !$acc end kernels
+        endif
+
+        if (err == 0) then
+            call compute_3d_z(prvar, list%var_list(ps_idx)%var%data_2d, this%z, t, qvar)
+        else
+            ps_idx  = list%get_var_idx(kVARS%surface_pressure, err)
+            hgt_idx = list%get_var_idx(kVARS%terrain)
+            if (err == 0) then
+                call compute_3d_z(prvar, list%var_list(ps_idx)%var%data_2d, this%z, t, qvar, list%var_list(hgt_idx)%var%data_2d)
+            else
+                write(*,*) "ERROR reading surface pressure or sea level pressure, variables not found"
+                error stop
+            endif
+        endif
+
+        !$acc exit data delete(t)
+        end associate
+
+        z_idx = list%get_var_idx(kVARS%z)
+        associate(z_data => list%var_list(z_idx)%var%data_3d)
+        !$acc kernels present(z_data, this%z)
+        z_data = this%z
+        !$acc end kernels
+        end associate
+
+    end subroutine compute_z_update
+
+    subroutine compute_p_update(this, list, options)
+        implicit none
+        class(boundary_t),  intent(inout)   :: this
+        type(var_dict_t),   intent(inout)   :: list
+        type(options_t),    intent(in)      :: options
+
+        integer :: err, hgterr, q_idx, t_idx, p_idx, ps_idx, hgt_idx
+
+        if (options%forcing%t_is_potential) stop "Need real air temperature to compute pressure"
+
+        q_idx   = list%get_var_idx(kVARS%water_vapor)
+        t_idx   = list%get_var_idx(kVARS%potential_temperature)
+        p_idx   = list%get_var_idx(kVARS%pressure)
+
+        ps_idx  = list%get_var_idx(kVARS%surface_pressure, err)
+        hgt_idx = list%get_var_idx(kVARS%terrain, hgterr)
+
+        if ((err + hgterr) == 0) then
+            call compute_3d_p(list%var_list(p_idx)%var%data_3d, list%var_list(ps_idx)%var%data_2d, &
+                              this%z, list%var_list(t_idx)%var%data_3d, list%var_list(q_idx)%var%data_3d, &
+                              list%var_list(hgt_idx)%var%data_2d)
+        else
+            ps_idx = list%get_var_idx(kVARS%sea_surface_pressure, err)
+
+            if (err == 0) then
+                call compute_3d_p(list%var_list(p_idx)%var%data_3d, list%var_list(ps_idx)%var%data_2d, &
+                                  this%z, list%var_list(t_idx)%var%data_3d, list%var_list(q_idx)%var%data_3d)
+            else
+                write(*,*) "ERROR reading surface pressure or sea level pressure, variables not found"
+                write(*,*) "ERROR or forcing height not given if sea level pressure is given"
+                error stop
+            endif
+        endif
+
+    end subroutine compute_p_update
+
+
+
+    !>------------------------------------------------------------
+    !! Setup the vars_to_read and var_dimensions arrays given a master set of variables
+    !!
+    !! Count the number of variables specified, then allocate and store those variables in a list just their size.
+    !! The master list will have all variables, but not all will be set
+    !!------------------------------------------------------------
+    subroutine setup_variable_lists(master_var_list, master_dim_list, opt, vars_to_read, var_dimensions, var_indx)
+        implicit none
+        character(len=kMAX_NAME_LENGTH), intent(in)                 :: master_var_list(:)
+        type(dim_arrays_type),           intent(in)                 :: master_dim_list(:)
+        type(options_t),                 intent(in)                 :: opt
+        character(len=kMAX_NAME_LENGTH), intent(inout), allocatable :: vars_to_read(:)
+        type(dim_arrays_type),           intent(inout), allocatable :: var_dimensions(:)
+        integer,                         intent(inout), allocatable :: var_indx(:)
+
+        integer :: n_valid_vars
+        integer :: i, curvar, err
+
+        n_valid_vars = 0
+        do i=1, size(master_var_list)
+            if (trim(master_var_list(i)) /= '') then
+                n_valid_vars = n_valid_vars + 1
+            endif
+        enddo
+
+        allocate(vars_to_read(  n_valid_vars), stat=err)
+        if (err /= 0) stop "vars_to_read: Allocation request denied"
+
+        allocate(var_dimensions(  n_valid_vars), stat=err)
+        if (err /= 0) stop "var_dimensions: Allocation request denied"
+
+        allocate(var_indx(  n_valid_vars), stat=err)
+        if (err /= 0) stop "var_dimensions: Allocation request denied"
+
+        curvar = 1
+        do i=1, size(master_var_list)
+            if (trim(master_var_list(i)) /= '') then
+                vars_to_read(curvar) = master_var_list(i)
+                var_dimensions(curvar)%num_dims = master_dim_list(i)%num_dims
+                var_dimensions(curvar)%dims(1:master_dim_list(i)%num_dims) = master_dim_list(i)%dims(1:master_dim_list(i)%num_dims)
+                ! if (STD_OUT_PE) print *, "in variable list: ", vars_to_read(curvar)
+                curvar = curvar + 1
+            endif
+        enddo
+
+        do i=1,size(vars_to_read)
+            if (vars_to_read(i) == opt%forcing%latvar) var_indx(i) = kVARS%latitude
+            if (vars_to_read(i) == opt%forcing%lonvar) var_indx(i) = kVARS%longitude
+            if (vars_to_read(i) == opt%forcing%uvar) var_indx(i) = kVARS%u
+            if (vars_to_read(i) == opt%forcing%ulat) var_indx(i) = kVARS%u_latitude
+            if (vars_to_read(i) == opt%forcing%ulon) var_indx(i) = kVARS%u_longitude
+            if (vars_to_read(i) == opt%forcing%vvar) var_indx(i) = kVARS%v
+            if (vars_to_read(i) == opt%forcing%vlat) var_indx(i) = kVARS%v_latitude
+            if (vars_to_read(i) == opt%forcing%vlon) var_indx(i) = kVARS%v_longitude
+            if (vars_to_read(i) == opt%forcing%wvar) var_indx(i) = kVARS%w_real
+            if (vars_to_read(i) == opt%forcing%pvar) var_indx(i) = kVARS%pressure
+            if (vars_to_read(i) == opt%forcing%pbvar) var_indx(i) = kVARS%pressure_base
+            if (vars_to_read(i) == opt%forcing%phbvar) var_indx(i) = kVARS%geopotential_base
+            if (vars_to_read(i) == opt%forcing%tvar) var_indx(i) = kVARS%potential_temperature
+            if (vars_to_read(i) == opt%forcing%qvvar) var_indx(i) = kVARS%water_vapor
+            if (vars_to_read(i) == opt%forcing%qcvar) var_indx(i) = kVARS%cloud_water_mass
+            if (vars_to_read(i) == opt%forcing%qivar) var_indx(i) = kVARS%ice_mass
+            if (vars_to_read(i) == opt%forcing%qrvar) var_indx(i) = kVARS%rain_mass
+            if (vars_to_read(i) == opt%forcing%qsvar) var_indx(i) = kVARS%snow_mass
+            if (vars_to_read(i) == opt%forcing%qgvar) var_indx(i) = kVARS%graupel_mass
+            if (vars_to_read(i) == opt%forcing%i2mvar) var_indx(i) = kVARS%ice2_mass
+            if (vars_to_read(i) == opt%forcing%i3mvar) var_indx(i) = kVARS%ice3_mass
+            if (vars_to_read(i) == opt%forcing%qncvar) var_indx(i) = kVARS%cloud_number
+            if (vars_to_read(i) == opt%forcing%qnivar) var_indx(i) = kVARS%ice_number
+            if (vars_to_read(i) == opt%forcing%qnrvar) var_indx(i) = kVARS%rain_number
+            if (vars_to_read(i) == opt%forcing%qnsvar) var_indx(i) = kVARS%snow_number
+            if (vars_to_read(i) == opt%forcing%qngvar) var_indx(i) = kVARS%graupel_number
+            if (vars_to_read(i) == opt%forcing%i2nvar) var_indx(i) = kVARS%ice2_number
+            if (vars_to_read(i) == opt%forcing%i3nvar) var_indx(i) = kVARS%ice3_number
+            if (vars_to_read(i) == opt%forcing%i1avar) var_indx(i) = kVARS%ice1_a
+            if (vars_to_read(i) == opt%forcing%i1cvar) var_indx(i) = kVARS%ice1_c
+            if (vars_to_read(i) == opt%forcing%i2avar) var_indx(i) = kVARS%ice2_a
+            if (vars_to_read(i) == opt%forcing%i2cvar) var_indx(i) = kVARS%ice2_c
+            if (vars_to_read(i) == opt%forcing%i3avar) var_indx(i) = kVARS%ice3_a
+            if (vars_to_read(i) == opt%forcing%i3cvar) var_indx(i) = kVARS%ice3_c
+            if (vars_to_read(i) == opt%forcing%qs_fmvar) var_indx(i) = kVARS%qs_fm
+            if (vars_to_read(i) == opt%forcing%ns_fmvar) var_indx(i) = kVARS%ns_fm
+            if (vars_to_read(i) == opt%forcing%hgtvar) var_indx(i) = kVARS%terrain
+            if (vars_to_read(i) == opt%forcing%pslvar) var_indx(i) = kVARS%sea_surface_pressure
+            if (vars_to_read(i) == opt%forcing%psvar) var_indx(i) = kVARS%surface_pressure
+            if (vars_to_read(i) == opt%forcing%sst_var) var_indx(i) = kVARS%sst
+            if (vars_to_read(i) == opt%forcing%pblhvar) var_indx(i) = kVARS%hpbl
+            if (vars_to_read(i) == opt%forcing%shvar) var_indx(i) = kVARS%sensible_heat
+            if (vars_to_read(i) == opt%forcing%lhvar) var_indx(i) = kVARS%latent_heat
+            if (vars_to_read(i) == opt%forcing%zvar) var_indx(i) = kVARS%z
+            if (vars_to_read(i) == opt%forcing%swdown_var) var_indx(i) = kVARS%shortwave
+            if (vars_to_read(i) == opt%forcing%lwdown_var) var_indx(i) = kVARS%longwave
+            if (vars_to_read(i) == opt%forcing%time_var) var_indx(i) = 1000
+
+        enddo
+    end subroutine
+
+    module subroutine release_boundary(this)
+        implicit none
+        class(boundary_t), intent(inout) :: this
+
+        ! Clean up GPU copies of interpolation lookup tables
+        ! (entered in domain_obj.F90 setup_geo_interpolation)
+        if (allocated(this%geo%geolut%x)) then
+            !$acc exit data delete(this%geo%geolut%x, this%geo%geolut%y, this%geo%geolut%w)
+        endif
+        if (allocated(this%geo_u%geolut%x)) then
+            !$acc exit data delete(this%geo_u%geolut%x, this%geo_u%geolut%y, this%geo_u%geolut%w)
+        endif
+        if (allocated(this%geo_v%geolut%x)) then
+            !$acc exit data delete(this%geo_v%geolut%x, this%geo_v%geolut%y, this%geo_v%geolut%w)
+        endif
+        if (allocated(this%geo%vert_lut%z)) then
+            !$acc exit data delete(this%geo%vert_lut%z, this%geo%vert_lut%w)
+        endif
+        if (allocated(this%geo_agl%vert_lut%z)) then
+            !$acc exit data delete(this%geo_agl%vert_lut%z, this%geo_agl%vert_lut%w)
+        endif
+        if (allocated(this%geo_u%vert_lut%z)) then
+            !$acc exit data delete(this%geo_u%vert_lut%z, this%geo_u%vert_lut%w)
+        endif
+        if (allocated(this%geo_v%vert_lut%z)) then
+            !$acc exit data delete(this%geo_v%vert_lut%z, this%geo_v%vert_lut%w)
+        endif
+        if (allocated(this%geo%z)) then
+            !$acc exit data delete(this%geo%z)
+        endif
+
+    end subroutine
+
+end submodule
