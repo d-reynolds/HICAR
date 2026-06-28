@@ -54,8 +54,10 @@ gated; manual dispatch and event-driven (PR/push) runs always run.
 
 ### 2.1 `hicar-full-test.yml` — the CPU correctness gate ✅
 
-GNU / CPU, GitHub-hosted. Triggers: **push** and **pull_request** (`main`/`develop`),
-**workflow_dispatch**, and **workflow_call** (reusable — see GPU lane).
+GNU / CPU, GitHub-hosted. Triggers: **`pull_request` → `main`** (the gate — runs on
+the *test-merge* and signs the PR head), **`push` to `main`/`develop`** (develop
+feedback; the `main` push is the **fresh post-merge run** that signs `main`'s own
+HEAD), **workflow_dispatch**, and **workflow_call** (reusable — see GPU lane).
 
 - **`cpu-debug`** (`MODE=debug`, bounds + `finit-real=nan`): unit/invariant tests
   (`HICAR-tester`) and reproducibility (decomposition + restart).
@@ -119,14 +121,13 @@ Builds HICAR twice on the same gfortran toolchain (`-DSNOWPACK_CPP=ON` C++
 bindings vs the default native-Fortran port), each into its **own build tree**
 (`build_cpp` / `build_fortran`, via `HICAR_BUILD_DIR`). It then runs a 3 h seeded-snowpack comparison
 (`tests/snowpack/test_snowpack_compare.sh`) against
-`tests/snowpack/tolerances_snowpack.yaml`. Triggers: PRs touching the snow drivers
-(paths-filtered), nightly, manual.
+`tests/snowpack/tolerances_snowpack.yaml`. Triggers: **every `pull_request` → `main`**
+(no path filter — runs on the test-merge), **`push` to `main`** (the post-merge run),
+nightly, and manual.
 
 A **`sign-snow`** job posts the **`snow-parity = success`** commit status that
-`main`'s ruleset requires (§2.6) whenever the comparison passes. It signs
-automatically on a PR that touches the snow drivers; for a `main` PR that does
-**not** touch them, dispatch the workflow on the head branch
-(`gh workflow run snowpack-compare.yml --ref develop`) to post the status.
+`main`'s ruleset requires (§2.6) whenever the comparison passes — on a PR it posts on
+the PR head, on a post-merge `push` it posts on `main`'s HEAD.
 
 **Parity blessing.** Analogous to the regression bless, but with a second,
 independent status context and one extra payload: a manual dispatch with
@@ -193,10 +194,12 @@ bracket when a divergence appeared.
 GNU / CPU, GitHub-hosted. Triggers: **nightly (03:30 UTC)**, **workflow_dispatch**,
 and **`workflow_run`** — it fires automatically when **HICAR full-test (CPU)**
 completes. Its `changed` gate runs the memcheck only when that full-test **passed**
-*and* the tested commit has an **open PR to `main`** (it checks out the full-test's
-`head_sha`). This makes valgrind a **required merge check** (§2.6) — kept off every
-push (valgrind is ~10–50× slower than native), but run automatically once a commit
-is actually a `main`-merge candidate.
+*and* was either a **PR into `main`** (signs the PR head) or a **post-merge `push` to
+`main`** (signs `main`'s HEAD); `develop` pushes are skipped (it reads the triggering
+run's event + branch and checks out its `head_sha`). This makes valgrind a
+**required merge check** (§2.6) — kept off `develop` pushes (valgrind is ~10–50×
+slower than native), but run automatically on every `main`-merge candidate and on
+`main` itself.
 
 A CPU **debug** build runs the unit-test suite (`HICAR-tester`) under `valgrind
 --track-origins=yes`. This lane exists because the debug build's
@@ -227,22 +230,26 @@ SHA it tested:
 
 | Status context | Posted by | How it's produced |
 |---|---|---|
-| `hicar-full-test` | full-test `sign` | **auto** — push to `develop` (or a PR) passes the CPU suite |
-| `valgrind` | valgrind `sign-valgrind` | **auto** — `workflow_run` after full-test passes, when an open `main` PR exists |
-| `gpu-check` | gpu `sign-gpu` | **manual** — dispatch `gpu.yml` on the head branch |
-| `snow-parity` | snowpack-compare `sign-snow` | **auto** on snow-driver PRs; **manual** dispatch otherwise |
+| `hicar-full-test` | full-test `sign` | **auto** — the PR into `main` runs on the test-merge and passes the CPU suite |
+| `valgrind` | valgrind `sign-valgrind` | **auto** — `workflow_run` after the PR's full-test passes |
+| `gpu-check` | gpu `sign-gpu` | **manual** — a maintainer dispatches `gpu.yml` on the PR head branch (self-hosted; never auto-triggered — §4) |
+| `snow-parity` | snowpack-compare `sign-snow` | **auto** — runs on every `main` PR |
 
 Typical `develop → main` merge:
 
-1. Push to `develop` → full-test runs and signs `hicar-full-test`; valgrind then
-   auto-fires (`workflow_run`) and signs `valgrind`.
-2. `gh workflow run gpu.yml --ref develop` → signs `gpu-check`.
-3. `gh workflow run snowpack-compare.yml --ref develop` (only if the PR didn't
-   already auto-run it) → signs `snow-parity`.
-4. All four green on the head commit → the PR merges.
+1. Open a PR `develop → main`. full-test and snowpack-compare run on the
+   **test-merge** and sign the **PR head** (`hicar-full-test`, `snow-parity`);
+   valgrind auto-fires (`workflow_run`) after full-test and signs the PR head.
+2. A maintainer reviews the diff and dispatches GPU on the PR head branch
+   (`gh workflow run gpu.yml --ref develop`) → signs `gpu-check`.
+3. All four green on the PR head commit → the PR merges.
+4. The merge **pushes to `main`**, firing a **fresh post-merge run** (full-test +
+   snowpack + valgrind on `main`; GPU via the nightly or a manual dispatch) that
+   signs `main`'s **own HEAD**. `main` carries its own statuses rather than
+   inheriting the PR head's — statuses are per-SHA and the merge commit is a new SHA.
 
 Statuses are evaluated per-commit, so each must land on the **current** PR head:
-push a new commit and you must re-run the manual gates on it. Repo admins keep a
+push a new commit and you must re-run the manual gate (GPU) on it. Repo admins keep a
 ruleset **bypass** (`RepositoryRole: always`) for emergencies.
 
 > **Bootstrapping note.** A lane only becomes triggerable once its workflow file is
@@ -254,20 +261,20 @@ ruleset **bypass** (`RepositoryRole: always`) for emergencies.
 ### 2.7 Flow diagram
 
 ```
-                 push develop / PR
-                        │
-                        ▼
-                 hicar-full-test ──(both pass)──> sign  hicar-full-test=success
-                        │
-                        └──(success)──> [workflow_run] valgrind ──> changed? (open main PR)
-                                                          └──(clean)──> sign-valgrind  valgrind=success
+   PR  develop ─> main   (tests run on the TEST-MERGE, sign the PR HEAD)
+     hicar-full-test ─(pass)─> sign  hicar-full-test=success
+            └─(success)─> [workflow_run] valgrind ─(clean)─> sign-valgrind  valgrind=success
+     snowpack-compare ─(pass)─> sign-snow  snow-parity=success      (auto, every main PR)
+     gpu.yml  ── MANUAL dispatch on the PR head branch (maintainer, after review) ──
+              ─> check-signed ─┬─ signed ──> gpu-tests ─(pass)─> sign-gpu  gpu-check=success
+                               └─ unsigned ─> full-test ─pass─> gpu-tests ─> sign-gpu
 
-   manual dispatch on the PR head branch (--ref develop):
-     gpu.yml          ─> changed ─> check-signed ─┬─ signed ──> gpu-tests ─(pass)─> sign-gpu  gpu-check=success
-                                                  └─ unsigned ─> full-test ─pass─> gpu-tests ─> sign-gpu
-     snowpack-compare ─> compare ─(pass)─> sign-snow  snow-parity=success   (auto on snow-driver PRs)
+   merge to main  ⇐  { hicar-full-test, valgrind, gpu-check, snow-parity } all green on the PR HEAD
 
-   merge to main  ⇐  { hicar-full-test, valgrind, gpu-check, snow-parity } all green on the PR head
+   push to main (the merge) ─> FRESH post-merge run signs main's OWN head:
+     hicar-full-test + snowpack-compare + valgrind     (GPU via nightly / manual)
+
+   push to develop ─> hicar-full-test only (feedback)
 
    ── nightly (each gated by `changed`: skip if main unchanged) ──
      snowpack-compare 03:00 · valgrind 03:30 · gpu 04:00
@@ -314,6 +321,9 @@ into the image) because `-gpu=ccnative` needs the device visible at build time.
 
 **Security posture: the runner never executes untrusted PR code.**
 
+- `gpu.yml` has **no `push`/`pull_request` trigger** — only the nightly (trusted,
+  already-merged `main`) and manual `workflow_dispatch`. It is **never auto-triggered**
+  by a PR.
 - The runner is **ephemeral** and run as a **fresh container per job**
   (`run-runner.sh`), so no state persists between jobs.
 - Runs as non-root, **no Docker socket mounted** (no host escape).
@@ -331,10 +341,10 @@ into the image) because `-gpu=ccnative` needs the device visible at build time.
   array in `tests/test_driver.F90`.
 - **Tune cross-lane tolerances**: edit `tests/tolerances.yaml` (per-variable
   `rtol`/`atol`); start loose, tighten as the nightly GPU spread is learned.
-- **Gate a `main` PR** (sign the head commit with the manual checks): after
-  full-test + valgrind have auto-signed, run `gh workflow run gpu.yml --ref <head>`
-  and (if the PR didn't auto-run it) `gh workflow run snowpack-compare.yml --ref
-  <head>`. See [§2.6](#26-merge-gate--required-checks-on-main).
+- **Gate a `main` PR**: full-test, snowpack-parity, and valgrind sign the PR head
+  automatically; only GPU is manual — a maintainer reviews the diff and runs
+  `gh workflow run gpu.yml --ref <head>` to sign `gpu-check`. See
+  [§2.6](#26-merge-gate--required-checks-on-main).
 - **The integration runner lives in the data repo**: `tests/Test_Cases/` (including
   `test_case_runner.sh`) is cloned from `HICAR-Model/Test-Data`, not this repo — so
   changes to how integration cases are *run* (e.g. the hang/wall-clock watchdog) go

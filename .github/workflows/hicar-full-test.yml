@@ -9,12 +9,16 @@
 # artifact and commits it back — develop not main, because it pushes directly and
 # main is PR-protected. It runs regardless of test outcome, independent of `sign`.
 #
-# Triggers: PR, push to main/develop, manual, and workflow_call (gpu.yml).
+# Triggers:
+#   - pull_request -> main : the gate. Runs on the test-merge; signs the PR HEAD.
+#   - push to develop      : fast feedback on develop (signs the develop commit).
+#   - push to main         : the FRESH post-merge run that signs main's own HEAD.
+#   - workflow_dispatch / workflow_call (gpu.yml reuse).
 name: HICAR full-test (CPU)
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main]
   push:
     branches: [main, develop]
   workflow_dispatch:
@@ -32,13 +36,9 @@ jobs:
   # build-deps: build the dependency toolchain once (cached) so cpu-debug and
   # cpu-release restore it instead of each rebuilding netcdf/hdf5/pnetcdf.
   build-deps:
-    # De-dup push+PR: a same-repo main/develop PR only re-tests the already-signed
-    # push commit, so skip it; fork PRs and feature-branch PRs (never push-tested)
-    # still run.
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name != github.repository ||
-      !contains(fromJSON('["main", "develop"]'), github.head_ref)
+    # No push/PR dedup: a PR into main is meant to run on the TEST-MERGE (the
+    # predicted post-merge state), which is a different commit from the develop
+    # push, so both runs are legitimate and wanted.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
