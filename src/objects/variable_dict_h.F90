@@ -53,7 +53,7 @@ module variable_dict_interface
         procedure :: get_var            ! get a variable for a given key
         procedure :: get_var_idx       ! get index of a variable for direct in-place access
         procedure :: add_var            ! store a variable with a given key
-        procedure :: sort_by_kVARS
+        ! procedure :: sort_by_kVARS
 
         procedure :: init => init_var_dict  ! initialize the dictionary (e.g. allocate the var_list)
     end type
@@ -94,10 +94,10 @@ interface
         type(variable_t)                    :: var_data
     end function
 
-    module subroutine sort_by_kVARS(this)
-        implicit none
-        class(var_dict_t),   intent(inout)  :: this
-    end subroutine
+    ! module subroutine sort_by_kVARS(this)
+    !     implicit none
+    !     class(var_dict_t),   intent(inout)  :: this
+    ! end subroutine
     !>-------------------------
     !! Primary subroutines to add and retrieve elements
     !!

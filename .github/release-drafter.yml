@@ -1,0 +1,35 @@
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+
+categories:
+  - title: 'Added'
+    labels: ['enhancement', 'feature']
+  - title: 'Changed (incl. model output)'
+    labels: ['changed', 'breaking']
+  - title: 'Fixed'
+    labels: ['bug', 'fix']
+  - title: 'Removed / Deprecated'
+    labels: ['removal', 'deprecated']
+  - title: 'Documentation, CI & tooling'
+    labels: ['documentation', 'ci', 'tooling']
+
+change-template: '- $TITLE (#$NUMBER) @$AUTHOR'
+change-title-escapes: '\<*_&'
+
+# Map PR labels to the next-version bump. Output-changing PRs should carry the
+# `changed` label (MINOR); namelist/interface-breaking PRs carry `breaking` (MAJOR).
+version-resolver:
+  major:
+    labels: ['breaking']
+  minor:
+    labels: ['enhancement', 'feature', 'changed']
+  patch:
+    labels: ['bug', 'fix', 'documentation', 'ci', 'tooling']
+  default: patch
+
+template: |
+  ## What's changed
+
+  $CHANGES
+
+  **Full changelog**: https://github.com/HICAR-Model/HICAR/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION

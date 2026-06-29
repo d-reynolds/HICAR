@@ -141,6 +141,32 @@ string(REGEX REPLACE "^heads/" "" GIT_VERSION "${GIT_VERSION}")
 
 add_definitions(-DVERSION="${GIT_VERSION}")
 
+# Commit hash and nearest tag (version), fetched at configure time for the startup
+# banner. GIT_COMMIT = exact short commit; GIT_TAG = nearest tag + offset/dirty
+# (or the bare hash if the repo has no tags yet).
+execute_process(
+COMMAND ${GIT_EXECUTABLE} rev-parse --short=12 HEAD
+WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+OUTPUT_VARIABLE GIT_COMMIT_HASH
+OUTPUT_STRIP_TRAILING_WHITESPACE
+ERROR_QUIET
+)
+execute_process(
+COMMAND ${GIT_EXECUTABLE} describe --always --dirty
+WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+OUTPUT_VARIABLE GIT_DESCRIBE_TAG
+OUTPUT_STRIP_TRAILING_WHITESPACE
+ERROR_QUIET
+)
+if(NOT GIT_COMMIT_HASH)
+	set(GIT_COMMIT_HASH "unknown")
+endif()
+if(NOT GIT_DESCRIBE_TAG)
+	set(GIT_DESCRIBE_TAG "untagged")
+endif()
+add_definitions(-DGIT_COMMIT="${GIT_COMMIT_HASH}")
+add_definitions(-DGIT_TAG="${GIT_DESCRIBE_TAG}")
+
 ############################################
 ############## Auto-detect  ################
 message(STATUS "")

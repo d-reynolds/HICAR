@@ -1626,11 +1626,6 @@ contains
                 description = "End date for simulation, format: 'YYYY-MM-DD HH:MM:SS'"
                 default = ""
                 group = "General"
-            case ("version")
-                description = "Version of the model"
-                default = kVERSION_STRING
-                group = "General"
-                type = 1
             case ("comment")
                 description = "Comment for the run, to be added to the output file metadata"
                 group = "General"

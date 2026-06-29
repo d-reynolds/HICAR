@@ -6,7 +6,6 @@ submodule(options_interface) options_implementation
     use time_delta_object,          only : time_delta_t
     use time_object,                only : Time_type
     use string,                     only : str
-    use model_tracking,             only : print_model_diffs
     use output_metadata,            only : get_varname, get_varindx, get_varmeta
     use namelist_utils,             only : set_nml_var, set_nml_var_default, set_namelist, write_nml_file_end, &
                                            translate_numeric_mapping, find_invalid_nml_vars
@@ -22,7 +21,6 @@ contains
     !!  Read all namelists from the options file specified on the command line
     !!
     !!  Reads the commandline (or uses default icar_options.nml filename)
-    !!  Checks that the version of the options file matches the version of the code
     !!  Reads each namelist successively, all options are stored in supplied options object
     !!
     !! ----------------------------------------------------------------------------
@@ -121,8 +119,6 @@ contains
         endif
 
         call default_var_requests(this)
-
-        if (n_indx == 1) call version_check(this%general)
 
     end subroutine init_namelist
 
@@ -996,10 +992,10 @@ contains
                                             use_cu_options, use_rad_options, use_pbl_options, use_sfc_options, &
                                             use_wind_options, use_sm_options
 
-        character(len=kMAX_FILE_LENGTH), dimension(kMAX_NESTS) :: start_date, end_date, calendar, version, comment
+        character(len=kMAX_FILE_LENGTH), dimension(kMAX_NESTS) :: start_date, end_date, calendar, comment
         character(len=kMAX_NAME_LENGTH)                        :: start_date_checked, end_date_checked
         namelist /general/    debug, interactive, calendar,          &
-                              version, comment,                 &
+                              comment,                 &
                               start_date, end_date, &
                               nests, parent_nest, &
                               use_mp_options,     &
@@ -1023,7 +1019,6 @@ contains
         gennml = .False.
         if (present(gen_nml)) gennml = gen_nml
 
-        call set_nml_var_default(version, 'version', print_info, gennml)
         call set_nml_var_default(comment, 'comment', print_info, gennml)
         call set_nml_var_default(debug, 'debug', print_info, gennml)
         call set_nml_var_default(interactive, 'interactive', print_info, gennml)
@@ -1061,7 +1056,6 @@ contains
         endif
 
         call set_nml_var(gen_options%calendar, calendar(n_indx), 'calendar', calendar(1))
-        call set_nml_var(gen_options%version, version(n_indx), 'version', version(1))
         call set_nml_var(gen_options%comment, comment(n_indx), 'comment', comment(1))
         call set_nml_var(gen_options%debug, debug(n_indx), 'debug', debug(1))
         call set_nml_var(gen_options%interactive, interactive(n_indx), 'interactive', interactive(1)) 
@@ -2876,29 +2870,6 @@ contains
     end subroutine
 
 
-    !> -------------------------------
-    !! Check the version number in the namelist file and compare to the current model version
-    !!
-    !! If the namelist version doesn't match, print the differences between that version and this
-    !! and STOP execution
-    !!
-    !! -------------------------------
-    subroutine version_check(options)
-        type(general_options_type),intent(inout)  :: options
-
-
-        if (options%version.ne.kVERSION_STRING) then
-            if (STD_OUT_PE) write(*,*) "  Model version does not match namelist version"
-            if (STD_OUT_PE) write(*,*) "    Model version: ",kVERSION_STRING
-            if (STD_OUT_PE) write(*,*) "    Namelist version: ",trim(options%version)
-            call print_model_diffs(options%version)
-            stop
-        endif
-
-        if (STD_OUT_PE) write(*,*) "    Model version: ",trim(options%version)
-
-    end subroutine version_check
-
     subroutine print_nml_error(nml_name, msg, iostat, nml_file, valid_nml_unit)
         implicit none
         character(len=*), intent(in) :: nml_name, msg
@@ -3293,7 +3264,6 @@ contains
             ! --- general: session-specific fields ---
             call append_kv_logical(config_str, pos, 'general', 'debug',       this%general%debug)
             call append_kv_logical(config_str, pos, 'general', 'interactive', this%general%interactive)
-            call append_kv_str    (config_str, pos, 'general', 'version',     trim(this%general%version))
             call append_kv_str    (config_str, pos, 'general', 'comment',     trim(this%general%comment))
 
             ! --- restart ---
