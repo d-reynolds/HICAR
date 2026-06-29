@@ -5,6 +5,39 @@
 > overall design), see [ci_cd_pipeline.md](ci_cd_pipeline.md). This page covers
 > running tests locally.
 
+## Running the tests (`make` targets)
+
+Every test is exposed as a `make` target in the build directory, so the usual
+pattern is just:
+
+```bash
+cd build/
+make <target>
+```
+
+Each target **pulls in its own build and data dependencies** — it (re)builds the
+executable it needs and downloads the test data if missing — so the command is
+self-contained; you don't have to build or fetch data first.
+
+| Target | What it checks | Extra needs |
+|---|---|---|
+| `make check` | Unit / invariant suites via `HICAR-tester` (4 MPI ranks) | — |
+| `make test_cli` | Every `./bin/HICAR` command-line option behaves | — |
+| `make test_cases` | Integration cases run without crash/NaN (Standard, Nested, restarts) | test data (auto) |
+| `make test_decomposition` | Output is identical at 5 vs 10 MPI ranks | builds a debug exe |
+| `make test_restart` | A restarted run matches an uninterrupted one | builds a debug exe |
+| `make test_reproducibility` | Decomposition + restart together | builds a debug exe |
+| `make test_regression` | Bit-for-bit vs the blessed reference commit (runs the cases, then diffs) | `gh` + a blessed commit |
+| `make test_snowpack` | Native-Fortran SNOWPACK port matches the C++ build (builds both, compares) | builds both CPU exes |
+| `make test_gpu` | GPU output matches CPU within tolerance (builds both, compares) | NVHPC + a GPU |
+
+Notes:
+- **SLURM:** `make check` / `make test_cases` need `-DSRUN_FLAGS='-A <account>'` at the cmake step (see [Test Cases on SLURM](#test-cases-on-slurm)).
+- **`test_regression`** resolves its reference via `gh` and is soft/skipped until a commit is blessed (see [ci_cd_pipeline.md](ci_cd_pipeline.md)). It reuses existing integration output under `tests/Test_Cases/output` and only re-runs the cases when missing. To pin a reference or use tolerance mode, call the script directly: `bash tests/test_regression.sh . build "<cases>" --blessed-commit <sha> --mode tolerance`.
+- **`test_gpu`** needs an NVHPC-configured build (`-DFC=nvfortran`) and a visible GPU — it can't build the GPU exe on a CPU-only checkout.
+
+The sections below cover the most-used targets in more detail.
+
 ## Running Test Cases
 
 To run a standard test case, run
@@ -18,14 +51,34 @@ The output of the test case will be written to the directory `tests/Test_Cases`
 
 ### Test Cases on SLURM
 
-To run the automated test case script on a system using SLURM, a modification to the cmake step is needed. This is because systems running SLURM often restrict direct access to the mpiexec command, and require additional information such as which account to bill node-hours to. To setup the automated test case script to run on a SLURM system, pass the flag `-DSRUN_FLAGS` to the cmake command as such:
+On HPC systems that use SLURM, direct calls to `mpiexec`/`mpirun` are often
+restricted — MPI jobs must instead be launched through `srun`, which also needs to
+know which account to bill the node-hours to. The two MPI-launching test targets,
+**`make check`** (the unit/integration suite) and **`make test_cases`** (the
+integration `.nml` cases), support this through a single CMake cache variable,
+`SRUN_FLAGS`. Pass it at the cmake step:
 
 ```bash
 cd build/
 cmake ../ -DSRUN_FLAGS='-A 9999'
 ```
 
-This will setup test cases to run with srun using the user account "9999". Any additional flags which could be passed to srun can also be included here, **with the exception of -N and -n, which are automatically set by the test case script**
+This makes both targets launch with `srun`, billing the account `9999`. Any other
+flag you would normally pass to `srun` can be added here too — **with the exception
+of `-N` and `-n` (the node and task counts), which the test targets set
+themselves.**
+
+`SRUN_FLAGS` only takes effect once CMake's MPI detection has resolved the launcher
+(`MPIEXEC_EXECUTABLE`) to `srun`. If `mpiexec`/`mpirun` is on your `PATH` and CMake
+selects it instead, point CMake at `srun` explicitly at configure time:
+
+```bash
+cd build/
+cmake ../ -DMPIEXEC_EXECUTABLE="$(command -v srun)" -DSRUN_FLAGS='-A 9999'
+```
+
+`SRUN_FLAGS` is a configure-time setting, so re-run the cmake step (as above) in an
+existing build directory to add or change it.
 
 ## Testing model components (developers)
 
@@ -47,54 +100,31 @@ bindings by `tests/snowpack/test_snowpack_compare.sh` (run in CI by
 the snow driver run a 3 h seeded-snowpack case and all outputs are compared
 against `tests/snowpack/tolerances_snowpack.yaml`.
 
-A passing commit can be **blessed as the parity reference**
-(`tests/snowpack/test_snowpack_compare.sh <repo> --bless`, or the workflow dispatch with
-`bless=true`). This posts a `hicar-snowpack-parity-blessed=success` commit
-status whose description records the upstream SNOWPACK SHA used — the anchor
-for tracking upstream drift. Blessing is restricted to repo admins/maintainers
-(role-checked on both paths) and requires the comparison evidence from the
-current commit to say PASS. When the comparison later diverges (new C++
-physics upstream not yet ported), run
+If the github workflow action passes, the comparison posts a `snow-parity=success` commit status
+whose description records the upstream SNOWPACK SHA used (`snowpack=<sha>`); that
+status doubles as the **divergence anchor** (the last upstream state at which the
+two implementations matched). If the comparison later diverges (new C++ physics
+upstream not yet ported), run
 
 ```bash
 tests/snowpack/snowpack_divergence_report.sh <hicar_repo>
 ```
 
-to get the list of upstream C++ commits/diffs since the last parity bless —
-the porting to-do list. Port them, re-run the comparison, re-bless.
+to get the list of upstream C++ commits/diffs since the last passing parity run —
+the porting to-do list. Port them and re-run the comparison; the next passing run
+re-records the anchor automatically.
 
 Each comparison run leaves its evidence in `tests/figures/snowpack_compare/`
 (per-variable stats in `parity_report.json`, spatial difference maps in
-`diffmaps/`, provenance in `parity_meta.txt`). **Blessing archives these as a
-permanent GitHub release** (`snowpack-parity/<date>-<sha>`), so the residual
-level can be compared across blesses:
+`diffmaps/`), uploaded as the `snowpack-compare-diagnostics` workflow artifact
+(retained ~90 days). To compare the residual level between two runs:
 
 ```bash
-gh release list | grep snowpack-parity
-gh release download snowpack-parity/<old> -p parity_report.json -O old.json
-gh release download snowpack-parity/<new> -p parity_report.json -O new.json
-tests/snowpack/parity_trend.py old.json new.json   # ranks per-variable residual growth
+gh run list --workflow=snowpack-compare.yml --branch main      # find the run IDs
+gh run download <old-run-id> -n snowpack-compare-diagnostics -D old/
+gh run download <new-run-id> -n snowpack-compare-diagnostics -D new/
+tests/snowpack/parity_trend.py old/parity_report.json new/parity_report.json
 ```
-
-## Running the CI suites locally
-
-The workflows are deliberately thin wrappers: every test is a standalone script
-taking the repo path, and the build entrypoint CI uses
-(`.github/scripts/hicar_install_utils.sh hicar_install`) runs locally too, so
-you can reproduce a lane before triggering an Action. What the workflows add on
-top (dependency install, caches, artifact upload, commit-status signing, the
-bless Environment gate) is GitHub plumbing you don't need locally.
-
-| Workflow job | Local equivalent (from the repo root) |
-|---|---|
-| full-test / cpu-debug | `HICAR_MODE=debug bash .github/scripts/hicar_install_utils.sh hicar_install`, then `cd build && mpiexec -np 4 tests/HICAR-tester`, `bash tests/Test_Cases/test_case_runner.sh . Standard`, `bash tests/test_reproducibility.sh . all` |
-| full-test / cpu-release | `HICAR_MODE=release ... hicar_install`, then `bash tests/Test_Cases/test_case_runner.sh . "Standard,Standard_restart,Nested,Nested_restart"` and `bash tests/test_regression.sh . build "Standard,Nested" --mode exact` (resolves the blessed commit via gh) |
-| snowpack-compare | build both exes (`HICAR_MODE=release HICAR_CMAKE_EXTRA="-DSNOWPACK_CPP=ON" ... hicar_install` for the C++ reference; again with `-DOPENACC=OFF` for the default native-Fortran port), then `bash tests/snowpack/test_snowpack_compare.sh . <cpp_exe> <fortran_exe>` |
-| gpu | self-hosted only; with NVHPC+GPU locally: `bash tests/compare_cpu_gpu.sh ...` |
-
-Using the same `hicar_install` entrypoint (with the same `HICAR_MODE` /
-`HICAR_CMAKE_EXTRA`) is what makes the local run faithful to CI — only the
-compiler/OS differ.
 
 ### Reproducing the GH runner (Docker)
 

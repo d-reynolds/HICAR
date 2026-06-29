@@ -63,7 +63,7 @@ endif()
 
 option(ASSERTIONS "Check logical assertions at runtime" ON)
 option(FSM "Link to the FSM2 snow model, requires separate compilation of the FSM2 model" OFF)
-option(SNOWPACK_CPP "Use the C++ Alpine3D/SNOWPACK wrapper instead of the native-Fortran port" OFF)
+option(SNOWPACK_CPP "Use the C++ SNOWPACK wrapper instead of the native-Fortran port" OFF)
 option(NCCL "Link to the NCCL library, if available" ON)
 option(OPENACC "Enable OpenACC support for GPU acceleration" OFF)
 option(SRUN_FLAGS "srun flags to use for running the test cases" "")
@@ -72,7 +72,7 @@ option(SRUN_FLAGS "srun flags to use for running the test cases" "")
 # selects the implementation (the whole build keys off it directly — there is no
 # internal SNOWPACK / SNOWPACK_FORTRAN variable):
 #   default            -> native-Fortran SNOWPACK port (snowpack_driver.F90)
-#   -DSNOWPACK_CPP=ON  -> C++ Alpine3D/SNOWPACK wrapper (sm_SNOWPACK.F90, -DSNOWPACK_CPP)
+#   -DSNOWPACK_CPP=ON  -> C++ SNOWPACK wrapper (sm_SNOWPACK.F90, -DSNOWPACK_CPP)
 #
 # Removed/deprecated flags (warn, then honor the closest modern equivalent):
 if(DEFINED SNOWPACK AND NOT SNOWPACK)
@@ -83,7 +83,7 @@ if(DEFINED SNOWPACK_FORTRAN)
     message(DEPRECATION "SNOWPACK_FORTRAN is deprecated: the native-Fortran SNOWPACK port is "
         "now the build default. Pass -DSNOWPACK_CPP=ON to select the C++ wrapper instead.")
     if(NOT SNOWPACK_FORTRAN)
-        set(SNOWPACK_CPP ON CACHE BOOL "Use the C++ Alpine3D/SNOWPACK wrapper" FORCE)
+        set(SNOWPACK_CPP ON CACHE BOOL "Use the C++ SNOWPACK wrapper" FORCE)
     endif()
     unset(SNOWPACK_FORTRAN CACHE)
 endif()
@@ -294,7 +294,7 @@ if (NOT SNOWPACK_CPP)
 	list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/physics/sm_SNOWPACK.F90)
 	message(STATUS "SNOWPACK sources (native-Fortran port): ${SNOWPACK_FORTRAN_SOURCES}")
 else()
-	# C++ Alpine3D/SNOWPACK wrapper: keep sm_SNOWPACK.F90, link the C++ libs.
+	# C++ SNOWPACK wrapper: keep sm_SNOWPACK.F90, link the C++ libs.
 	find_package(SNOWPACK REQUIRED)
 endif()
 
@@ -583,10 +583,10 @@ elseif(SNOWPACK_FOUND)
     endif()
     target_link_libraries(hicar_lib PUBLIC ${CXX_STDLIB})
     
-	# C++ Alpine3D/SNOWPACK wrapper: -DSNOWPACK_CPP selects the C++ wrapper path
+	# C++ SNOWPACK wrapper: -DSNOWPACK_CPP selects the C++ wrapper path
 	# in the sources (#ifdef SNOWPACK_CPP).
 	add_definitions(-DSNOWPACK_CPP)
-    message(STATUS "SNOWPACK support enabled (C++ Alpine3D/SNOWPACK wrapper)")
+    message(STATUS "SNOWPACK support enabled (C++ SNOWPACK wrapper)")
 endif()
 if (OpenACC_Fortran_FOUND AND OPENACC)
 	target_link_libraries(hicar_lib PUBLIC OpenACC::OpenACC_Fortran)
@@ -812,6 +812,17 @@ ADD_CUSTOM_TARGET( distclean make clean
 separate_arguments(SRUN_FLAGS_LIST UNIX_COMMAND "${SRUN_FLAGS}")
 SET(SRUN_FLAGS_LIST_TEST_CASE "-SRUN_FLAGS='${SRUN_FLAGS}'")
 
+set(TEST_CASES "Standard,Nested,Standard_restart,Nested_restart")
+
+# Build and install HICAR to bin/ before the single-exe test targets run: the
+# test scripts invoke bin/HICAR, so depending on this guarantees they exercise a
+# freshly compiled exe rather than a stale install.
+add_custom_target(HICAR_installed
+    COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR}
+    DEPENDS HICAR
+    COMMENT "Building + installing HICAR to bin/"
+)
+
 #check if the string "srun" appears in the MPIEXEC_EXECUTABLE variable
 if (MPIEXEC_EXECUTABLE MATCHES "srun")
     #see if the variable "account" is not set
@@ -829,13 +840,13 @@ if (MPIEXEC_EXECUTABLE MATCHES "srun")
 	)
 
 	add_custom_target(test_cases
-	COMMAND ${CMAKE_COMMAND} -E echo "Running test cases..."
-	COMMAND "${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_case_runner.sh" ${PROJECT_SOURCE_DIR} "Standard,Standard_nested" ${SRUN_FLAGS_LIST_TEST_CASE} 
-	DEPENDS download_test_data
+	COMMAND ${CMAKE_COMMAND} -E echo "Running integration cases: ${TEST_CASES}"
+	COMMAND "${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_case_runner.sh" ${PROJECT_SOURCE_DIR} "${TEST_CASES}" ${SRUN_FLAGS_LIST_TEST_CASE}
+	DEPENDS HICAR_installed download_test_data
 	WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
-	COMMENT "Running test case suite"
+	COMMENT "Running integration test case suite"
 	VERBATIM
-	)  
+	)
 
 else()
 	add_custom_target(check
@@ -848,11 +859,11 @@ else()
 	)
 
 	add_custom_target(test_cases
-	COMMAND ${CMAKE_COMMAND} -E echo "Running test cases..."
-	COMMAND ${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_case_runner.sh ${PROJECT_SOURCE_DIR} Standard,Standard_restart
-	DEPENDS download_test_data
+	COMMAND ${CMAKE_COMMAND} -E echo "Running integration cases: ${TEST_CASES}"
+	COMMAND ${PROJECT_SOURCE_DIR}/tests/Test_Cases/test_case_runner.sh ${PROJECT_SOURCE_DIR} "${TEST_CASES}"
+	DEPENDS HICAR_installed download_test_data
 	WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
-	COMMENT "Running test case suite"
+	COMMENT "Running integration test case suite"
 	VERBATIM
 	)
 
@@ -861,7 +872,7 @@ endif()
 add_custom_target(test_cli
     COMMAND ${CMAKE_COMMAND} -E echo "Running CLI option tests..."
     COMMAND ${PROJECT_SOURCE_DIR}/tests/test_cli_options.sh ${PROJECT_SOURCE_DIR}
-    DEPENDS HICAR
+    DEPENDS HICAR_installed
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests
     COMMENT "Running CLI options test suite"
     VERBATIM
@@ -917,12 +928,45 @@ add_custom_target(test_reproducibility
     VERBATIM
 )
 
+# Regression test: diff current integration output against a "blessed" reference
+# commit (tests/test_regression.sh, which resolves the blessed commit via gh). The
+# script decides for itself whether to (re)run the integration cases — it reuses
+# existing output under tests/Test_Cases/output and only runs `make test_cases`
+# when it is missing
 add_custom_target(test_regression
+    COMMAND ${CMAKE_COMMAND} -E echo "Regression: diff vs the blessed reference commit (mode exact)..."
     COMMAND ${PROJECT_SOURCE_DIR}/tests/test_regression.sh
-        ${PROJECT_SOURCE_DIR}
-        ${CMAKE_BINARY_DIR}
-    DEPENDS HICAR download_test_data
+            ${PROJECT_SOURCE_DIR} ${CMAKE_BINARY_DIR} "${TEST_CASES}" --mode exact
+    DEPENDS HICAR_installed download_test_data
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
-    COMMENT "Running regression test against known-good commit"
+    COMMENT "Regression: diff integration output vs blessed commit"
+    VERBATIM
+)
+
+# GPU-vs-CPU comparison (tests/compare_cpu_gpu.sh). `make test_gpu` compiles BOTH
+# exes fresh (CPU=OPENACC=OFF, GPU=OPENACC=ON, same compiler) into
+# build_gpu_compare_cpu / build_gpu_compare_gpu, compares, then removes those
+# trees so the next run rebuilds fresh. Needs an NVHPC-configured build
+# (FC=nvfortran) for the GPU exe.
+add_custom_target(test_gpu
+    COMMAND ${CMAKE_COMMAND} -E echo "Building CPU + GPU exes, then comparing (tolerance)..."
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/compare_cpu_gpu.sh ${PROJECT_SOURCE_DIR} --build ${CMAKE_BINARY_DIR}
+    DEPENDS download_test_data
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
+    COMMENT "Building CPU/GPU exes then running GPU-vs-CPU comparison"
+    VERBATIM
+)
+
+# SNOWPACK C++ vs native-Fortran parity (tests/snowpack/test_snowpack_compare.sh).
+# `make test_snowpack` compiles BOTH exes fresh (-DSNOWPACK_CPP=ON vs the default
+# port, both CPU) into build_snowpack_cpp / build_snowpack_fortran, compares, then
+# removes those trees so the next run rebuilds fresh. The --build arg is the build
+# directory whose CMakeCache supplies the compiler/library config.
+add_custom_target(test_snowpack
+    COMMAND ${CMAKE_COMMAND} -E echo "Building C++ + Fortran SNOWPACK exes, then comparing..."
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/snowpack/test_snowpack_compare.sh ${PROJECT_SOURCE_DIR} --build ${CMAKE_BINARY_DIR}
+    DEPENDS download_test_data
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
+    COMMENT "Building SNOWPACK C++/Fortran exes then running parity comparison"
     VERBATIM
 )

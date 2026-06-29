@@ -4,11 +4,11 @@
 # HICAR's blessing mechanism stores no files: a commit is "blessed" by posting a
 # GitHub commit status (state=success) in a given context:
 #   hicar-regression-blessed       — regression reference (tests/test_regression.sh)
-#   hicar-snowpack-parity-blessed  — last commit where the native-Fortran SNOWPACK
-#                                    port matched the C++ SNOWPACK build
-#                                    (tests/snowpack/test_snowpack_compare.sh). Its status
-#                                    DESCRIPTION records the upstream SNOWPACK SHA
-#                                    (snowpack=<sha>) used at bless time.
+#   snow-parity                    — last commit where the native-Fortran SNOWPACK
+#                                    port matched the C++ build (posted by
+#                                    snowpack-compare on PASS). Its status DESCRIPTION
+#                                    records the upstream SNOWPACK SHA (snowpack=<sha>),
+#                                    the divergence anchor for snowpack_divergence_report.sh.
 #
 # This script walks the first-parent history from HEAD and prints the SHA of the
 # most recent commit whose combined status contains <context>=success.

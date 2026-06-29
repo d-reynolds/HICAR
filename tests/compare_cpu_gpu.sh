@@ -10,21 +10,97 @@
 #
 # Usage:
 #   compare_cpu_gpu.sh <hicar_repo> <cpu_exe> <gpu_exe> [--tolerance-spec PATH]
+#   compare_cpu_gpu.sh <hicar_repo> --build <ref_build_dir> [--tolerance-spec PATH]
+#
+# --build: compile BOTH exes fresh from the CURRENT source (CPU = OPENACC=OFF,
+#   GPU = OPENACC=ON, same compiler) into sub-build trees under <ref_build_dir>,
+#   inheriting the compiler/library config from that build's CMakeCache.txt. This
+#   is what `make test_gpu` uses, so the comparison is fully self-contained.
+#   Needs an NVHPC-configured reference build (FC=nvfortran) for the GPU exe.
 # =============================================================================
 set -euo pipefail
 BLUE='\033[0;36m'; GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
 
-if [ $# -lt 3 ]; then
-    echo "Usage: $0 <hicar_repo> <cpu_exe> <gpu_exe> [--tolerance-spec PATH]"; exit 1
+# check if this system has a GPU (nvidia-smi) and an NVHPC compiler (nvfortran) in PATH.
+if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo -e "${RED}nvidia-smi not found; no GPU detected${NC}"; exit 1
 fi
-hicar_repo=$(cd "$1" && pwd); CPU_EXE="$2"; GPU_EXE="$3"; shift 3
+if ! command -v nvfortran >/dev/null 2>&1; then
+    echo -e "${RED}nvfortran not found; NVHPC compiler required for GPU build${NC}"; exit 1
+fi
+
+if [ $# -lt 3 ]; then
+    echo "Usage: $0 <hicar_repo> <cpu_exe> <gpu_exe> [--tolerance-spec PATH]"
+    echo "       $0 <hicar_repo> --build <ref_build_dir> [--tolerance-spec PATH]"
+    exit 1
+fi
+hicar_repo=$(cd "$1" && pwd); shift
 TOL_SPEC="$hicar_repo/tests/tolerances/tolerances_gpu_cpu.yaml"
+
+# Default build trees for --build mode. The GPU workflow stages its pre-built
+# CPU-reference and GPU exes here so the comparison reuses them; a local run
+# builds them. Removed on exit (see the trap below) so the next run builds fresh.
+BUILD_REF=""
+GPU_COMPARE_CPU_BUILD="${hicar_repo}/build_gpu_compare_cpu"
+GPU_COMPARE_GPU_BUILD="${hicar_repo}/build_gpu_compare_gpu"
+
+# find_hicar_exe <build_tree>: print the HICAR exe in <build_tree> (any MODE
+# variant), or return 1 if none is present.
+find_hicar_exe() {
+    local tree="$1" n
+    for n in HICAR_debug_gpu HICAR_debug HICAR_gpu HICAR_profile HICAR; do
+        [ -x "$tree/$n" ] && { echo "$tree/$n"; return 0; }
+    done
+    return 1
+}
+
+# build_hicar_variant <out_tree> <label> [extra -D...]: print the HICAR exe in
+# <out_tree>, building it first ONLY if it is not already there — so an exe the
+# GPU workflow already staged is reused (skip compiling). Config is inherited
+# from the reference build's cache ($BUILD_REF/CMakeCache.txt); cmake chatter
+# goes to <out_tree>.{cfg,build}.log.
+build_hicar_variant() {
+    local out_tree="$1" label="$2"; shift 2
+    local existing
+    if existing=$(find_hicar_exe "$out_tree"); then
+        echo -e "${GREEN}Reusing pre-built ${label} exe: ${existing}${NC}" >&2
+        echo "$existing"; return 0
+    fi
+    local args=() v val
+    if [ -f "$BUILD_REF/CMakeCache.txt" ]; then
+        for v in MODE FC NETCDF_DIR FFTW_DIR MPI_DIR PETSC_DIR FSM FSM_DIR ASSERTIONS NCCL SNOWPACK_DIR; do
+            val=$(grep "^${v}:" "$BUILD_REF/CMakeCache.txt" 2>/dev/null | head -n1 | sed 's/^[^=]*=//' || true)
+            [ -n "$val" ] && args+=("-D${v}=${val}")
+        done
+    fi
+    args+=("$@")
+    echo -e "${BLUE}Building HICAR (${label}) in ${out_tree} ...${NC}" >&2
+    cmake -S "$hicar_repo" -B "$out_tree" "${args[@]}" >"${out_tree}.cfg.log" 2>&1 \
+        || { echo -e "${RED}configure failed (${label}); tail ${out_tree}.cfg.log:${NC}" >&2; tail -n 25 "${out_tree}.cfg.log" >&2; return 1; }
+    cmake --build "$out_tree" --target HICAR --parallel >"${out_tree}.build.log" 2>&1 \
+        || { echo -e "${RED}build failed (${label}); tail ${out_tree}.build.log:${NC}" >&2; tail -n 25 "${out_tree}.build.log" >&2; return 1; }
+    find_hicar_exe "$out_tree" || { echo -e "${RED}no HICAR exe produced in ${out_tree}${NC}" >&2; return 1; }
+}
+
+if [ "${1:-}" = "--build" ]; then
+    BUILD_REF="${2:?--build requires a reference build dir}"; shift 2
+else
+    CPU_EXE="${1:?need <cpu_exe> or --build}"; GPU_EXE="${2:?need <gpu_exe>}"; shift 2
+fi
 while [ $# -gt 0 ]; do
     case "$1" in
         --tolerance-spec) TOL_SPEC="$2"; shift 2;;
         *) echo -e "${RED}Unknown arg: $1${NC}"; exit 1;;
     esac
 done
+
+if [ -n "$BUILD_REF" ]; then
+    # Clean the default build trees on exit (success OR failure) so the next
+    # `make test_gpu` builds fresh exes.
+    trap 'rm -rf "$GPU_COMPARE_CPU_BUILD" "$GPU_COMPARE_GPU_BUILD"' EXIT
+    CPU_EXE=$(build_hicar_variant "$GPU_COMPARE_CPU_BUILD" "CPU OPENACC=OFF" -DOPENACC=OFF) || exit 1
+    GPU_EXE=$(build_hicar_variant "$GPU_COMPARE_GPU_BUILD" "GPU OPENACC=ON"  -DOPENACC=ON)  || exit 1
+fi
 
 [ -x "$CPU_EXE" ] || { echo -e "${RED}CPU exe not found/executable: $CPU_EXE${NC}"; exit 1; }
 [ -x "$GPU_EXE" ] || { echo -e "${RED}GPU exe not found/executable: $GPU_EXE${NC}"; exit 1; }

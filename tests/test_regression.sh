@@ -7,14 +7,15 @@
 # status (resolved by tests/resolve_blessed_commit.sh). This script:
 #   1. builds the blessed commit's HICAR exe (cached by hash, in a git worktree),
 #   2. runs it on the requested integration case(s) to REGENERATE the reference,
-#   3. diffs the *current* integration outputs (already produced by
-#      test_case_runner.sh) against the regenerated reference with compare_outputs.py.
+#   3. diffs the *current* integration outputs against the regenerated reference
+#      with compare_outputs.py. The current output is reused if present under
+#      tests/Test_Cases/output, otherwise generated via `make test_cases`.
 #
 # Because both the current and the blessed exe are built on the same runner with
 # the same toolchain, the comparison defaults to bit-for-bit (--mode exact): any
 # difference is a real change in model output.
 #
-# Run integration FIRST (so output/<case>/ exists), then this:
+# The script runs the integration cases itself when their output is missing:
 #   test_regression.sh <hicar_repo> <build_dir> <cases> [options]
 #     <cases>             comma-separated base cases, e.g. "Standard,Nested"
 #                         (_restart variants are reproducibility cases; skipped)
@@ -94,6 +95,26 @@ echo "======================================================="
 echo -e "  HICAR regression vs blessed commit ${BLUE}${REF_HASH:0:12}${NC}"
 echo -e "  Cases: ${BLUE}${CASES}${NC}   Mode: ${BLUE}${MODE}${NC}"
 echo "======================================================="
+
+# --- ensure the current integration output exists ---------------------------
+# Regression diffs the CURRENT output (tests/Test_Cases/output/<case>) against the
+# regenerated blessed reference. Reuse existing output if present; only (re)run the
+# integration cases (via `make test_cases`) when it is missing. Restart variants are
+# reproducibility cases, skipped here.
+_need_cases=false
+IFS=',' read -ra _req_cases <<< "$CASES"
+for _raw in "${_req_cases[@]}"; do
+    _c=$(echo "$_raw" | xargs)
+    [[ "$_c" == *"_restart"* ]] && continue
+    ls "$hicar_repo/tests/Test_Cases/output/${_c}"/*.nc >/dev/null 2>&1 || _need_cases=true
+done
+if [ "$_need_cases" = true ]; then
+    echo -e "${YELLOW}Integration output missing under tests/Test_Cases/output — running 'make test_cases'...${NC}"
+    bash "$hicar_repo/tests/test_case_runner.sh" "$hicar_repo" "$CASES" || {
+        echo -e "${RED}make test_cases failed; cannot run regression${NC}"; exit 1; }
+else
+    echo -e "${GREEN}Found existing integration output under tests/Test_Cases/output — skipping 'make test_cases'.${NC}"
+fi
 
 # --- build (or reuse cached) blessed exe ------------------------------------
 OLD_EXE="$hicar_repo/bin/HICAR_blessed"

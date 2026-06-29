@@ -59,15 +59,15 @@ jobs:
       - run: bash .github/scripts/hicar_install_utils.sh hicar_install
       - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
       - name: CLI options                    # cheapest failure first
-        run: bash tests/test_cli_options.sh "$GITHUB_WORKSPACE"
+        run: cd build && make test_cli
       - name: Unit / invariant tests
-        run: cd build && mpiexec -np 4 tests/HICAR-tester
+        run: cd build && make check
       # Regenerate from the gen scripts BEFORE integration, so cases validate the
       # current scripts rather than a stale committed .nml.
       - name: Regenerate example namelists
         run: bash helpers/example_namelists/generate_examples.sh "$GITHUB_WORKSPACE/bin/HICAR_debug"
       - name: Reproducibility (decomposition + restart)
-        run: bash tests/test_reproducibility.sh "$GITHUB_WORKSPACE" all
+        run: cd build && make test_reproducibility
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -104,10 +104,7 @@ jobs:
           path: helpers/example_namelists/*.nml
           if-no-files-found: error
       - name: Integration (all config cases — run only)
-        run: |
-          cd tests/Test_Cases
-          bash test_case_runner.sh "$GITHUB_WORKSPACE" \
-            "Standard,Standard_restart,Nested,Nested_restart"
+        run: cd build && make test_cases
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -117,7 +114,9 @@ jobs:
             tests/Test_Cases/input/*.out
           if-no-files-found: ignore
 
-      # Regression reference = most recent ancestor with hicar-regression-blessed=success.
+      # `make test_regression` resolves the blessed commit itself; this step only
+      # (a) skips regression when nothing is blessed yet and (b) supplies the SHA
+      # for the blessed-exe cache key below (the regression run reuses that cache).
       - name: Resolve blessed regression commit
         id: blessed
         continue-on-error: true   # none yet -> regression step is skipped
@@ -138,9 +137,7 @@ jobs:
       - name: Regression vs blessed commit (recompiles blessed exe, diffs outputs)
         if: steps.blessed.outputs.sha != ''
         continue-on-error: true   # flip to false once a blessed commit is established
-        run: |
-          bash tests/test_regression.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/build" \
-            "Standard,Nested" --blessed-commit "${{ steps.blessed.outputs.sha }}" --mode exact
+        run: cd build && make test_regression
       - uses: actions/upload-artifact@v4
         if: always()
         with:

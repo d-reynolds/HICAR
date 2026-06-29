@@ -1,4 +1,4 @@
-# Maintainer-only: bless a commit as the regression reference.
+# Admin/maintainer-only (role-checked): bless a commit as the regression reference.
 #
 # The regression reference is the most recent commit carrying a
 # hicar-regression-blessed=success status (test_regression.sh recompiles it to
@@ -26,6 +26,19 @@ jobs:
   bless:
     runs-on: ubuntu-22.04
     steps:
+      # Blessing moves the regression reference for everyone, so restrict it to
+      # repo admins/maintainers (the same gate as the SNOWPACK parity bless).
+      - name: Verify maintainer permission
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          role=$(gh api "/repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission" \
+                   --jq '.role_name // .permission')
+          echo "actor=${{ github.actor }} role=$role"
+          case "$role" in
+            admin|maintain) echo "Bless authorized." ;;
+            *) echo "::error::Regression bless is restricted to repo admins/maintainers (role: $role)"; exit 1 ;;
+          esac
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - name: Resolve commit (warn if not full-tested)

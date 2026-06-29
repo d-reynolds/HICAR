@@ -109,85 +109,57 @@ Only the `HICAR` target is built (`cmake --build --target HICAR` + `cmake
 
 ### 2.3 `bless-baseline.yml` — bless the regression reference commit ✅
 
-Maintainer-only (`workflow_dispatch`). Posts a **`hicar-regression-blessed=success`
-commit status** to a (known-good, ideally full-test-passed) commit — the same
-machinery as the full-test `sign`. The regression reference is therefore "the most
+Maintainer-only (`workflow_dispatch`), **role-checked** — the dispatching actor must
+be a repo `admin`/`maintain` (collaborator-permission API). Posts a **`hicar-regression-blessed=success` commit status** to a
+(known-good, ideally full-test-passed) commit — the same machinery as the full-test
+`sign`. The regression reference is therefore "the most
 recent blessed commit," with no stored file, no PR, no build, no LFS, no token.
 Warns if the commit hasn't passed full-test.
 
-### 2.4 `snowpack-compare.yml` — SNOWPACK C++ vs Fortran parity, with bless ✅
+### 2.4 `snowpack-compare.yml` — SNOWPACK C++ vs Fortran parity ✅
 
 Builds HICAR twice on the same gfortran toolchain (`-DSNOWPACK_CPP=ON` C++
 bindings vs the default native-Fortran port), each into its **own build tree**
-(`build_cpp` / `build_fortran`, via `HICAR_BUILD_DIR`). It then runs a 3 h seeded-snowpack comparison
-(`tests/snowpack/test_snowpack_compare.sh`) against
-`tests/snowpack/tolerances_snowpack.yaml`. Triggers: **every `pull_request` → `main`**
-(no path filter — runs on the test-merge), **`push` to `main`** (the post-merge run),
-nightly, and manual.
+(`build_snowpack_cpp` / `build_snowpack_fortran`, via `HICAR_BUILD_DIR`). It then
+runs a 3 h seeded-snowpack comparison (`tests/snowpack/test_snowpack_compare.sh`)
+against `tests/snowpack/tolerances_snowpack.yaml`. Triggers: **every
+`pull_request` → `main`** (no path filter — runs on the test-merge), **`push` to
+`main`** (the post-merge run), nightly, and manual.
 
-A **`sign-snow`** job posts the **`snow-parity = success`** commit status that
-`main`'s ruleset requires (§2.6) whenever the comparison passes — on a PR it posts on
-the PR head, on a post-merge `push` it posts on `main`'s HEAD.
+" A **`sign-snow`** job posts
+the **`snow-parity = success`** commit status that `main`'s ruleset requires (§2.6)
+whenever the comparison passes (on a PR on the PR head; on a post-merge `push` on
+`main`'s HEAD). Its **description records the upstream SNOWPACK SHA**
+(`snowpack=<sha>`) of the fetched `fortran-bindings` checkout, so the success status
+*doubles as the divergence anchor* — the last upstream state at which the two
+implementations provably matched. 
+**Evidence archive (90-day artifact).** Every comparison run writes a
+machine-readable per-variable stats report (`parity_report.json`:
+max|abs|/max|rel|/violation counts for all variables common to both output files,
+passing ones included — the exact count depends on the run's `output_vars` and is
+reported at runtime as `n_compared`) and the spatial difference maps (`diffmaps/`)
+into `tests/figures/snowpack_compare/`, uploaded as the
+`snowpack-compare-diagnostics` workflow artifact (retained ~90 days). To track
+residual growth, download the report from two runs (`gh run download <run-id> -n
+snowpack-compare-diagnostics`) and analize it with `tests/snowpack/parity_trend.py
+<old.json> <new.json>`. The upstream SNOWPACK commit each run was built against is
+recorded in the `snow-parity` status description (`snowpack=<sha>`), not in the
+artifact.
 
-**Parity blessing.** Analogous to the regression bless, but with a second,
-independent status context and one extra payload: a manual dispatch with
-`bless=true` posts **`hicar-snowpack-parity-blessed=success`** on the commit,
-and the status *description* records the **upstream SNOWPACK commit SHA**
-(`snowpack=<sha>`) of the fetched `fortran-bindings` checkout used in the run.
-That SHA is the *parity anchor*: the last upstream state at which the Fortran
-port provably matched the C++ build.
-
-Blessing is **restricted to repo admins/maintainers** and **gated on a passing
-comparison**, with three stacked controls:
-
-1. **Role check** (both paths): the actor's role is queried via the
-   collaborator-permission API (`role_name` admin or maintain). The workflow
-   fails fast on dispatch with `bless=true` before building; the local
-   `--bless` refuses before posting. `--force` never bypasses authorization.
-2. **Pass gate**: in CI the bless job runs only if the comparison job
-   succeeded (`needs:`); locally `--bless` checks the run's `parity_meta.txt`
-   evidence and refuses unless it says PASS, was produced from the current
-   HEAD, and matches the SNOWPACK checkout (`--force` overrides the evidence
-   checks only, and is recorded in the status text).
-3. **Required-reviewer Environment** (platform-enforced): the bless runs in a
-   separate job bound to `environment: parity-bless`. With required reviewers
-   configured, GitHub pauses that job until a designated reviewer approves it
-   in the Actions UI — independent of anything in the workflow file or
-   scripts. **One-time setup** (repo admin):
-   `Settings > Environments > New environment "parity-bless" > Required
-   reviewers > add the owners/maintainers`, or via API:
-   `gh api -X PUT repos/<owner>/<repo>/environments/parity-bless --input -`
-   with `{"reviewers":[{"type":"User","id":<numeric-uid>}]}`.
-
-**Evidence archive.** Every comparison run writes a machine-readable
-per-variable stats report (`parity_report.json`: max|abs|/max|rel|/violation
-counts for all variables common to both output files, passing ones included — the exact count depends on the run's `output_vars` and is reported at runtime as `n_compared`), the standard spatial
-difference maps (`diffmaps/`), and a provenance stamp into
-`tests/figures/snowpack_compare/` (uploaded as a workflow artifact, ≤90 d).
-**Blessing additionally publishes these as a permanent GitHub release**
-tagged `snowpack-parity/<date>-<sha>`, so the parity level is consultable
-across blesses indefinitely: list with `gh release list`, download two
-reports and rank residual growth with
-`tests/snowpack/parity_trend.py <old.json> <new.json>` (flags >3× growth as a
-candidate regression and points at the divergence routine below).
-
-**Divergence routine.** SNOWPACK is fetched from the *moving*
-`fortran-bindings` branch (cmake/FindSNOWPACK.cmake), so upstream C++ commits
-land in CI builds automatically. When the nightly comparison starts failing:
+**Divergence routine.** SNOWPACK is fetched from the *moving* `fortran-bindings`
+branch (cmake/FindSNOWPACK.cmake), so upstream C++ commits land in CI builds
+automatically. When the comparison starts failing:
 
 ```
 tests/snowpack/snowpack_divergence_report.sh <hicar_repo>
 ```
 
-resolves the anchor from the blessed status, deepens the shallow SNOWPACK
-clone, and prints `git log`/`diff --stat` between the anchor and the current
-upstream SHA — split into the C++ core (`snowpack/`, `meteoio/`: the porting
-to-do list) and `fortran/` (port-side changes). Port the listed changes into
-the Fortran driver, re-run the comparison until it passes, then re-bless
-(workflow dispatch with `bless=true`, or locally
-`tests/snowpack/test_snowpack_compare.sh <repo> --bless --reason '...'`). Every
-comparison run also logs the SNOWPACK SHA it used, so CI logs alone can
-bracket when a divergence appeared.
+resolves the anchor from the most recent `snow-parity=success` status (reading its
+`snowpack=<sha>`), deepens the shallow SNOWPACK clone, and prints `git log`/`diff
+--stat` between the anchor and the current upstream SHA — split into the C++ core
+(`snowpack/`, `meteoio/`: the porting to-do list) and `fortran/` (port-side
+changes). Port the listed changes into the Fortran driver and re-run the comparison
+until it passes; the next passing run re-records the anchor automatically.
 
 ### 2.5 `valgrind-memcheck.yml` — uninitialised-memory check ✅ (required on `main` PRs)
 

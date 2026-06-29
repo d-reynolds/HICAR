@@ -122,25 +122,29 @@ jobs:
         run: |
           nvidia-smi -L
           nvfortran --version | head -n2
+      # Build the CPU-reference and GPU exes into the default trees that
+      # compare_cpu_gpu.sh --build looks for (build_gpu_compare_cpu/_gpu); the
+      # compare step then reuses them (skips recompiling) and removes the trees on
+      # exit. Separate steps so a build failure is attributed to its own step.
       # CPU reference: NVHPC, OPENACC=OFF. Only the HICAR target (skip the device link).
       - name: Build CPU reference exe (NVHPC, OPENACC=OFF)
         run: |
-          rm -rf build_cpu
-          cmake -S . -B build_cpu -DMODE=release -DOPENACC=OFF
-          cmake --build build_cpu --target HICAR -j"$(nproc)"
-          cmake --install build_cpu
-      - name: Build GPU exe (NVHPC, OPENACC=ON) + test data
+          rm -rf build_gpu_compare_cpu
+          cmake -S . -B build_gpu_compare_cpu -DMODE=release -DOPENACC=OFF
+          cmake --build build_gpu_compare_cpu --target HICAR -j"$(nproc)"
+      - name: Build GPU exe (NVHPC, OPENACC=ON)
         run: |
-          rm -rf build_gpu
-          cmake -S . -B build_gpu -DMODE=release -DOPENACC=ON
-          cmake --build build_gpu --target HICAR -j"$(nproc)"
-          cmake --install build_gpu
-          cmake --build build_gpu --target download_test_data
+          rm -rf build_gpu_compare_gpu
+          cmake -S . -B build_gpu_compare_gpu -DMODE=release -DOPENACC=ON
+          cmake --build build_gpu_compare_gpu --target HICAR -j"$(nproc)"
+      # `make test_gpu` reuses the exes staged above (the script skips recompiling
+      # when they exist), fetches the test data (download_test_data dependency),
+      # compares, and removes the build trees on exit. Use -C, not `cd`, so the
+      # step shell's CWD isn't the tree the cleanup deletes. Locally, `make
+      # test_gpu` builds both exes itself.
       - name: GPU-vs-CPU regression (tolerance)
         continue-on-error: true   # flip to false once the comparison is stable
-        run: |
-          bash tests/compare_cpu_gpu.sh "$GITHUB_WORKSPACE" \
-            "$GITHUB_WORKSPACE/bin/HICAR" "$GITHUB_WORKSPACE/bin/HICAR_gpu"
+        run: make -C build_gpu_compare_gpu test_gpu
       - name: Validation (stub)
         run: |
           echo "TODO: GPU validation — idealized analytic case and/or conservation diagnostics."
