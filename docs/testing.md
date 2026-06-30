@@ -5,6 +5,28 @@
 > overall design), see [ci_cd_pipeline.md](ci_cd_pipeline.md). This page covers
 > running tests locally.
 
+HICAR uses a tiered approach to testing, comprising unit, integration, and end-to-end tests.
+
+Unit tests are small in their scope and seek to test discrete "units" of code. HICAR implements
+unit testing via the [test-drive](https://github.com/fortran-lang/test-drive) fortran project.
+The fortran code in tests/unit contain these unit tests, grouped by code region. Agruably, 
+some of these are not strictly unit tests and verge on integration testing, but if it ain't broke,
+don't fix it.
+
+Integration tests use code components together, how well they "integrate" with one another. As mentioned,
+some of the "unit" tests are more like integration tests. The tests/scripts directory contains automated
+testing, some of which, like the cli tests or decomposition testing, checks that various model components
+produce expected results when working together.
+
+Lastly, end-to-end testing checks that a full model run produces expected results. This is obviously difficult
+for atmospheric models, where there is no ground truth for a high-resolution, 3D atmospheric state. Instead,
+we use end-to-end testing to check that the model does not crash, that we have parity between different setups
+which should be similar/identical, and that we do not drift from a known baseline simulation. This last point
+is known as regression testing, where we want to ensure that the output does not "regress" relative to the baseline.
+Finally, and most expensive, is validation testing, where the model is run for long enough that we can spin up its 
+internal state, and compare simulation output to observations. This is currently an outstanding to do in the 
+automated test setup, and will be implemented on the GPU self-hosted runner for improved time-to-solution.
+
 ## Running the tests (`make` targets)
 
 Every test is exposed as a `make` target in the build directory, so the usual

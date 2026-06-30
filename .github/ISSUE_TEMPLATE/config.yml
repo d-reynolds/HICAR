@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/HICAR-Model/HICAR/tree/main/docs
+    about: Compiling, running, namelist options, forcing/domain generation, and developing HICAR.

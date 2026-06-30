@@ -70,9 +70,9 @@ queryable, and shown as a green check on the commit.
 
 NVFortran, self-hosted. Triggers: **`workflow_dispatch` only** — **no `push` and no
 `pull_request` trigger** (see Security, §4), so a fork PR can never execute on the
-self-hosted box. `develop` is GPU-tested *after* it merges to `main` (a maintainer
-dispatches on `main`), and *before* merge via the manual `gpu-check` gate (dispatch
-on the head branch — §2.6).
+self-hosted box. A change is GPU-tested *before* merging a PR into main via the manual `gpu-check` gate
+(a maintainer dispatches on the PR's head branch — §2.6), and `main` itself is
+GPU-tested *after* merge (a maintainer dispatches on `main`).
 
 
 1. **`gpu-tests`** (self-hosted):
@@ -87,7 +87,7 @@ on the head branch — §2.6).
    The GPU-vs-CPU tolerance comparison is currently *advisory*
    (`continue-on-error`), so `gpu-check` signs on a successful NVHPC **build + run**
    of both exes. **To gate a `main` PR**, dispatch this workflow on the PR's head
-   branch — `gh workflow run gpu.yml --ref develop` — so `github.sha` is the PR head
+   branch — `gh workflow run gpu.yml --ref <your-feature-branch>` — so `github.sha` is the PR head
    commit and the status lands where the ruleset evaluates it.
 
 Only the `HICAR` target is built (`cmake --build --target HICAR` + `cmake
@@ -195,13 +195,13 @@ SHA it tested:
 | `gpu-check` | gpu `sign-gpu` | **manual** — a maintainer dispatches `gpu.yml` on the PR head branch (self-hosted; never auto-triggered — §4) |
 | `snow-parity` | snowpack-compare `sign-snow` | **auto** — runs on every `main` PR |
 
-Typical `develop → main` merge:
+Typical feature-branch → `main` merge:
 
-1. Open a PR `develop → main`. full-test and snowpack-compare run on the
-   **test-merge** and sign the **PR head** (`hicar-full-test`, `snow-parity`);
+1. Open a PR from your feature branch into `main`. full-test and snowpack-compare run
+   on the **test-merge** and sign the **PR head** (`hicar-full-test`, `snow-parity`);
    valgrind auto-fires (`workflow_run`) after full-test and signs the PR head.
 2. A maintainer reviews the diff and dispatches GPU on the PR head branch
-   (`gh workflow run gpu.yml --ref develop`) → signs `gpu-check`.
+   (`gh workflow run gpu.yml --ref <your-feature-branch>`) → signs `gpu-check`.
 3. All four green on the PR head commit → the PR merges.
 4. The merge **pushes to `main`**, firing a **fresh post-merge run** (full-test +
    snowpack + valgrind on `main`; GPU via a manual dispatch) that
@@ -221,7 +221,7 @@ ruleset **bypass** (`RepositoryRole: always`) for emergencies.
 ### 2.7 Flow diagram
 
 ```
-   PR  develop ─> main   (tests run on the TEST-MERGE, sign the PR HEAD)
+   PR  feature ─> main   (tests run on the TEST-MERGE, sign the PR HEAD)
      hicar-full-test ─(pass)─> sign  hicar-full-test=success
             └─(success)─> [workflow_run] valgrind ─(clean)─> sign-valgrind  valgrind=success
      snowpack-compare ─(pass)─> sign-snow  snow-parity=success      (auto, every main PR)

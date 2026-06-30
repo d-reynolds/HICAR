@@ -1,7 +1,16 @@
 # The High-resolution Intermediate Complexity Atmospheric Research Model (HICAR)
 
+<!-- The four merge-gate lanes that sign main's HEAD: hicar-full-test, valgrind, gpu-check, snow-parity -->
+[![full-test](https://github.com/HICAR-Model/HICAR/actions/workflows/hicar-full-test.yml/badge.svg?branch=main)](https://github.com/HICAR-Model/HICAR/actions/workflows/hicar-full-test.yml)
+[![valgrind](https://github.com/HICAR-Model/HICAR/actions/workflows/valgrind-memcheck.yml/badge.svg?branch=main)](https://github.com/HICAR-Model/HICAR/actions/workflows/valgrind-memcheck.yml)
+[![GPU](https://github.com/HICAR-Model/HICAR/actions/workflows/gpu.yml/badge.svg?branch=main)](https://github.com/HICAR-Model/HICAR/actions/workflows/gpu.yml)
+[![SNOWPACK parity](https://github.com/HICAR-Model/HICAR/actions/workflows/snowpack-compare.yml/badge.svg?branch=main)](https://github.com/HICAR-Model/HICAR/actions/workflows/snowpack-compare.yml)
 
+[![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![version](https://img.shields.io/github/v/tag/HICAR-Model/HICAR?filter=v*&label=version)](https://github.com/HICAR-Model/HICAR/tags)
 [![DOI](https://zenodo.org/badge/638935780.svg)](https://zenodo.org/badge/latestdoi/638935780)
+[![Paper: GMD](https://img.shields.io/badge/paper-GMD-1f7a8c.svg)](https://doi.org/10.5194/gmd-2023-16)
+[![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](docs/index.md)
 
 HICAR is a variant of the Intermediate Complexity Atmospheric Research (ICAR) model developed for sub-kilometer resolutions. The model is developed for downscaling of kilometer-scale NWP model output to resolutions used for land-surface simulations. HICAR features physics parameterizations shared by traditional weather models such as WRF, but with massively simplified dynamics which enable for run times nearly 600x faster than WRF.
 
@@ -23,6 +32,7 @@ This script creates the working-directory tree (`input/`, `output/`, `restart/`,
 While being fast to run compared to traditional weather models, HICAR has still been developed and intended for use on High Performance Computing (HPC) machines, although it can also be run on a local machine. HICAR thus uses a few package requirements which are common to HPC environments. They are:
 
 - Parallel NetCDF4
+- MPI
 - FFTW
 
 HICAR currently supports either the GNU Fortran or NVFortran compilers.
@@ -57,15 +67,6 @@ Example namelists for a range of configurations are provided under `helpers/exam
 #### Supplementary data
 
 Supplementary data for running HICAR, for example look-up tables needed for the ISHMAEL microphysics scheme, can be found in the following repo: https://github.com/NCAR/icar_supporting_files
-
-#### Developing
-If you plan to make any major additions to HICAR or ICAR, please get in touch, for minor changes feel free to just submit a pull request. The current workflow is to make changes and pull requests to the `develop` branch.
-
-If your code changes are core to the model and would benefit both HICAR and ICAR, please make them over at the ICAR model repo: https://github.com/NCAR/icar.
-
-For an outline of the basic code structure see the [code overview](docs/code_overview.md).
-
-For the contribution workflow and how to add to the model, see [Developing HICAR](docs/developing.md).
 
 
 #### Generating Static Data
