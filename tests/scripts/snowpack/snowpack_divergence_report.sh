@@ -2,7 +2,7 @@
 # ===========================================================================
 # SNOWPACK C++ vs Fortran divergence report.
 #
-# Companion to tests/snowpack/test_snowpack_compare.sh. When the nightly/PR comparison
+# Companion to tests/scripts/snowpack/test_snowpack_compare.sh. When the nightly/PR comparison
 # between the C++ SNOWPACK build and the native-Fortran port starts FAILING,
 # the usual cause is new physics landing on the upstream `fortran-bindings`
 # branch (C++ side) that has not yet been ported to the Fortran driver. This
@@ -62,7 +62,7 @@ done
 # --- 1. the parity anchor (last blessed upstream SHA) -----------------------
 hicar_blessed=""
 if [ -z "$blessed_sha" ]; then
-    line=$(bash "$hicar_repo/tests/resolve_blessed_commit.sh" "$hicar_repo" \
+    line=$(bash "$hicar_repo/tests/scripts/resolve_blessed_commit.sh" "$hicar_repo" \
             snow-parity --with-description) || {
         echo -e "${RED}No commit with snow-parity=success found.${NC}"
         echo "Run the parity comparison first (it records snowpack=<sha> on PASS),"

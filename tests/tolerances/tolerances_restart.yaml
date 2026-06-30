@@ -7,7 +7,7 @@
 # an INTEGRATION check — "the restart reconstructs a physically-equivalent run
 # and did not drop or corrupt state" — not bit-for-bit equality.
 #
-# Three tiers (see tests/compare_outputs.py):
+# Three tiers (see tests/scripts/compare_outputs.py):
 #   Tier 1 STRUCTURAL  — NaN/Inf, dropped vars, shape changes are ALWAYS fatal
 #                        (applies to every variable, including warn_only ones).
 #   Tier 2 PROGNOSTIC  — core dynamics/thermo reliably reconstruct; tight tol.

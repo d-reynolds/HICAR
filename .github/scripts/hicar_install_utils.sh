@@ -292,7 +292,7 @@ function execute_test_run {
 
     # 1. CLI options test (fast, no MPI needed)
     echo "--- Running CLI options tests ---"
-    bash tests/test_cli_options.sh ${GITHUB_WORKSPACE}
+    bash tests/scripts/test_cli_options.sh ${GITHUB_WORKSPACE}
 
     # 2. Unit tests (MPI)
     echo "--- Running unit tests ---"

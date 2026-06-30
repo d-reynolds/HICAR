@@ -1,8 +1,8 @@
 # ---------------------------------------------------------------------------
 # C++ SNOWPACK  vs  native-Fortran SNOWPACK  comparison tolerances
 # ---------------------------------------------------------------------------
-# Used by tests/compare_outputs.py --tolerance-spec for the snow-driver
-# comparison test (tests/snowpack/test_snowpack_compare.sh). Both runs use the SAME
+# Used by tests/scripts/compare_outputs.py --tolerance-spec for the snow-driver
+# comparison test (tests/scripts/snowpack/test_snowpack_compare.sh). Both runs use the SAME
 # gfortran toolchain/flags on the SAME domain and forcing; the ONLY difference is
 # the snow driver (C++ Alpine3D/SNOWPACK bindings vs the native-Fortran port).
 #
@@ -28,7 +28,7 @@
 # default: they matched at rtol=1e-5/atol=1e-6 when calibrated.
 #
 # If a NEW field starts failing here, do not loosen it blindly: run
-# tests/snowpack/snowpack_divergence_report.sh to check for upstream SNOWPACK drift
+# tests/scripts/snowpack/snowpack_divergence_report.sh to check for upstream SNOWPACK drift
 # first (see docs/ci_cd_pipeline.md section 3.4).
 # ---------------------------------------------------------------------------
 

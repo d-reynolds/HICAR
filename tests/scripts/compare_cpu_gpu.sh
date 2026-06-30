@@ -105,7 +105,7 @@ fi
 [ -x "$CPU_EXE" ] || { echo -e "${RED}CPU exe not found/executable: $CPU_EXE${NC}"; exit 1; }
 [ -x "$GPU_EXE" ] || { echo -e "${RED}GPU exe not found/executable: $GPU_EXE${NC}"; exit 1; }
 
-COMPARE="$hicar_repo/tests/compare_outputs.py"
+COMPARE="$hicar_repo/tests/scripts/compare_outputs.py"
 STANDARD_GEN="$hicar_repo/tests/Test_Cases/input/nml_gen_scripts/Standard.sh"
 OUTPUT_FILENAME="Gaudergrat_250m_2017-02-14_00-00-00.nc"
 

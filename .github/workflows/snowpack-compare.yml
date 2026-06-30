@@ -5,7 +5,7 @@
 #   reference: -DSNOWPACK_CPP=ON  (C++ bindings, sm_SNOWPACK.F90)
 #   candidate: default build       (native-Fortran port, snowpack_driver.F90)
 # A 3 h Standard run seeded with a 14-layer / 1 m snowpack is compared against
-# tests/tolerances/tolerances_snowpack.yaml. See tests/snowpack/test_snowpack_compare.sh.
+# tests/tolerances/tolerances_snowpack.yaml. See tests/scripts/snowpack/test_snowpack_compare.sh.
 #
 # Triggers: every PR into main (the gate — no path filter), push to main (the
 # fresh post-merge run), and manual dispatch.

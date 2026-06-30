@@ -3,7 +3,7 @@
 #
 # HICAR's blessing mechanism stores no files: a commit is "blessed" by posting a
 # GitHub commit status (state=success) in a given context:
-#   hicar-regression-blessed       — regression reference (tests/test_regression.sh)
+#   hicar-regression-blessed       — regression reference (tests/scripts/test_regression.sh)
 #   snow-parity                    — last commit where the native-Fortran SNOWPACK
 #                                    port matched the C++ build (posted by
 #                                    snowpack-compare on PASS). Its status DESCRIPTION

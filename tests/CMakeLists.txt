@@ -53,11 +53,11 @@ set(
 )
 set(
   SOURCE_FILES
-  "test_driver.F90"
+  "unit/test_driver.F90"
 )
 foreach(t IN LISTS tests)
-  string(MAKE_C_IDENTIFIER ${t} t) 
-  list(APPEND SOURCE_FILES "test_${t}.F90")
+  string(MAKE_C_IDENTIFIER ${t} t)
+  list(APPEND SOURCE_FILES "unit/test_${t}.F90")
 endforeach()
 
 add_executable(

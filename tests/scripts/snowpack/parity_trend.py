@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Compare two SNOWPACK-parity comparison reports (parity_report.json, written
-by tests/snowpack/test_snowpack_compare.sh via compare_outputs.py --report-json and
+by tests/scripts/snowpack/test_snowpack_compare.sh via compare_outputs.py --report-json and
 archived on each `snowpack-parity/*` GitHub release).
 
 Shows how the C++-vs-Fortran residual changed between two blesses:
@@ -8,11 +8,11 @@ Shows how the C++-vs-Fortran residual changed between two blesses:
     # fetch two archived reports
     gh release download snowpack-parity/20260612-abc1234 -p parity_report.json -O old.json
     gh release download snowpack-parity/20260701-def5678 -p parity_report.json -O new.json
-    tests/snowpack/parity_trend.py old.json new.json
+    tests/scripts/snowpack/parity_trend.py old.json new.json
 
 Variables are ranked by the growth of max|abs| difference; growth beyond
 --flag-ratio (default 3x) is marked as a potential regression worth a
-tests/snowpack/snowpack_divergence_report.sh look.
+tests/scripts/snowpack/snowpack_divergence_report.sh look.
 """
 import argparse
 import json
@@ -58,7 +58,7 @@ def main():
 
     if flagged:
         print(f"\n{flagged} variable(s) grew >{args.flag_ratio}x — check upstream drift:")
-        print("  tests/snowpack/snowpack_divergence_report.sh <hicar_repo>")
+        print("  tests/scripts/snowpack/snowpack_divergence_report.sh <hicar_repo>")
     else:
         print(f"\nNo variable grew >{args.flag_ratio}x — parity level stable.")
 

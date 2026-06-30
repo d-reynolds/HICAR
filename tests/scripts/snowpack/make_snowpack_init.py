@@ -7,7 +7,7 @@ state from the domain / init_conditions_file via read_snowpack_state, using the
 namelist `snowpack_*_var` names. This script copies an existing domain file and
 adds those variables so the model starts from a prescribed, multi-layer snowpack
 instead of cold-starting. It is used by the C++-vs-Fortran SNOWPACK comparison
-test (tests/snowpack/test_snowpack_compare.sh) so both builds initialize from a bit-
+test (tests/scripts/snowpack/test_snowpack_compare.sh) so both builds initialize from a bit-
 identical state.
 
 Layout expected by HICAR's reader (verified against try_read_snp_3d):

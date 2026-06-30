@@ -80,7 +80,7 @@ on the head branch — §2.6).
      `bin/HICAR`) and a **GPU exe** with NVHPC (`-DOPENACC=ON` → `bin/HICAR_gpu`).
      Same compiler for both isolates the GPU port from compiler differences.
    - Runs both on the Standard case with an **identical namelist** and compares
-     GPU-vs-CPU by tolerance (`tests/compare_cpu_gpu.sh`).
+     GPU-vs-CPU by tolerance (`tests/scripts/compare_cpu_gpu.sh`).
    - **Validation** ⬜ — stubbed (idealized case / conservation checks to come).
 2. **`sign-gpu`** (hosted, runs only if `gpu-tests` passed): posts the
    **`gpu-check = success`** commit status that `main`'s ruleset requires (§2.6).
@@ -107,8 +107,8 @@ Warns if the commit hasn't passed full-test.
 Builds HICAR twice on the same gfortran toolchain (`-DSNOWPACK_CPP=ON` C++
 bindings vs the default native-Fortran port), each into its **own build tree**
 (`build_snowpack_cpp` / `build_snowpack_fortran`, via `HICAR_BUILD_DIR`). It then
-runs a 3 h seeded-snowpack comparison (`tests/snowpack/test_snowpack_compare.sh`)
-against `tests/snowpack/tolerances_snowpack.yaml`. Triggers: **every
+runs a 3 h seeded-snowpack comparison (`tests/scripts/snowpack/test_snowpack_compare.sh`)
+against `tests/tolerances/tolerances_snowpack.yaml`. Triggers: **every
 `pull_request` → `main`** (no path filter — runs on the test-merge), **`push` to
 `main`** (the post-merge run), and manual dispatch.
 
@@ -127,7 +127,7 @@ reported at runtime as `n_compared`) and the spatial difference maps (`diffmaps/
 into `tests/figures/snowpack_compare/`, uploaded as the
 `snowpack-compare-diagnostics` workflow artifact (retained ~90 days). To track
 residual growth, download the report from two runs (`gh run download <run-id> -n
-snowpack-compare-diagnostics`) and analize it with `tests/snowpack/parity_trend.py
+snowpack-compare-diagnostics`) and analize it with `tests/scripts/snowpack/parity_trend.py
 <old.json> <new.json>`. The upstream SNOWPACK commit each run was built against is
 recorded in the `snow-parity` status description (`snowpack=<sha>`), not in the
 artifact.
@@ -137,7 +137,7 @@ branch (cmake/FindSNOWPACK.cmake), so upstream C++ commits land in CI builds
 automatically. When the comparison starts failing:
 
 ```
-tests/snowpack/snowpack_divergence_report.sh <hicar_repo>
+tests/scripts/snowpack/snowpack_divergence_report.sh <hicar_repo>
 ```
 
 resolves the anchor from the most recent `snow-parity=success` status (reading its
@@ -174,7 +174,7 @@ all. The gate is robust to third-party noise: instead of `--error-exitcode`
 (mpich is not valgrind-clean), it **fails only when a valgrind error block cites a
 HICAR `.F90` source**, and also fails if the tester itself exits non-zero. The
 full valgrind log is uploaded as an artifact. The gate logic lives in
-`tests/test_valgrind.sh` (runnable locally as `make test_valgrind`), which the
+`tests/scripts/test_valgrind.sh` (runnable locally as `make test_valgrind`), which the
 workflow's `run:` step invokes.
 
 A **`sign-valgrind`** job posts the outcome as the **`valgrind`** commit status —
@@ -242,7 +242,7 @@ ruleset **bypass** (`RepositoryRole: always`) for emergencies.
 
 ## 3. Comparison engine ✅
 
-`tests/compare_outputs.py` is the single comparison engine for all lanes:
+`tests/scripts/compare_outputs.py` is the single comparison engine for all lanes:
 
 - `--mode exact` (bit-for-bit, CPU regression) and `--mode tolerance`
   (CPU↔GPU), driven by per-variable `rtol`/`atol` in `tests/tolerances.yaml`.
@@ -252,10 +252,10 @@ ruleset **bypass** (`RepositoryRole: always`) for emergencies.
   values, abs/rel error), emits GitHub `::error::` annotations, and writes a
   JSON report.
 
-**Regression** (`tests/test_regression.sh`) uses a **blessed *commit*** as the
+**Regression** (`tests/scripts/test_regression.sh`) uses a **blessed *commit*** as the
 reference, not a stored output file. The reference is the most recent commit
 carrying a `hicar-regression-blessed=success` status (resolved by
-`tests/resolve_blessed_commit.sh` — branch-aware: the newest blessed *ancestor* of
+`tests/scripts/resolve_blessed_commit.sh` — branch-aware: the newest blessed *ancestor* of
 the commit under test). It recompiles that commit's exe (cached by hash in a git
 worktree), runs it on the requested cases to **regenerate** the reference output,
 and diffs the *current* integration outputs against it. Both exes are built on the
@@ -263,7 +263,7 @@ same runner/toolchain, so the comparison defaults to **bit-for-bit (`--mode
 exact`)** — any difference is a real change in model output. Nothing is stored in
 the repo; blessing just posts a commit status (§2.3).
 
-**CPU↔GPU** (`tests/compare_cpu_gpu.sh`) runs the GPU exe and a CPU-host NVHPC exe
+**CPU↔GPU** (`tests/scripts/compare_cpu_gpu.sh`) runs the GPU exe and a CPU-host NVHPC exe
 (same commit, same compiler) with an identical namelist and compares by tolerance.
 
 ---
@@ -294,7 +294,7 @@ into the image) because `-gpu=ccnative` needs the device visible at build time.
 
 - **Add a unit test**: create `tests/test_<name>.F90` with a `collect_<name>_suite`,
   add it to the `tests` list in `tests/CMakeLists.txt` **and** to the `testsuites`
-  array in `tests/test_driver.F90`.
+  array in `tests/unit/test_driver.F90`.
 - **Tune cross-lane tolerances**: edit `tests/tolerances.yaml` (per-variable
   `rtol`/`atol`); start loose, tighten as the GPU comparison spread is learned.
 - **Gate a `main` PR**: full-test, snowpack-parity, and valgrind sign the PR head

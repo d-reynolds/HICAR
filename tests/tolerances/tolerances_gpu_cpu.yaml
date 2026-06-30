@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# HICAR GPU-vs-CPU comparison tolerances  (tests/compare_cpu_gpu.sh)
+# HICAR GPU-vs-CPU comparison tolerances  (tests/scripts/compare_cpu_gpu.sh)
 # ---------------------------------------------------------------------------
 # AUTO-TUNED to the accepted CPU<->GPU cross-lane spread of the Standard case
 # (NVHPC, same commit, OPENACC OFF vs ON). These gate "did the GPU diverge

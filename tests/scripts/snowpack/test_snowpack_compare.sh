@@ -138,9 +138,9 @@ fortran_exe="$(cd "$(dirname "$fortran_exe")" && pwd)/$(basename "$fortran_exe")
 input_dir="${hicar_repo}/tests/Test_Cases/input"
 domains_dir="${hicar_repo}/tests/Test_Cases/domains"
 nmlgen_dir="${input_dir}/nml_gen_scripts"
-compare_script="${hicar_repo}/tests/compare_outputs.py"
+compare_script="${hicar_repo}/tests/scripts/compare_outputs.py"
 tol_spec="${hicar_repo}/tests/tolerances/tolerances_snowpack.yaml"
-seeder="${hicar_repo}/tests/snowpack/make_snowpack_init.py"
+seeder="${hicar_repo}/tests/scripts/snowpack/make_snowpack_init.py"
 seeded_domain="${domains_dir}/Gaudergrat_250m_snowpack.nc"
 
 # --- MPI launcher (same heuristic as test_reproducibility.sh) ---------------
@@ -187,7 +187,7 @@ echo "  ranks each run:      $np"
 midday_forcing="${hicar_repo}/tests/Test_Cases/forcing_midday"
 echo
 echo -e "Shifting forcing +10 h (night -> midday) for the shortwave-on comparison..."
-"$python_exe" "${hicar_repo}/tests/shift_forcing_timestamps.py" \
+"$python_exe" "${hicar_repo}/tests/scripts/shift_forcing_timestamps.py" \
     "${hicar_repo}/tests/Test_Cases/forcing" "$midday_forcing" 10 \
     || { echo -e "${RED}forcing time-shift failed${NC}"; exit 1; }
 "${hicar_repo}/helpers/filelist_script.sh" \
@@ -268,7 +268,7 @@ cmp_status=$?
 # Spatial difference maps for the key snow/surface fields, generated on PASS as
 # well as FAIL (compare_outputs only plots failures): these are the figures the
 # archive job snapshots, and the visual baseline for "how did the residual change".
-"$python_exe" "${hicar_repo}/tests/snowpack/plot_snowpack_diff.py" \
+"$python_exe" "${hicar_repo}/tests/scripts/snowpack/plot_snowpack_diff.py" \
     "$ref_out" "$cand_out" "${report_dir}/diffmaps" >/dev/null 2>&1 \
     && echo -e "Difference maps: ${BLUE}${report_dir}/diffmaps${NC}" \
     || echo -e "${RED}(diff-map generation failed — non-fatal)${NC}"

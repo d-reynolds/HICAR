@@ -4,7 +4,7 @@
 #
 # The blessed reference is NOT a stored .nc file and NOT a file in the repo: it is
 # the most recent commit carrying a `hicar-regression-blessed=success` commit
-# status (resolved by tests/resolve_blessed_commit.sh). This script:
+# status (resolved by tests/scripts/resolve_blessed_commit.sh). This script:
 #   1. builds the blessed commit's HICAR exe (cached by hash, in a git worktree),
 #   2. runs it on the requested integration case(s) to REGENERATE the reference,
 #   3. diffs the *current* integration outputs against the regenerated reference
@@ -50,7 +50,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-COMPARE="$hicar_repo/tests/compare_outputs.py"
+COMPARE="$hicar_repo/tests/scripts/compare_outputs.py"
 TC="$hicar_repo/tests/Test_Cases"
 
 # set_var <nml_file> <name> <value> <group>: set a namelist variable by name,
@@ -77,7 +77,7 @@ fi
 # --- resolve the blessed reference commit -----------------------------------
 REF_HASH="$BLESSED_COMMIT"
 if [ -z "$REF_HASH" ]; then
-    REF_HASH=$(bash "$hicar_repo/tests/resolve_blessed_commit.sh" "$hicar_repo" --exclude-head) || {
+    REF_HASH=$(bash "$hicar_repo/tests/scripts/resolve_blessed_commit.sh" "$hicar_repo" --exclude-head) || {
         echo -e "${RED}Could not resolve a blessed commit (none found, or gh not authed).${NC}"
         echo -e "${RED}Bless one first (bless-baseline.yml or test_regression.sh --bless), or pass --blessed-commit.${NC}"
         exit 1

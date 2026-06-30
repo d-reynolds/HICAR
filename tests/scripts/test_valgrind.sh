@@ -10,7 +10,7 @@
 # runnable locally. It needs a debug build (-DMODE=debug) and `valgrind` on PATH.
 #
 # Usage:
-#   bash tests/test_valgrind.sh <hicar_repo> [build_dir]   # build_dir default <repo>/build
+#   bash tests/scripts/test_valgrind.sh <hicar_repo> [build_dir]   # build_dir default <repo>/build
 #   make test_valgrind                                      # via CMake (debug build)
 
 set -uo pipefail

@@ -4,7 +4,7 @@
 #
 # Validates that all command-line options in driver.F90 produce the expected
 # exit codes and output. Run with:
-#   bash tests/test_cli_options.sh /path/to/hicar/repo
+#   bash tests/scripts/test_cli_options.sh /path/to/hicar/repo
 #
 # Or via cmake:
 #   make test_cli

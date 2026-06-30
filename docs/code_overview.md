@@ -134,7 +134,7 @@ namelist parsing (`namelist_utilities.F90`), array helpers
 
 ## Tests
 
-Component tests live under `tests/` as [test-drive] suites: `test_driver.F90`
+Component tests live under `tests/unit/` as [test-drive] suites: `test_driver.F90`
 dispatches to the individual `test_<name>.F90` files. The runnable suite names are
 `advection`, `snow_drift`, `wind_iterative`, `control_flow`, `halo_exch`, `geo`,
 `time`, and `utilities` (note the advection suite is `advection`, though its file

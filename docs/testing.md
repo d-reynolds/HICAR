@@ -35,7 +35,7 @@ self-contained; you don't have to build or fetch data first.
 Notes:
 - **SLURM:** `make check` / `make test_cases` need `-DSRUN_FLAGS='-A <account>'` at the cmake step (see [Test Cases on SLURM](#test-cases-on-slurm)).
 - **`test_valgrind`** runs `make check`'s suite under `valgrind --track-origins` (the CPU memcheck CI lane, runnable locally). Needs a debug build (`-DMODE=debug`) and `valgrind` installed; it writes `build/valgrind.log` and fails on any error block citing a HICAR `.F90` (or a non-zero tester exit).
-- **`test_regression`** resolves its reference via `gh` and is soft/skipped until a commit is blessed (see [ci_cd_pipeline.md](ci_cd_pipeline.md)). It reuses existing integration output under `tests/Test_Cases/output` and only re-runs the cases when missing. To pin a reference or use tolerance mode, call the script directly: `bash tests/test_regression.sh . build "<cases>" --blessed-commit <sha> --mode tolerance`.
+- **`test_regression`** resolves its reference via `gh` and is soft/skipped until a commit is blessed (see [ci_cd_pipeline.md](ci_cd_pipeline.md)). It reuses existing integration output under `tests/Test_Cases/output` and only re-runs the cases when missing. To pin a reference or use tolerance mode, call the script directly: `bash tests/scripts/test_regression.sh . build "<cases>" --blessed-commit <sha> --mode tolerance`.
 - **`test_gpu`** needs an NVHPC-configured build (`-DFC=nvfortran`) and a visible GPU — it can't build the GPU exe on a CPU-only checkout.
 
 The sections below cover the most-used targets in more detail.
@@ -82,7 +82,7 @@ cmake ../ -DMPIEXEC_EXECUTABLE="$(command -v srun)" -DSRUN_FLAGS='-A 9999'
 `SRUN_FLAGS` is a configure-time setting, so re-run the cmake step (as above) in an
 existing build directory to add or change it.
 
-## Testing model components (developers)
+## Testing model components
 
 Some basic integration testing of the model dynamics are implemented, and can be run by calling
 
@@ -91,16 +91,16 @@ cd build/
 make check
 ```
 
-tests are defined under the `tests/` folder. `test_driver.F90` manages the execution of the different test modules, which are defined as `test_XXXX.F90`. The runnable suite names (as passed to `HICAR-tester`) are: `advection`, `snow_drift`, `control_flow`, `halo_exch`, `geo`, `time`, `utilities` — note the advection suite is `advection`, though its source file is `test_advect.F90`. Run a single suite with `mpiexec -np 2 tests/HICAR-tester <suite>`, or run them all (with no argument) via `make check`.
+tests are defined under `tests/unit/`. `test_driver.F90` manages the execution of the different test modules, which are defined as `test_XXXX.F90`. The runnable suite names (as passed to `HICAR-tester`) are: `advection`, `snow_drift`, `control_flow`, `halo_exch`, `geo`, `time`, `utilities` — note the advection suite is `advection`, though its source file is `test_advect.F90`. Run a single suite with `mpiexec -np 2 tests/HICAR-tester <suite>`, or run them all (with no argument) via `make check`.
 
 ## SNOWPACK C++ vs Fortran parity (developers)
 
 The native-Fortran SNOWPACK port (`snowpack_driver.F90`, fetched with the
 upstream `fortran-bindings` branch) is validated against the C++ SNOWPACK
-bindings by `tests/snowpack/test_snowpack_compare.sh` (run in CI by
+bindings by `tests/scripts/snowpack/test_snowpack_compare.sh` (run in CI by
 `.github/workflows/snowpack-compare.yml`): two HICAR builds differing only in
 the snow driver run a 3 h seeded-snowpack case and all outputs are compared
-against `tests/snowpack/tolerances_snowpack.yaml`.
+against `tests/tolerances/tolerances_snowpack.yaml`.
 
 If the github workflow action passes, the comparison posts a `snow-parity=success` commit status
 whose description records the upstream SNOWPACK SHA used (`snowpack=<sha>`); that
@@ -109,7 +109,7 @@ two implementations matched). If the comparison later diverges (new C++ physics
 upstream not yet ported), run
 
 ```bash
-tests/snowpack/snowpack_divergence_report.sh <hicar_repo>
+tests/scripts/snowpack/snowpack_divergence_report.sh <hicar_repo>
 ```
 
 to get the list of upstream C++ commits/diffs since the last passing parity run —
@@ -125,7 +125,7 @@ Each comparison run leaves its evidence in `tests/figures/snowpack_compare/`
 gh run list --workflow=snowpack-compare.yml --branch main      # find the run IDs
 gh run download <old-run-id> -n snowpack-compare-diagnostics -D old/
 gh run download <new-run-id> -n snowpack-compare-diagnostics -D new/
-tests/snowpack/parity_trend.py old/parity_report.json new/parity_report.json
+tests/scripts/snowpack/parity_trend.py old/parity_report.json new/parity_report.json
 ```
 
 ### Reproducing the GH runner (Docker)

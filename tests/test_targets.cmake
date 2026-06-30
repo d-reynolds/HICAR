@@ -79,13 +79,13 @@ else()
 
 endif()
 
-# Unit tests under valgrind memcheck (tests/test_valgrind.sh): the same
+# Unit tests under valgrind memcheck (tests/scripts/test_valgrind.sh): the same
 # HICAR-tester `check` runs (mpiexec -np 4), wrapped in valgrind --track-origins.
 # This is the CPU  memcheck CI lane (valgrind-memcheck.yml) made runnable locally; needs a debug
 # build and `valgrind` installed (the script errors clearly if it is missing).
 add_custom_target(test_valgrind
     COMMAND ${CMAKE_COMMAND} -E echo "Running unit tests under valgrind memcheck (mpiexec -np 4)..."
-    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_valgrind.sh ${PROJECT_SOURCE_DIR} ${CMAKE_BINARY_DIR}
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/scripts/test_valgrind.sh ${PROJECT_SOURCE_DIR} ${CMAKE_BINARY_DIR}
     DEPENDS ${PROJECT_NAME}-tester
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     COMMENT "Running HICAR unit tests under valgrind memcheck"
@@ -94,7 +94,7 @@ add_custom_target(test_valgrind
 
 add_custom_target(test_cli
     COMMAND ${CMAKE_COMMAND} -E echo "Running CLI option tests..."
-    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_cli_options.sh ${PROJECT_SOURCE_DIR}
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/scripts/test_cli_options.sh ${PROJECT_SOURCE_DIR}
     DEPENDS HICAR_installed
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests
     COMMENT "Running CLI options test suite"
@@ -128,7 +128,7 @@ else()
 endif()
 
 add_custom_target(test_decomposition
-    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_reproducibility.sh ${PROJECT_SOURCE_DIR} decomposition
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/scripts/test_reproducibility.sh ${PROJECT_SOURCE_DIR} decomposition
     DEPENDS HICAR_debug download_test_data
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
     COMMENT "Running MPI domain decomposition reproducibility test (5 vs 10 ranks)"
@@ -136,7 +136,7 @@ add_custom_target(test_decomposition
 )
 
 add_custom_target(test_restart
-    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_reproducibility.sh ${PROJECT_SOURCE_DIR} restart
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/scripts/test_reproducibility.sh ${PROJECT_SOURCE_DIR} restart
     DEPENDS HICAR_debug download_test_data
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
     COMMENT "Running restart reproducibility test"
@@ -144,7 +144,7 @@ add_custom_target(test_restart
 )
 
 add_custom_target(test_reproducibility
-    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_reproducibility.sh ${PROJECT_SOURCE_DIR} all
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/scripts/test_reproducibility.sh ${PROJECT_SOURCE_DIR} all
     DEPENDS HICAR_debug download_test_data
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
     COMMENT "Running all reproducibility tests"
@@ -152,13 +152,13 @@ add_custom_target(test_reproducibility
 )
 
 # Regression test: diff current integration output against a "blessed" reference
-# commit (tests/test_regression.sh, which resolves the blessed commit via gh). The
+# commit (tests/scripts/test_regression.sh, which resolves the blessed commit via gh). The
 # script decides for itself whether to (re)run the integration cases — it reuses
 # existing output under tests/Test_Cases/output and only runs `make test_cases`
 # when it is missing
 add_custom_target(test_regression
     COMMAND ${CMAKE_COMMAND} -E echo "Regression: diff vs the blessed reference commit (mode exact)..."
-    COMMAND ${PROJECT_SOURCE_DIR}/tests/test_regression.sh
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/scripts/test_regression.sh
             ${PROJECT_SOURCE_DIR} ${CMAKE_BINARY_DIR} "${TEST_CASES}" --mode exact
     DEPENDS HICAR_installed download_test_data
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
@@ -166,28 +166,28 @@ add_custom_target(test_regression
     VERBATIM
 )
 
-# GPU-vs-CPU comparison (tests/compare_cpu_gpu.sh). `make test_gpu` compiles BOTH
+# GPU-vs-CPU comparison (tests/scripts/compare_cpu_gpu.sh). `make test_gpu` compiles BOTH
 # exes fresh (CPU=OPENACC=OFF, GPU=OPENACC=ON, same compiler) into
 # build_gpu_compare_cpu / build_gpu_compare_gpu, compares, then removes those
 # trees so the next run rebuilds fresh. Needs an NVHPC-configured build
 # (FC=nvfortran) for the GPU exe.
 add_custom_target(test_gpu
     COMMAND ${CMAKE_COMMAND} -E echo "Building CPU + GPU exes, then comparing (tolerance)..."
-    COMMAND ${PROJECT_SOURCE_DIR}/tests/compare_cpu_gpu.sh ${PROJECT_SOURCE_DIR} --build ${CMAKE_BINARY_DIR}
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/scripts/compare_cpu_gpu.sh ${PROJECT_SOURCE_DIR} --build ${CMAKE_BINARY_DIR}
     DEPENDS download_test_data
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
     COMMENT "Building CPU/GPU exes then running GPU-vs-CPU comparison"
     VERBATIM
 )
 
-# SNOWPACK C++ vs native-Fortran parity (tests/snowpack/test_snowpack_compare.sh).
+# SNOWPACK C++ vs native-Fortran parity (tests/scripts/snowpack/test_snowpack_compare.sh).
 # `make test_snowpack` compiles BOTH exes fresh (-DSNOWPACK_CPP=ON vs the default
 # port, both CPU) into build_snowpack_cpp / build_snowpack_fortran, compares, then
 # removes those trees so the next run rebuilds fresh. The --build arg is the build
 # directory whose CMakeCache supplies the compiler/library config.
 add_custom_target(test_snowpack
     COMMAND ${CMAKE_COMMAND} -E echo "Building C++ + Fortran SNOWPACK exes, then comparing..."
-    COMMAND ${PROJECT_SOURCE_DIR}/tests/snowpack/test_snowpack_compare.sh ${PROJECT_SOURCE_DIR} --build ${CMAKE_BINARY_DIR}
+    COMMAND ${PROJECT_SOURCE_DIR}/tests/scripts/snowpack/test_snowpack_compare.sh ${PROJECT_SOURCE_DIR} --build ${CMAKE_BINARY_DIR}
     DEPENDS download_test_data
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Test_Cases
     COMMENT "Building SNOWPACK C++/Fortran exes then running parity comparison"
