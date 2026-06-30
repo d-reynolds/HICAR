@@ -1,6 +1,6 @@
 ## Namelist Options
 
-You can get information about the namelist options by interacting with the executable generated from compiling the model.
+Example namelists for a range of configurations are provided under `helpers/example_namelists/`. The complete set of namelist options, with default values and inline comments describing their function, can be generated from the compiled executable with `./bin/HICAR --gen-nml my_options.nml` as described below.
 
 Once the model has been succesfully compiled, from the root repository type:
 

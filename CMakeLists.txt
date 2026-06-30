@@ -142,8 +142,9 @@ string(REGEX REPLACE "^heads/" "" GIT_VERSION "${GIT_VERSION}")
 add_definitions(-DVERSION="${GIT_VERSION}")
 
 # Commit hash and nearest tag (version), fetched at configure time for the startup
-# banner. GIT_COMMIT = exact short commit; GIT_TAG = nearest tag + offset/dirty
-# (or the bare hash if the repo has no tags yet).
+# banner. GIT_COMMIT = exact short commit; GIT_TAG = nearest `v*` release tag +
+# offset/dirty (--tags so lightweight tags count, --match v* to skip dev tags;
+# or the bare hash if the repo has no v* tags yet).
 execute_process(
 COMMAND ${GIT_EXECUTABLE} rev-parse --short=12 HEAD
 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -152,7 +153,7 @@ OUTPUT_STRIP_TRAILING_WHITESPACE
 ERROR_QUIET
 )
 execute_process(
-COMMAND ${GIT_EXECUTABLE} describe --always --dirty
+COMMAND ${GIT_EXECUTABLE} describe --tags --match v* --always --dirty
 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 OUTPUT_VARIABLE GIT_DESCRIBE_TAG
 OUTPUT_STRIP_TRAILING_WHITESPACE

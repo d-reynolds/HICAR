@@ -1,6 +1,23 @@
 
 # Forcing Data
 
+## Forcing data requirements
+
+HICAR requires at least the following 5 fields to run, all of which are contained within one netCDF file:
+- U winds
+- V winds
+- Pressure
+- Temperature (potential or normal temperature)
+- Humidity (mixing ratio or specific humidity)
+
+When using the variational wind solver, providing W winds from forcing data can lead to better estimates of wind speeds.
+
+To perform nested runs, HICAR can be forced with the output from a previous HICAR simulation. Thus HICAR also supports the forcing of all hydrometeors and all of their moments as according to the microphysics scheme chosen. It is recommended to specify these forcing variables when forcing HICAR with output from coarser resolution HICAR runs.
+
+HICAR reads in forcing data from a forcing file list supplied to the model in the namelist. A shell script for generating a forcing file list from a given directory is found within helpers/filelist_script.sh
+
+Example forcing data for running a 1-day simulation can be found under: [HICAR-model/Test-data](https://github.com/HICAR-Model/Test-Data)
+
 For reading in forcing data, HICAR accepts a .txt file specified by the namelist variable 'forcing_file_list' in the 'forcing' section of the namelist. This .txt file should be a list of full file paths to the forcing data surrounded by full quotes, with one file path per line, i.e.:
 
 ```text

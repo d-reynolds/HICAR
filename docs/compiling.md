@@ -157,8 +157,7 @@ make install
 ```
 
 The GPU build maps one GPU to each compute MPI rank at run time (see
-[Running](running.md)). The relocatable device-code link is the dominant cost of
-a GPU build and takes several minutes regardless of optimization level.
+[Running](running.md)).
 
 ## Options
 
@@ -207,12 +206,6 @@ Full list of user options, not including standard cmake options, are:
 
 > The `SRUN_FLAGS` option only affects how the bundled test cases are launched on
 > SLURM systems; see [Testing](testing.md#test-cases-on-slurm).
-
-> Note: SNOWPACK (native-Fortran port) is now always compiled into HICAR; there
-> is no flag to build without it. `-DSNOWPACK_CPP=ON` selects the C++ wrapper
-> instead. `-DSNOWPACK_FORTRAN=ON` is deprecated (the port is the default) and
-> `-DSNOWPACK=OFF` is no longer supported. Re-configuring an existing build
-> directory keeps previously cached values; use a fresh build directory.
 
 The following flags are used to help cmake locate installed dependencies. Though not explicitly necesarry, they help cmake find dependencies, especially if they have been installed to unusual locations on the system.
 

@@ -25,7 +25,7 @@ mpiexec -np 64 ./bin/HICAR your_namelist.nml
 The value is validated at startup, and the following rules apply:
 
 - `HICAR_IO_PER_NODE` must **evenly divide the number of MPI ranks per node**. If it does not, HICAR decrements it to the next value that does and prints a warning.
-- It is capped at the number of ranks per node; a larger value is reduced to that number (with a warning).
+- It is capped at the number of ranks per node; a larger value is reduced to that number (with a warning). But remember to leave something for the compute tasks...
 - Every I/O task replaces a compute task, so increasing `HICAR_IO_PER_NODE` reduces the number of compute ranks. At least one compute rank must remain, or the run aborts at startup.
 
 ## Running on GPUs

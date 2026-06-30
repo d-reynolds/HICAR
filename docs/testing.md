@@ -157,13 +157,8 @@ in the runner's environment, use the **CI-repro image** — a faithful clone of 
 hosted CPU runner (`.github/docker/Dockerfile.ci-repro`):
 
 ```bash
-# From the repo root. The image BUILD *is* the CI compile — if HICAR fails to
+# From the repo root. The image BUILD is the CI compile — if HICAR fails to
 # build on CI, it fails here too, in the same toolchain. Default = cpu-debug:
 docker build -f .github/docker/Dockerfile.ci-repro -t hicar-ci-repro .
 
-# Reproduce another lane's build via build args:
-docker build -f .github/docker/Dockerfile.ci-repro -t hicar-ci-repro-rel \
-  --build-arg HICAR_MODE=release .
-docker build -f .github/docker/Dockerfile.ci-repro -t hicar-ci-repro-cpp \
-  --build-arg HICAR_CMAKE_EXTRA=-DSNOWPACK_CPP=ON .
 ```
