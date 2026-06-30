@@ -22,6 +22,7 @@ self-contained; you don't have to build or fetch data first.
 | Target | What it checks | Extra needs |
 |---|---|---|
 | `make check` | Unit / invariant suites via `HICAR-tester` (4 MPI ranks) | — |
+| `make test_valgrind` | `HICAR-tester` under valgrind `--track-origins` (uninitialised / invalid memory) | valgrind + a debug build |
 | `make test_cli` | Every `./bin/HICAR` command-line option behaves | — |
 | `make test_cases` | Integration cases run without crash/NaN (Standard, Nested, restarts) | test data (auto) |
 | `make test_decomposition` | Output is identical at 5 vs 10 MPI ranks | builds a debug exe |
@@ -33,6 +34,7 @@ self-contained; you don't have to build or fetch data first.
 
 Notes:
 - **SLURM:** `make check` / `make test_cases` need `-DSRUN_FLAGS='-A <account>'` at the cmake step (see [Test Cases on SLURM](#test-cases-on-slurm)).
+- **`test_valgrind`** runs `make check`'s suite under `valgrind --track-origins` (the CPU memcheck CI lane, runnable locally). Needs a debug build (`-DMODE=debug`) and `valgrind` installed; it writes `build/valgrind.log` and fails on any error block citing a HICAR `.F90` (or a non-zero tester exit).
 - **`test_regression`** resolves its reference via `gh` and is soft/skipped until a commit is blessed (see [ci_cd_pipeline.md](ci_cd_pipeline.md)). It reuses existing integration output under `tests/Test_Cases/output` and only re-runs the cases when missing. To pin a reference or use tolerance mode, call the script directly: `bash tests/test_regression.sh . build "<cases>" --blessed-commit <sha> --mode tolerance`.
 - **`test_gpu`** needs an NVHPC-configured build (`-DFC=nvfortran`) and a visible GPU — it can't build the GPU exe on a CPU-only checkout.
 

@@ -2,8 +2,8 @@
 #
 # Two builds: debug (unit tests, Standard integration, reproducibility) and
 # release (all integration cases + regression vs the blessed commit). If both
-# pass, `sign` posts the hicar-full-test=success commit status; the GPU lane
-# reads it to decide whether it can skip re-running this suite (gpu.yml).
+# pass, `sign` posts the hicar-full-test=success commit status — a required check
+# for merging into main (see ci_cd_pipeline.md §2.6).
 #
 # example-namelists (push to develop only) reuses cpu-release's regenerated .nml
 # artifact and commits it back — develop not main, because it pushes directly and
@@ -13,7 +13,7 @@
 #   - pull_request -> main : the gate. Runs on the test-merge; signs the PR HEAD.
 #   - push to develop      : fast feedback on develop (signs the develop commit).
 #   - push to main         : the FRESH post-merge run that signs main's own HEAD.
-#   - workflow_dispatch / workflow_call (gpu.yml reuse).
+#   - workflow_dispatch    : manual run.
 name: HICAR full-test (CPU)
 
 on:
@@ -22,7 +22,6 @@ on:
   push:
     branches: [main, develop]
   workflow_dispatch:
-  workflow_call:
 
 permissions:
   contents: read
@@ -36,9 +35,6 @@ jobs:
   # build-deps: build the dependency toolchain once (cached) so cpu-debug and
   # cpu-release restore it instead of each rebuilding netcdf/hdf5/pnetcdf.
   build-deps:
-    # No push/PR dedup: a PR into main is meant to run on the TEST-MERGE (the
-    # predicted post-merge state), which is a different commit from the develop
-    # push, so both runs are legitimate and wanted.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -93,10 +89,6 @@ jobs:
       - run: bash .github/scripts/hicar_install_utils.sh gen_test_run_data
       - name: Regenerate example namelists
         run: bash helpers/example_namelists/generate_examples.sh "$GITHUB_WORKSPACE/bin/HICAR"
-      # Publish the .nml regenerated HERE (on the builder, where the -march=native
-      # release exe runs) so example-namelists can commit them without re-running
-      # the exe on a different runner (it would SIGILL). Uploaded before the tests
-      # so it survives a later test failure.
       - name: Upload regenerated example namelists
         uses: actions/upload-artifact@v4
         with:
@@ -147,8 +139,6 @@ jobs:
             tests/figures/**
           if-no-files-found: ignore
 
-  # sign: mark the commit hicar-full-test=success (the gate the GPU lane reads).
-  # PR: post on the PR HEAD (rulesets evaluate there), not the merge commit.
   sign:
     needs: [cpu-debug, cpu-release]
     runs-on: ubuntu-22.04
@@ -164,9 +154,6 @@ jobs:
           token: ${{ github.token }}
 
   # example-namelists: commit cpu-release's regenerated .nml (push to develop only).
-  # Reuses the artifact rather than re-running the -march=native exe (it would
-  # SIGILL on a different runner). The github.workflow guard stops it firing when
-  # gpu.yml reuses this workflow via workflow_call.
   example-namelists:
     needs: cpu-release
     if: ${{ always() && github.event_name == 'push' && github.ref_name == 'develop' && github.workflow == 'HICAR full-test (CPU)' }}

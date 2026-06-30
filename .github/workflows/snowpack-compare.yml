@@ -8,7 +8,7 @@
 # tests/tolerances/tolerances_snowpack.yaml. See tests/snowpack/test_snowpack_compare.sh.
 #
 # Triggers: every PR into main (the gate — no path filter), push to main (the
-# fresh post-merge run), nightly, and manual dispatch.
+# fresh post-merge run), and manual dispatch.
 name: SNOWPACK C++ vs Fortran
 
 on:
@@ -16,8 +16,6 @@ on:
     branches: [main]          # gate: run on EVERY PR into main, on the test-merge
   push:
     branches: [main]          # fresh post-merge parity run that signs main's HEAD
-  schedule:
-    - cron: '0 3 * * *'   # 03:00 UTC nightly
   workflow_dispatch:
 
 concurrency:
@@ -26,54 +24,16 @@ concurrency:
 
 permissions:
   contents: read    # checkout
-  actions: read     # the `changed` gate queries previous runs
   statuses: write   # sign-snow posts the snow-parity commit status
 
 jobs:
-  # On a nightly, skip if main is unchanged since the last completed run.
-  # PRs into main, push to main, and manual dispatch always run.
-  changed:
-    runs-on: ubuntu-22.04
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-    steps:
-      - id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "Event '${{ github.event_name }}' is a PR/push/manual trigger — running."
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # On any API error, fall back to empty so we run rather than skip.
-          last_sha=$(gh api \
-            "/repos/${{ github.repository }}/actions/workflows/snowpack-compare.yml/runs?branch=main&status=completed&per_page=1&exclude_pull_requests=true" \
-            --jq '.workflow_runs[0].head_sha // ""') || last_sha=""
-          cur_sha="${{ github.sha }}"
-          echo "current main SHA:  $cur_sha"
-          echo "last run main SHA: ${last_sha:-<none>}"
-          if [ -z "$last_sha" ]; then
-            echo "No previous run found — running."
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          elif [ "$last_sha" = "$cur_sha" ]; then
-            echo "main unchanged since the last run — skipping."
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "main advanced since the last run — running."
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          fi
-
   snowpack-compare:
-    needs: changed
-    if: needs.changed.outputs.should_run == 'true'
     runs-on: ubuntu-22.04
     outputs:
       snowpack_sha: ${{ steps.sha.outputs.snowpack_sha }}
     env:
       # Release (-O3) for BOTH builds: the C++ SNOWPACK library is always -O3, so a
-      # debug HICAR would compare an -O0 port against -O3 C++ physics — FP-reorder
-      # noise. Release puts both at -O3 for a like-for-like comparison (and is faster).
+      # debug HICAR would compare an -O0 port against -O3 C++ physics
       HICAR_MODE: release
     steps:
       - uses: actions/checkout@v4
@@ -81,20 +41,12 @@ jobs:
       - uses: ./.github/actions/hicar-deps
       - uses: ./.github/actions/snowpack-src-cache   # outage fallback for the git.wsl.ch snowpack+meteoio fetch
 
-      # Build the two exes into the default trees that test_snowpack_compare.sh
-      # --build looks for (build_snowpack_cpp / build_snowpack_fortran); the
-      # compare step then finds them and skips recompiling, then removes the trees
-      # on exit. Separate steps so a build failure is attributed to its own step;
-      # separate trees so the C++ build's shared libs survive the Fortran build.
-      # Build A (reference): C++ SNOWPACK.
       - name: Build HICAR with C++ SNOWPACK
         env:
           HICAR_CMAKE_EXTRA: "-DSNOWPACK_CPP=ON -DOPENACC=OFF"
           HICAR_BUILD_DIR: build_snowpack_cpp
         run: bash .github/scripts/hicar_install_utils.sh hicar_install
 
-      # Build B (candidate): native-Fortran port (the default build; OpenACC off
-      # for the GNU CPU comparison).
       - name: Build HICAR with native-Fortran SNOWPACK
         env:
           HICAR_CMAKE_EXTRA: "-DOPENACC=OFF"
@@ -112,11 +64,6 @@ jobs:
           echo "snowpack_sha=$sha" >> "$GITHUB_OUTPUT"
           echo "SNOWPACK (fortran-bindings) commit under test: $sha"
 
-      # --- Run the comparison ------------------------------------------------
-      # `make test_snowpack` reuses the exes staged above (the script skips
-      # recompiling when they already exist) and removes the build trees on exit.
-      # Use -C, not `cd` — so the step shell's CWD isn't the tree the cleanup
-      # deletes. Locally, `make test_snowpack` builds both exes itself.
       - name: Compare C++ vs Fortran SNOWPACK
         run: make -C build_snowpack_fortran test_snowpack
 
@@ -130,10 +77,6 @@ jobs:
             tests/Test_Cases/input/SNOWPACK_*.out
           if-no-files-found: ignore
 
-  # Post snow-parity=success (required by main's ruleset), recording the upstream
-  # SNOWPACK SHA in the description (snowpack=<sha>) so it doubles as the divergence
-  # anchor — snowpack_divergence_report.sh reads it from the last passing commit.
-  # On a PR the status must land on the PR HEAD; a manual dispatch resolves to github.sha.
   sign-snow:
     needs: snowpack-compare
     if: needs.snowpack-compare.result == 'success'
