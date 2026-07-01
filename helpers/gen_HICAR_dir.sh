@@ -23,7 +23,7 @@ if [ ! -d "$2" ]; then
 	echo "Error: HICAR repo directory $2 does not exist."
 	echo
 	exit 1
-else [ -d "$2/bin" ]; then
+elif [ ! -d "$2/bin" ]; then
 	echo
 	echo "Error: HICAR repo directory $2 does not contain a bin/ directory."
 	echo
@@ -49,6 +49,17 @@ fi
 # Use readlink -f or realpath to get absolute paths
 parent_dir=$(readlink -f "$1")
 HICAR_dir=$(readlink -f "$2")
+
+# Guard: this script scaffolds a working tree at $parent_dir/HICAR. If that path
+# resolves to the HICAR repository itself, refuse rather than silently pollute the repository.
+if [ "$parent_dir/HICAR" = "$HICAR_dir" ]; then
+	echo
+	echo "Error: the target working directory ($parent_dir/HICAR) is the HICAR repository itself."
+	echo "       Pick a different parent directory so its 'HICAR' subdirectory does not collide"
+	echo "       with the repo at $HICAR_dir."
+	echo
+	exit 1
+fi
 
 echo
 echo '#######################################################'

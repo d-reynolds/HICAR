@@ -217,7 +217,9 @@ The following flags are used to help cmake locate installed dependencies. Though
     MPI_DIR=           # Path to MPI installation. If not set, defaults to environment variable, if set
 
     FSM_DIR=           # Path to the compiled FSM installation (root directory of the lib and build directories)
-                       # Defaults to HICAR/FSM2trans/, assuming that the cmake routine for FSM2trans has been run without modification
+                       # If not set on the command line, defaults to the FSM_DIR environment variable (empty if unset).
+                       # There is no automatic HICAR/FSM2trans/ default: set it to the FSM2 source dir where
+                       # 'make install' placed lib/ and build/ (see "Compiling FSM" below).
 ```
 
  If using modules, these directories (besides `FSM_DIR`) should be set automatically. Still, they can be checked for by running
@@ -261,5 +263,5 @@ make install               # FSM2 library is now installed to ../lib
 FSM2 is now installed. To link FSM2 to HICAR when installing HICAR, set the `FSM_DIR` variable when calling cmake for HICAR. In this way, the previous cmake command under the section "Compiling HICAR" can be changed to:
 
 ```bash
-cmake ../ -DFC=gfortran -DFSM_DIR=FSM2_Dir/FSM_SOURCE_CODE
+cmake ../ -DFC=gfortran -DFSM=ON -DFSM_DIR=FSM2_Dir/FSM_SOURCE_CODE
 ```

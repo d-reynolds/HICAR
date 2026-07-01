@@ -45,7 +45,7 @@ specifying the model options. See [Forcing data](forcing_data.md) and
   Cursor, or other AI agents to HICAR's namelist, physics-scheme, variable, docs, and code knowledge.
 
 For the code, see the **[Code overview](code_overview.md)** and
-**[Developing](developing.md)** pages.
+**[Developer Information](dev_info.md)** pages.
 
 ## References
 

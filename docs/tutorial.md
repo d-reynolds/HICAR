@@ -24,7 +24,7 @@ Once the model has been succesfully compiled, from the root repository type:
 
 `./helpers/gen_HICAR_dir.sh path/to/desired/parent/directory path/to/HICAR/repo`
 
-Replacing the two paths with their actual values in your filesystem. Importantly, the parent directory cannot be the parent directory of the HICAR git repo. This script will generate a directory tree at `path/to/desired/working/directory` which organises the input and output data used when running HICAR. The directories generated are:
+Replacing the two paths with their actual values in your filesystem. The parent directory must not be the parent of the HICAR git repo itself: if `<parent>/HICAR` would resolve to the repo, the script stops with an error . This script will generate a directory tree at `path/to/desired/working/directory` which organises the input and output data used when running HICAR. The directories generated are:
 
 <pre>
 

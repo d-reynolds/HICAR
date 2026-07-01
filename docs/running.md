@@ -3,7 +3,7 @@
 ## Example
 
 ```bash
-mpiexec -np 2 ./HICAR/bin/HICAR HICAR_Test_Case.nml
+mpiexec -np 2 ./bin/HICAR your_namelist.nml
 ```
 In the above example, the number of MPI ranks is set with `-np 2`. The number of ranks must always be greater than 1, as at least 1 processor is needed for I/O. An even number of ranks may lead to inefficient domain decomposition, since an odd number of ranks are used in the domain decomposition (i.e. `-np 6` results in 1 I/O task and 5 compute tasks).
 

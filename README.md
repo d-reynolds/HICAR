@@ -12,9 +12,7 @@
 [![Paper: GMD](https://img.shields.io/badge/paper-GMD-1f7a8c.svg)](https://doi.org/10.5194/gmd-2023-16)
 [![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](docs/index.md)
 
-HICAR is a variant of the Intermediate Complexity Atmospheric Research (ICAR) model developed for sub-kilometer resolutions. The model is developed for downscaling of kilometer-scale NWP model output to resolutions used for land-surface simulations. HICAR features physics parameterizations shared by traditional weather models such as WRF, but with massively simplified dynamics which enable for run times nearly 600x faster than WRF.
-
-More information about the model features enabling this can be found in Reynolds et al., 2023.
+HICAR is a variant of the Intermediate Complexity Atmospheric Research (ICAR) model developed for sub-kilometer resolutions. The model is developed for downscaling of kilometer-scale NWP model output to resolutions used for land-surface simulations. HICAR features physics parameterizations shared by traditional weather models such as WRF, but with massively simplified dynamics which enable run times up to roughly two to three orders of magnitude faster than WRF (Reynolds et al., 2023).
 
 #### Reference
 

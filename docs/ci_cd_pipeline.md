@@ -89,6 +89,13 @@ When the comparison starts failing:
 tests/scripts/snowpack/snowpack_divergence_report.sh <hicar_repo>
 ```
 
+By default this looks up the last blessed commit's `snowpack=<sha>` status (via `gh`) to use as the diff anchor. 
+To pass the upstream snowpack anchor SHA explicitly:
+
+```
+tests/scripts/snowpack/snowpack_divergence_report.sh <hicar_repo> --blessed-snowpack <upstream_snowpack_sha>
+```
+
 Then port the listed changes into the Fortran driver and re-run the comparison
 until it passes; the next passing run re-records the anchor automatically.
 
@@ -108,7 +115,8 @@ all.
 `tests/scripts/compare_outputs.py` is the single comparison engine for all lanes:
 
 - `--mode exact` (bit-for-bit, CPU regression) and `--mode tolerance`
-  (CPU↔GPU), driven by per-variable `rtol`/`atol` in `tests/tolerances.yaml`.
+  (CPU↔GPU), driven by per-variable `rtol`/`atol` specs under
+  `tests/tolerances/`.
 - **NaN/Inf introduced by the candidate is always a failure**
 - A dropped output variable → failure; an added one → warning.
 - On failure it localizes the **worst offender** (variable, `dim=index`, both
@@ -117,11 +125,11 @@ all.
 
 ## 4. Operating & extending
 
-- **Add a unit test**: create `tests/test_<name>.F90` with a `collect_<name>_suite`,
+- **Add a unit test**: create `tests/unit/test_<name>.F90` with a `collect_<name>_suite`,
   add it to the `tests` list in `tests/CMakeLists.txt` **and** to the `testsuites`
   array in `tests/unit/test_driver.F90`.
-- **Tune cross-lane tolerances**: edit `tests/tolerances.yaml` (per-variable
-  `rtol`/`atol`); start loose, tighten as the GPU comparison spread is learned.
+- **Tune cross-lane tolerances**: edit `tests/tolerances/tolerances*.yaml`
+  (per-variable `rtol`/`atol`); start loose, tighten as the GPU comparison spread is learned.
 - **Gate a `main` PR**: full-test, snowpack-parity, and valgrind sign the PR head
   automatically; only GPU is manual — a maintainer reviews the diff and runs
   `gh workflow run gpu.yml --ref <head>` to sign `gpu-check`.

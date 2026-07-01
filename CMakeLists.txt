@@ -6,13 +6,29 @@ set(CMAKE_CXX_STANDARD 14)
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
-enable_language (Fortran)
-
 #Do not use any conda packages
 if(DEFINED ENV{CONDA_PREFIX})
   set(CMAKE_IGNORE_PATH $ENV{CONDA_PREFIX} ${CMAKE_IGNORE_PATH})
   message(STATUS "Ignoring Conda environment path: $ENV{CONDA_PREFIX}")
 endif()
+
+set(_fc_request "")
+if (DEFINED FC AND NOT FC STREQUAL "")
+	set(_fc_request "${FC}")
+elseif (DEFINED ENV{FC} AND NOT "$ENV{FC}" STREQUAL "")
+	set(_fc_request "$ENV{FC}")
+endif()
+if (NOT _fc_request STREQUAL "")
+	find_program(FC_FULL_PATH NAMES "${_fc_request}")
+	if (FC_FULL_PATH)
+		set(_fc_request "${FC_FULL_PATH}")   # bare name -> absolute path
+	endif()
+	set(CMAKE_Fortran_COMPILER "${_fc_request}" CACHE FILEPATH "Fortran compiler" FORCE)
+	unset(FC_FULL_PATH CACHE)
+endif()
+unset(_fc_request)
+
+enable_language (Fortran)
 
 # Put all fetched external dependencies (noah_mp, rte-rrtmgp, rrtmgp_data,
 # icar_supporting_files, test-drive, ...) under build/external — alongside
@@ -45,7 +61,7 @@ if (NOT DEFINED METEOIO_DIR OR METEOIO_DIR STREQUAL "")
 	set(METEOIO_DIR $ENV{METEOIO_DIR} CACHE PATH "Path to the compiled MeteoIO installation (root directory of the lib and include directories)")
 endif()
 
-if (NOT $ENV{NOAHMP_LIBRARY} STREQUAL "")
+if (NOT "$ENV{NOAHMP_LIBRARY}" STREQUAL "")
 	set(NOAHMP_LIBRARY $ENV{NOAHMP_LIBRARY} CACHE PATH "Path to the Noah-MP source directory")
 endif()
 
@@ -66,7 +82,7 @@ option(FSM "Link to the FSM2 snow model, requires separate compilation of the FS
 option(SNOWPACK_CPP "Use the C++ SNOWPACK wrapper instead of the native-Fortran port" OFF)
 option(NCCL "Link to the NCCL library, if available" ON)
 option(OPENACC "Enable OpenACC support for GPU acceleration" OFF)
-option(SRUN_FLAGS "srun flags to use for running the test cases" "")
+set(SRUN_FLAGS "" CACHE STRING "srun flags to use for running the test cases")
 
 # SNOWPACK is always compiled into HICAR; SNOWPACK_CPP is the single switch that
 # selects the implementation (the whole build keys off it directly — there is no
@@ -112,13 +128,6 @@ macro(Disable_FSM)
 	list(REMOVE_ITEM SOURCE_FILES ${FSM2_INTERFACE})
 endmacro()
 
-#-DUSE_ASSERTIONS -- controls whether to use assertions in the code
-if(ASSERTIONS)
-  	add_definitions(-DUSE_ASSERTIONS=.true.)
-else()
-  	add_definitions(-DUSE_ASSERTIONS=.false.)
-endif()
-
 #-DFSM -- controls compilation of FSM2 driver and linking to the FSM2 library
 IF (FSM AND IS_DIRECTORY ${FSM_DIR}/lib AND
 			IS_DIRECTORY ${FSM_DIR}/build)
@@ -130,43 +139,34 @@ else()
 	Disable_FSM()
 endif()
 
-execute_process(
-COMMAND ${GIT_EXECUTABLE} describe --long --dirty --all --always
-WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-OUTPUT_VARIABLE GIT_VERSION
-OUTPUT_STRIP_TRAILING_WHITESPACE
-RESULT_VARIABLE GIT_RESULT
-)
-string(REGEX REPLACE "^heads/" "" GIT_VERSION "${GIT_VERSION}")
+find_package(Git QUIET)
+if(GIT_EXECUTABLE)
+	execute_process(
+		COMMAND ${GIT_EXECUTABLE} describe --long --dirty --all --always
+		WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+		OUTPUT_VARIABLE GIT_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+	string(REGEX REPLACE "^heads/" "" GIT_VERSION "${GIT_VERSION}")
 
-add_definitions(-DVERSION="${GIT_VERSION}")
-
-# Commit hash and nearest tag (version), fetched at configure time for the startup
-# banner. GIT_COMMIT = exact short commit; GIT_TAG = nearest `v*` release tag +
-# offset/dirty (--tags so lightweight tags count, --match v* to skip dev tags;
-# or the bare hash if the repo has no v* tags yet).
-execute_process(
-COMMAND ${GIT_EXECUTABLE} rev-parse --short=12 HEAD
-WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-OUTPUT_VARIABLE GIT_COMMIT_HASH
-OUTPUT_STRIP_TRAILING_WHITESPACE
-ERROR_QUIET
-)
-execute_process(
-COMMAND ${GIT_EXECUTABLE} describe --tags --match v* --always --dirty
-WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-OUTPUT_VARIABLE GIT_DESCRIBE_TAG
-OUTPUT_STRIP_TRAILING_WHITESPACE
-ERROR_QUIET
-)
+	# GIT_COMMIT = exact short commit; GIT_TAG = nearest `v*` release tag + offset/dirty
+	# (--tags so lightweight tags count, --match v* to skip dev tags; bare hash if none).
+	execute_process(
+		COMMAND ${GIT_EXECUTABLE} rev-parse --short=12 HEAD
+		WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+		OUTPUT_VARIABLE GIT_COMMIT_HASH OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+	execute_process(
+		COMMAND ${GIT_EXECUTABLE} describe --tags --match v* --always --dirty
+		WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+		OUTPUT_VARIABLE GIT_DESCRIBE_TAG OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+endif()
+if(NOT GIT_VERSION)
+	set(GIT_VERSION "unknown")
+endif()
 if(NOT GIT_COMMIT_HASH)
 	set(GIT_COMMIT_HASH "unknown")
 endif()
 if(NOT GIT_DESCRIBE_TAG)
 	set(GIT_DESCRIBE_TAG "untagged")
 endif()
-add_definitions(-DGIT_COMMIT="${GIT_COMMIT_HASH}")
-add_definitions(-DGIT_TAG="${GIT_DESCRIBE_TAG}")
 
 ############################################
 ############## Auto-detect  ################
@@ -175,38 +175,18 @@ message(STATUS "Trying to auto-detect the environment...")
 list(APPEND CMAKE_MESSAGE_INDENT "  ")
 
 
-if (NOT DEFINED FC OR FC STREQUAL "")
-	if (DEFINED ENV{FC})
-		message(STATUS "Using Fortran compiler supplied by the environment variable FC: $ENV{FC}")
-		set(FC $ENV{FC})
-	elseif(DEFINED CMAKE_Fortran_COMPILER)
-		message(STATUS "Using Auto-detected Fortran compiler: ${CMAKE_Fortran_COMPILER}")
-		set(FC ${CMAKE_Fortran_COMPILER})
-	else()
-		message(FATAL_ERROR "No Fortran compiler specified")
-	endif()
-elseif(DEFINED FC)
-	message(STATUS "Using Fortran compiler specified by the user in variable FC: ${FC}")
-endif()
-if (FC MATCHES "gfortran")
-	set(CMAKE_Fortran_COMPILER "${FC}")
-	set(CMAKE_Fortran_COMPILER_ID "GNU")
-	set(CMAKE_Fortran_COMPILER_LOADED TRUE)
+# enable_language(Fortran) above resolved CMAKE_Fortran_COMPILER (the FC we forced, or
+# CMake's auto-detection). Classify by executable basename — a directory component
+# containing e.g. "gfortran" can't misclassify.
+message(STATUS "Using Fortran compiler: ${CMAKE_Fortran_COMPILER}")
+get_filename_component(FC_NAME "${CMAKE_Fortran_COMPILER}" NAME)
+if (FC_NAME MATCHES "gfortran")
 	set(COMPILER "gnu")
-elseif (FC MATCHES "mpif90")
-	#set(CMAKE_Fortran_COMPILER "mpif90")
-	#set(CMAKE_Fortran_COMPILER_ID "mpif90")
-	#set(CMAKE_Fortran_COMPILER_LOADED TRUE)
+elseif (FC_NAME MATCHES "mpif90")
 	set(COMPILER "gnu")
-	elseif (FC MATCHES "mpifort")
-			#set(CMAKE_Fortran_COMPILER "mpifort")
-			#set(CMAKE_Fortran_COMPILER_ID "mpifort")
-			#set(CMAKE_Fortran_COMPILER_LOADED TRUE)
-			set(COMPILER "gnu")
-elseif (FC MATCHES "nvfortran")
-	set(CMAKE_Fortran_COMPILER "${FC}")
-	set(CMAKE_Fortran_COMPILER_ID "NVHPC")
-	set(CMAKE_Fortran_COMPILER_LOADED TRUE)
+elseif (FC_NAME MATCHES "mpifort")
+	set(COMPILER "gnu")
+elseif (FC_NAME MATCHES "nvfortran")
 	set(COMPILER "nvfortran")
 	# Auto-enable OpenACC for NVFortran if not explicitly set
 	if (NOT OPENACC_SET_BY_USER)
@@ -217,6 +197,7 @@ elseif (FC MATCHES "nvfortran")
 else()
 	message(FATAL_ERROR "Unknown Fortran compiler (FC) specified")
 endif()
+unset(FC_NAME)
 
 string( TOLOWER "${MODE}" MODE )
 string( TOLOWER "${COMPILER}" COMPILER )
@@ -234,6 +215,8 @@ message(STATUS "Setting up compiler flags...")
 # Define compiler flags based on MODE and COMPILER
 # These will be used consistently throughout the project
 # Define as a list (semicolon-separated) for proper handling in CMake
+# Optimization flag tail shared by the gnu release + profile builds.
+set(_gnu_opt_tail -ffast-math -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native -fno-protect-parens)
 if(MODE STREQUAL "debug")
 	set(CMAKE_BUILD_TYPE Debug)
 
@@ -260,12 +243,12 @@ elseif(MODE STREQUAL "profile")
 	set(CMAKE_BUILD_TYPE Profile)
 
 	if (COMPILER STREQUAL "gnu")
-		set(HICAR_Fortran_FLAGS -g -O3 -fopenmp -fbounds-check -fbacktrace -finit-real=nan -fopt-info-missed=opt_info.txt -ffast-math -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native -fno-protect-parens)
+		set(HICAR_Fortran_FLAGS -g -O3 -fopenmp -fbounds-check -fbacktrace -finit-real=nan -fopt-info-missed=opt_info.txt ${_gnu_opt_tail})
 	endif()
 elseif(MODE STREQUAL "release")
 	set(CMAKE_BUILD_TYPE Release)
 	if (COMPILER STREQUAL "gnu")
-		set(HICAR_Fortran_FLAGS -O3 -fopenmp -ffast-math -ffree-line-length-none -ftree-vectorize -fimplicit-none -funroll-loops -march=native -fno-protect-parens)
+		set(HICAR_Fortran_FLAGS -O3 -fopenmp ${_gnu_opt_tail})
 	elseif (COMPILER STREQUAL "nvfortran")
 		if(OPENACC)
 			set(HICAR_Fortran_FLAGS -O3 -Minfo=accel -march=native -acc=gpu -gpu=mem:separate,ccnative)
@@ -273,6 +256,13 @@ elseif(MODE STREQUAL "release")
 			set(HICAR_Fortran_FLAGS -O3 -mp -march=native)
 		endif()
 	endif()
+endif()
+
+# Fail loudly instead of silently building with NO flags: unknown MODE, or a
+# MODE×COMPILER combo with no branch above (e.g. nvfortran + debugslow/profile).
+if(NOT DEFINED HICAR_Fortran_FLAGS)
+	message(FATAL_ERROR "No compiler flags for MODE='${MODE}' with COMPILER='${COMPILER}'. "
+		"Supported: debug/release (gnu + nvfortran); debugslow/profile (gnu only).")
 endif()
 
 # Convert list to space-separated string for display and external projects
@@ -294,7 +284,7 @@ include(GNUInstallDirs)
 
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake" ${FFTW_DIR} ${NETCDF_DIR}  ${MPI_DIR} ${FSM_DIR} ${SNOWPACK_DIR})
-set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${MPI_DIR} ${FSM_DIR} ${SNOWPACK_DIR})
+set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${FFTW_DIR} ${NETCDF_DIR} ${MPI_DIR} ${FSM_DIR} ${SNOWPACK_DIR})
 
 find_package(PkgConfig REQUIRED)
 include(FetchContent)
@@ -421,8 +411,6 @@ endif()
 # Restore HICAR's full flags (incl. -fopenmp) for HICAR and the remaining deps.
 set(CMAKE_Fortran_FLAGS "${_hicar_saved_fortran_flags}")
 
-# Add preprocessor definition to indicate rte-rrtmgp is available
-add_definitions(-DUSE_RTE_RRTMGP)
 list(APPEND SOURCE_FILES ${ra_mo_files})
 
 message(STATUS "rte-rrtmgp library configured successfully")
@@ -457,9 +445,18 @@ list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
 add_library(hicar_lib STATIC ${SOURCE_FILES})
 add_executable(HICAR ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
 
-set_property(TARGET hicar_lib PROPERTY EXCLUDE_FROM_DEFAULT_BUILD FALSE)
-set_property(TARGET HICAR PROPERTY EXCLUDE_FROM_DEFAULT_BUILD FALSE)
-
+# HICAR-only compile definitions (target-scoped so they don't leak into the
+# FetchContent subprojects). PUBLIC so they also reach the HICAR executable.
+if(ASSERTIONS)
+	target_compile_definitions(hicar_lib PUBLIC USE_ASSERTIONS=.true.)
+else()
+	target_compile_definitions(hicar_lib PUBLIC USE_ASSERTIONS=.false.)
+endif()
+target_compile_definitions(hicar_lib PUBLIC
+	VERSION="${GIT_VERSION}"
+	GIT_COMMIT="${GIT_COMMIT_HASH}"
+	GIT_TAG="${GIT_DESCRIBE_TAG}"
+	USE_RTE_RRTMGP)
 
 if(OpenMP_CXX_FOUND)
         target_link_libraries(hicar_lib PUBLIC OpenMP::OpenMP_CXX)
@@ -496,7 +493,7 @@ if (NETCDF_FOUND)
     
     if(NETCDF_HAS_PARALLEL STREQUAL "yes")
         message(STATUS "NetCDF built with parallel support")
-        add_definitions(-DNETCDF_PARALLEL)
+        target_compile_definitions(hicar_lib PUBLIC NETCDF_PARALLEL)
     else()
         message(STATUS "NetCDF built WITHOUT parallel support")
     endif()
@@ -571,7 +568,7 @@ if (FSM)
 	find_library(FSM2_LIB NAMES FSM2 REQUIRED)
 	target_include_directories(hicar_lib PUBLIC ${FSM_DIR}/build)
 	target_link_libraries(hicar_lib PUBLIC ${FSM2_LIB})
-	add_definitions(-DFSM)
+	target_compile_definitions(hicar_lib PUBLIC FSM)
 endif()
 
 if(NOT SNOWPACK_CPP)
@@ -612,7 +609,7 @@ elseif(SNOWPACK_FOUND)
     
 	# C++ SNOWPACK wrapper: -DSNOWPACK_CPP selects the C++ wrapper path
 	# in the sources (#ifdef SNOWPACK_CPP).
-	add_definitions(-DSNOWPACK_CPP)
+	target_compile_definitions(hicar_lib PUBLIC SNOWPACK_CPP)
     message(STATUS "SNOWPACK support enabled (C++ SNOWPACK wrapper)")
 endif()
 if (OpenACC_Fortran_FOUND AND OPENACC)
@@ -629,7 +626,7 @@ if (OpenACC_Fortran_FOUND AND OPENACC)
 		      $ENV{NCCL_ROOT}/lib)
 	if(NCCL_INCLUDE_DIR AND NCCL_LIBRARY AND NCCL)
 		message(STATUS "Found NCCL: ${NCCL_LIBRARY}")
-		add_definitions(-DUSE_NCCL)
+		target_compile_definitions(hicar_lib PUBLIC USE_NCCL)
 		# NCCL requires CUDA runtime (cudaSetDevice, cudaFree, cudaStream*, etc.)
 		if(NOT TARGET CUDA::cudart)
 			enable_language(CUDA)
@@ -669,22 +666,18 @@ target_link_libraries(HICAR PUBLIC hicar_lib)
 ##########################################################
 ############## Set up the compiler options ###############
 
-if(MODE STREQUAL "debug" OR MODE STREQUAL "debugslow")
-	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_debug")
-	if (COMPILER STREQUAL "nvfortran" AND OPENACC)
-		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_debug_gpu")
-	endif()
+if(MODE MATCHES "debug")
+	set(_hicar_name "HICAR_debug")
 elseif(MODE STREQUAL "profile")
-	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_profile")
-elseif(MODE STREQUAL "release")
-	set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR")
-	if (COMPILER STREQUAL "nvfortran" AND OPENACC)
-		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "HICAR_gpu")
-	endif()
+	set(_hicar_name "HICAR_profile")
+else()
+	set(_hicar_name "HICAR")
 endif()
-
-# Use the predefined HICAR compiler flags (already a list)
-target_compile_options(HICAR PUBLIC ${HICAR_Fortran_FLAGS})
+if(COMPILER STREQUAL "nvfortran" AND OPENACC AND NOT MODE STREQUAL "profile")
+	set(_hicar_name "${_hicar_name}_gpu")
+endif()
+set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "${_hicar_name}")
+unset(_hicar_name)
 
 
 # sm_* files (snow model drivers) need OpenMP but not OpenACC (for CPU snow models).
@@ -713,13 +706,7 @@ if(COMPILER STREQUAL "nvfortran" AND OPENACC)
 	endif()
 endif()
 
-# Apply the same compile options to hicar_lib as are set on HICAR
-get_target_property(COMPILER_OPTIONS HICAR COMPILE_OPTIONS)
-if(COMPILER_OPTIONS)
-	target_compile_options(hicar_lib PUBLIC ${COMPILER_OPTIONS})
-endif()
 
-#set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LFLAGS}")
 
 ##########################################################
 
@@ -766,10 +753,9 @@ message(STATUS "...done searching for dependencies")
 
 
 
-######################################################k#
+#######################################################
 ############## Print User Information #################
-get_target_property(MAIN_CFLAGS hicar_lib COMPILE_OPTIONS)
-string(REGEX REPLACE ";" " " MAIN_CFLAGS "${MAIN_CFLAGS}")
+set(MAIN_CFLAGS "${HICAR_Fortran_FLAGS_STR}")
 
 # if FFTW_DIR is empty
 if (NOT DEFINED FFTW_DIR OR FFTW_DIR STREQUAL "")
@@ -811,8 +797,6 @@ message(STATUS "")
 #This sets the location for library installation -- i.e., ${CMAKE_INSTALL_LIBDIR}=/usr/local/lib 
 # and also the header for library if it has, in this case we do not have. ${CMAKE_INSTALL_INCLUDEDIR}=/usr/local/include
 
-# get_target_property(hicar_lib HICAR LINK_LIBRARIES)
-# message(STATUS "Libraries linked against HICAR target: ${HICAR_LIBS}")
 
 # Set the install prefix to the project source directory so that
 # "make install" works without root permissions
@@ -826,8 +810,6 @@ set(CMAKE_Fortran_MODULE_DIRECTORY  ${CMAKE_BINARY_DIR})
 install(TARGETS HICAR  DESTINATION  ${CMAKE_INSTALL_EXEDIR})
 
 
-#install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/build DESTINATION ${CMAKE_Fortran_MODULE_DIRECTORY}) 
-#install(PROGRAMS ${modeFiles} DESTINATION ${CMAKE_Fortran_MODULE_DIRECTORY}/sec) # not working
     
 
 ADD_CUSTOM_TARGET( distclean make clean

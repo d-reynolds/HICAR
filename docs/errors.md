@@ -18,7 +18,7 @@ or variables don't match. Typical messages:
 
 ```text
 NetCDF: Start+count exceeds dimension bound
-output/hicar_1990_01_01_00-00.nc: qv
+saving:qv
 ```
 
 The fix is to delete or move the existing output files, or change your options so
@@ -34,8 +34,9 @@ backend the netCDF library was built against:
 
 If your forcing/domain files are netCDF-4 but the library was built only with
 PnetCDF (or vice versa), I/O operations will fail. Make sure that the netCDF library
-HICAR was compiled with supports the file type you are using (`nc-config
---has-nc4` should report `yes` for netCDF-4 support). A symptom of building
+HICAR was compiled with supports the file type you are using (the generic netCDF
+query `nc-config --has-nc4` should report `yes` for netCDF-4 support — note HICAR's
+own build instead probes `nc-config --has-parallel` to detect parallel-I/O capability). A symptom of building
 without netCDF-4 support is a compile-time error like:
 
 ```text
@@ -47,11 +48,14 @@ Recompile the netCDF stack with HDF5 (and PnetCDF) support — the
 
 ## 4. Slow parallel I/O with OpenMPI
 
-When using **OpenMPI**, its default OMPIO component is slow for parallel HDF5
-writes. Force the older ROMIO component instead:
+When using **OpenMPI**, its default OMPIO component can be slow for parallel HDF5
+writes; forcing the older ROMIO component can help. HICAR does not set this for you —
+it is external OpenMPI runtime tuning. The ROMIO component name is version-specific,
+so discover it first:
 
 ```bash
-export OMPI_MCA_io=romio321
+ompi_info | grep -i romio     # e.g. romio321 on OpenMPI <=4.x, romio341 on 5.x
+export OMPI_MCA_io=<name>      # use the component name your build reports (i.e. romio321 on OpenMPI <=4.x)
 ```
 
 This can dramatically speed up output on OpenMPI systems. (It is not needed with
@@ -81,6 +85,6 @@ This may be the shell's stack-size limit, especially for larger domains. Raise
 it before running:
 
 ```bash
-bash:  ulimit -s unlimited
+ulimit -s unlimited
 ```
 

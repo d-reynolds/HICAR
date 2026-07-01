@@ -22,9 +22,13 @@ If your crash occured during initialization, it should be relatively easy to rep
 
 1. Output a restart file just before the model crash occurs
 2. Set the model's `restart_date` to the date from the restart file, and set `restart = .True.` in the namelist
-3a. The model crashes at the same time: **Congratulations, your crash is reproducible 🎉**
-**-- or --**
-3b. The model crashed before/after the initial crash ➡️ your crash is not reproducible, continue to [non-reproducible crashes](#non-reproducible crashes).
+3. Rerun and check the outcome:
+
+    a. The model crashes at the same time: **Congratulations, your crash is reproducible 🎉**
+
+    **-- or --**
+
+    b. The model crashed before/after the initial crash ➡️ your crash is not reproducible, continue to [non-reproducible crashes](#non-reproducible-crashes).
 
 ## Debug run
 
@@ -35,6 +39,7 @@ Assuming that you were using the default, release exe of HICAR, we will not go t
 ```bash
 cd /path/to/hicar/repo
 mkdir build_debug
+cd build_debug
 cmake ../ -DMODE=debug #Plus any other configuration flags you used in your crashing release build
 make -j
 make install

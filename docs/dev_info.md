@@ -109,7 +109,7 @@ flag to drop false positives, checks (and, in the heavier modes, runs) the
 documented steps, and writes a report of what it flagged with a suggested edit
 for each. **It only flags problems; it never edits the docs for you.**
 
-### **This agent, especially when run in 'full' mode, will burn your tokens. Thank you for your sacrifice/You have been warned.**
+**This agent, especially when run in 'full' mode, will burn your tokens. Thank you for your sacrifice/You have been warned.**
 
 ### Modes
 
@@ -129,10 +129,9 @@ a multi-hour build. Reach for `full` deliberately.
 The audit is incremental. After each run it writes a cache,
 `docs/.audit/doc-verify-state.json`, recording for every page the commit it was
 checked at, the source files its claims depend on, and its findings. The next run
-only re-audits a page whose text *or* one of its referenced source files has
+only re-audits a page whose text or one of its referenced source files has
 changed since that commit (with a periodic full sweep as a backstop); unchanged
-pages are served from the cache. **Commit `doc-verify-state.json`** together with
-your documentation changes so the cache is shared across machines and CI.
+pages are served from the cache. 
 
 ### Output
 

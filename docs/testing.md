@@ -47,7 +47,7 @@ self-contained; you don't have to build or fetch data first.
 | `make test_valgrind` | `HICAR-tester` under valgrind `--track-origins` (uninitialised / invalid memory) | valgrind + a debug build |
 | `make test_cli` | Every `./bin/HICAR` command-line option behaves | — |
 | `make test_cases` | Integration cases run without crash/NaN (Standard, Nested, restarts) | test data (auto) |
-| `make test_decomposition` | Output is identical at 5 vs 10 MPI ranks | builds a debug exe |
+| `make test_decomposition` | Output is identical at N/2 vs N MPI ranks (N = host logical-core count; (G/2+1) vs (G+1) for G GPUs in GPU mode) | builds a debug exe |
 | `make test_restart` | A restarted run matches an uninterrupted one | builds a debug exe |
 | `make test_reproducibility` | Decomposition + restart together | builds a debug exe |
 | `make test_regression` | Bit-for-bit vs the blessed reference commit (runs the cases, then diffs) | `gh` + a blessed commit |
@@ -113,7 +113,7 @@ cd build/
 make check
 ```
 
-tests are defined under `tests/unit/`. `test_driver.F90` manages the execution of the different test modules, which are defined as `test_XXXX.F90`. The runnable suite names (as passed to `HICAR-tester`) are: `advection`, `snow_drift`, `control_flow`, `halo_exch`, `geo`, `time`, `utilities` — note the advection suite is `advection`, though its source file is `test_advect.F90`. Run a single suite with `mpiexec -np 2 tests/HICAR-tester <suite>`, or run them all (with no argument) via `make check`.
+tests are defined under `tests/unit/`. `test_driver.F90` manages the execution of the different test modules, which are defined as `test_XXXX.F90`. The runnable suite names (as passed to `HICAR-tester`) are: `advection`, `snow_drift`, `control_flow`, `halo_exch`, `wind_iterative`, `geo`, `time`, `utilities` — note the advection suite is `advection`, though its source file is `test_advect.F90`. Run a single suite with `mpiexec -np 2 tests/HICAR-tester <suite>`, or run them all (with no argument) via `make check`.
 
 ## SNOWPACK C++ vs Fortran parity (developers)
 
@@ -147,7 +147,7 @@ Each comparison run leaves its evidence in `tests/figures/snowpack_compare/`
 gh run list --workflow=snowpack-compare.yml --branch main      # find the run IDs
 gh run download <old-run-id> -n snowpack-compare-diagnostics -D old/
 gh run download <new-run-id> -n snowpack-compare-diagnostics -D new/
-tests/scripts/snowpack/parity_trend.py old/parity_report.json new/parity_report.json
+tests/scripts/snowpack/parity_trend.py old/figures/snowpack_compare/parity_report.json new/figures/snowpack_compare/parity_report.json
 ```
 
 ### Reproducing the GH runner (Docker)

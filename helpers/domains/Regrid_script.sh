@@ -57,10 +57,10 @@ if [ $n_iters -eq 0 ]; then
     n_iters=1
 fi
 
-# # Parse the variable list provided in $2
-# # If "landuse" is in the list, set the
-# # landuse flag to true and remove it from
-# # the list
+# Parse the variable list provided in $2
+# If "landuse" is in the list, set the
+# landuse flag to true and remove it from
+# the list
 landuse_flag=0
 IFS=','  # Set comma as the delimiter
 for name in $2; do
