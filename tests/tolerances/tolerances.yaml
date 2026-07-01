@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 # HICAR cross-lane comparison tolerances
 # ---------------------------------------------------------------------------
-# Used by tests/compare_outputs.py --tolerance-spec for comparisons that CANNOT
+# Used by tests/scripts/compare_outputs.py --tolerance-spec for comparisons that CANNOT
 # be bit-for-bit: CPU<->GPU and gnu<->nvfortran. Floating-point operations are
 # reordered across architectures/compilers/optimization levels, so two runs that
 # are both "correct" will differ at the ULP level and accumulate over a run.

@@ -269,23 +269,26 @@ contains
     !! Useful when the order in which variables added to a list is random,
     !! but we need to assume ordering elsewhere (i.e. for IO server/client)
     !!
+    !! Deprecated by DR June 2026 due to ICE on GCC 16. The subroutine is currently
+    !! not used in the code, so it is safe to deprecate in place.
+    !!
     !!------------------------------------------------
-    module subroutine sort_by_kVARS(this)
-        implicit none
-        class(var_dict_t),   intent(inout)  :: this
+    ! module subroutine sort_by_kVARS(this)
+    !     implicit none
+    !     class(var_dict_t),   intent(inout)  :: this
 
-        type(var_dict_t) :: sorted
-        type(variable_t) :: var
-        integer :: i, err
+    !     type(var_dict_t) :: sorted
+    !     type(variable_t) :: var
+    !     integer :: i, err
         
-        do i = 1,kMAX_STORAGE_VARS
-            !Get the data for the variable name. Returns 1 if not found
-            var = this%get_var(i,err=err)
-            if (err==0) call sorted%add_var(i,var)
-        enddo
+    !     do i = 1,kMAX_STORAGE_VARS
+    !         !Get the data for the variable name. Returns 1 if not found
+    !         var = this%get_var(i,err=err)
+    !         if (err==0) call sorted%add_var(i,var)
+    !     enddo
 
-        this%var_list = sorted%var_list
-    end subroutine
+    !     this%var_list = sorted%var_list
+    ! end subroutine
 
 
     !>---------------------------

@@ -1,0 +1,23 @@
+# Keeps a DRAFT GitHub Release for the next version up to date, auto-categorising
+# merged PRs by label (config in .github/release-drafter.yml). It only drafts —
+# a maintainer reviews and publishes, which creates the vX.Y.Z tag.
+name: Release Drafter
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update_release_draft:
+    permissions:
+      contents: write        # create/update the draft release
+      pull-requests: read     # read merged PRs for the notes
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: release-drafter/release-drafter@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

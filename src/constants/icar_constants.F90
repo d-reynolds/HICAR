@@ -6,7 +6,6 @@ module icar_constants
 
     implicit none
 
-    character(len=5) :: kVERSION_STRING = "v2.1"
     
     ! Define process info and team info
     integer, parameter :: kCOMPUTE_TEAM = 1

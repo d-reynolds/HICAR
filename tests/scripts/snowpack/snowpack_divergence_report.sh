@@ -2,17 +2,16 @@
 # ===========================================================================
 # SNOWPACK C++ vs Fortran divergence report.
 #
-# Companion to tests/snowpack/test_snowpack_compare.sh. When the nightly/PR comparison
+# Companion to tests/scripts/snowpack/test_snowpack_compare.sh. When the nightly/PR comparison
 # between the C++ SNOWPACK build and the native-Fortran port starts FAILING,
 # the usual cause is new physics landing on the upstream `fortran-bindings`
 # branch (C++ side) that has not yet been ported to the Fortran driver. This
 # script turns that into a concrete porting to-do list:
 #
-#   1. Resolve the most recent HICAR commit blessed with
-#      `hicar-snowpack-parity-blessed=success` and extract the upstream
-#      SNOWPACK SHA recorded in its status description (snowpack=<sha>) —
-#      the last upstream state at which the two implementations provably
-#      matched.
+#   1. Resolve the most recent HICAR commit with `snow-parity=success` and
+#      extract the upstream SNOWPACK SHA recorded in its status description
+#      (snowpack=<sha>) — the last upstream state at which the two
+#      implementations provably matched.
 #   2. Resolve the CURRENT upstream SNOWPACK SHA (from the fetched checkout,
 #      or the remote branch head).
 #   3. Print `git log` / `git diff --stat` between the two, split into the
@@ -63,10 +62,10 @@ done
 # --- 1. the parity anchor (last blessed upstream SHA) -----------------------
 hicar_blessed=""
 if [ -z "$blessed_sha" ]; then
-    line=$(bash "$hicar_repo/tests/resolve_blessed_commit.sh" "$hicar_repo" \
-            hicar-snowpack-parity-blessed --with-description) || {
-        echo -e "${RED}No hicar-snowpack-parity-blessed commit found.${NC}"
-        echo "Bless one first:  tests/snowpack/test_snowpack_compare.sh <repo> --bless"
+    line=$(bash "$hicar_repo/tests/scripts/resolve_blessed_commit.sh" "$hicar_repo" \
+            snow-parity --with-description) || {
+        echo -e "${RED}No commit with snow-parity=success found.${NC}"
+        echo "Run the parity comparison first (it records snowpack=<sha> on PASS),"
         echo "or pass --blessed-snowpack <sha> directly."
         exit 1
     }
@@ -131,5 +130,5 @@ if [ -n "$full_diff" ]; then
 fi
 
 echo "Next steps: port the relevant C++ changes into fortran/snowpack_driver.F90"
-echo "(and friends), re-run tests/snowpack/test_snowpack_compare.sh until it passes, then"
-echo "re-bless:  tests/snowpack/test_snowpack_compare.sh <repo> --bless --reason '...'"
+echo "(and friends), then re-run the parity comparison until it passes — the next"
+echo "passing run re-records the anchor automatically (the snow-parity status)."

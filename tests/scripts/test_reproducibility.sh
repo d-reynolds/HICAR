@@ -61,7 +61,7 @@ if [ "$use_gpu" = true ]; then
 fi
 
 # Path to the compare script and figures output directory
-compare_script="$hicar_repo/tests/compare_outputs.py"
+compare_script="$hicar_repo/tests/scripts/compare_outputs.py"
 figures_dir="$hicar_repo/tests/figures"
 
 # Output file name pattern (from Standard.sh: domain=Gaudergrat_250m, start=2017-02-14)

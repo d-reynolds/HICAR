@@ -53,11 +53,11 @@ set(
 )
 set(
   SOURCE_FILES
-  "test_driver.F90"
+  "unit/test_driver.F90"
 )
 foreach(t IN LISTS tests)
-  string(MAKE_C_IDENTIFIER ${t} t) 
-  list(APPEND SOURCE_FILES "test_${t}.F90")
+  string(MAKE_C_IDENTIFIER ${t} t)
+  list(APPEND SOURCE_FILES "unit/test_${t}.F90")
 endforeach()
 
 add_executable(
@@ -72,9 +72,6 @@ target_link_libraries(
 )
 
 target_link_libraries("${PROJECT_NAME}-tester" PUBLIC MPI::MPI_Fortran)
-if (OpenACC_Fortran_FOUND)
-	target_link_libraries("${PROJECT_NAME}-tester" PUBLIC OpenACC::OpenACC_Fortran)
-endif()
 
 target_include_directories("${PROJECT_NAME}-tester" PUBLIC ${CMAKE_BINARY_DIR})
 
@@ -86,17 +83,9 @@ foreach(t IN LISTS tests)
   add_test("test_${t}.F90" "${PROJECT_NAME}-tester" "${t}")
 endforeach()
 
-# set(CMAKE_BUILD_TYPE Debug)
-
-if (COMPILER STREQUAL "gnu")
-  target_compile_options("${PROJECT_NAME}-tester" PUBLIC -c -O0 -g -fopenmp -fbounds-check -fbacktrace -finit-real=nan -ffree-line-length-none -Wconversion)
-elseif (COMPILER STREQUAL "intel")
-  target_compile_options("${PROJECT_NAME}-tester" PUBLIC -debug -c -O2 -u -check all -check noarg_temp_created -traceback -fpe0 -fast-transcendentals -xhost)
-elseif (COMPILER STREQUAL "cray")
-  target_compile_options("${PROJECT_NAME}-tester" PUBLIC -h noomp -c -eI -G0 -m2 -rl -R bcdsp) #-R cpbs --cray-print-opts
-elseif (COMPILER STREQUAL "nvfortran")
-		target_compile_options("${PROJECT_NAME}-tester" PUBLIC -O0 -g -Minfo=accel -march=native -acc=gpu -gpu=mem:separate,ccnative)
-endif()
+# HICAR-tester's compiler flags come from hicar_lib's INTERFACE compile options
+# (set in the root CMakeLists after target creation); the tester links hicar_lib
+# below, so it inherits them — no per-tester flag block needed here.
 
 # Create a custom target for downloading test data
 add_custom_target(download_test_data

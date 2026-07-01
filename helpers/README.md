@@ -1,14 +1,11 @@
 # helpers/
 
-Utility scripts for setting up and running HICAR. (The ICAR-era helper
-ecosystem — forcing converters, plotting, ideal-case generators — was removed
-in 2026-06; see `docs/helpers_modernization_plan.md`. It remains available at
-the git tag `pre-helpers-cleanup`.)
+Utility scripts for setting up and running HICAR.
 
 | Script | Purpose | Docs |
 |---|---|---|
 | `gen_HICAR_dir.sh` | Create a working-directory tree (input/output/restart/forcing/domains) and populate the supporting files for a run. | [tutorial](../docs/tutorial.md) |
-| `filelist_script.sh` | Build a forcing-file list (one absolute quoted path per line) from a glob. Truncates the output file, so re-runs are safe. | [forcing_data](../docs/forcing_data.md) |
+| `filelist_script.sh` | Build a forcing-file list (one absolute quoted path per line) from a glob. | [forcing_data](../docs/forcing_data.md) |
 | `batch_submit_SLURM.sh` | Self-resubmitting SLURM job chain for runs longer than the wall-time: each job restarts HICAR from the newest restart file (`restart_run`/`restart_date` set automatically) and queues a successor that only fires if the job is killed. Test locally with `--setup-only`. | header comments |
 
 ## domains/ — domain-generation toolchain

@@ -2,7 +2,18 @@ site_name: HICAR
 site_description: The High-resolution Intermediate Complexity Atmospheric Research model
 repo_url: https://github.com/HICAR-Model/HICAR
 repo_name: HICAR-Model/HICAR
-theme: readthedocs
+theme: material
+
+features:
+  - navigation.tabs          # top-level sections as header tabs
+  - navigation.tabs.sticky   # tabs stay visible when scrolling
+  - navigation.sections      # sub-sections grouped in the sidebar
+  - navigation.top           # back-to-top button
+  - navigation.indexes       # section landing pages
+  - toc.integrate            # fold the right-hand TOC into the sidebar
+  - toc.follow
+  - content.code.copy
+  - content.code.annotate
 
 nav:
   - Home: index.md
@@ -16,6 +27,6 @@ nav:
   - Testing: testing.md
   - CI/CD pipeline: ci_cd_pipeline.md
   - Code overview: code_overview.md
-  - Developing: developing.md
+  - Developing: dev_info.md
   - FAQ: FAQ.md
   - Errors: errors.md

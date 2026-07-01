@@ -7,12 +7,17 @@
 # job runs on a clean registration and a malicious job cannot persist on the box.
 #
 # Required environment:
-#   REPO_URL    e.g. https://github.com/d-reynolds/HICAR
+#   REPO_URL    GitHub repo OR org to register against (scope is auto-detected):
+#                 https://github.com/OWNER/REPO -> repository-level runner
+#                 https://github.com/ORG        -> organization-level runner (serves
+#                                                  every repo in the org)
 #   one of:
-#     RUNNER_TOKEN  a runner *registration* token (Settings > Actions > Runners > New;
-#                   valid ~1h — fine for a long-lived container that registers once)
-#     GH_PAT        a PAT with repo admin scope; the script fetches a fresh
-#                   registration token via the API on every (re)start
+#     RUNNER_TOKEN  a runner *registration* token (Settings > Actions > Runners > New)
+#     GH_PAT        a fine-grained PAT used to mint a fresh registration token on every
+#                   (re)start. Grant the LEAST privilege for your scope:
+#                     org-level  -> org permission "Self-hosted runners: write" ONLY
+#                     repo-level -> repo permission "Administration: write" (no narrower
+#                                   repository scope exists for runner registration)
 #
 # Optional:
 #   RUNNER_NAME   default: hicar-gpu-<short-hostname>
@@ -26,12 +31,22 @@ RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,gpu,nvhpc}"
 # Resolve a registration token.
 if [ -z "${RUNNER_TOKEN:-}" ]; then
     if [ -n "${GH_PAT:-}" ]; then
-        owner_repo="${REPO_URL#https://github.com/}"
-        echo "Fetching registration token via API for ${owner_repo}..."
+        # Auto-detect scope from REPO_URL's path:
+        #   "ORG/REPO" (has a slash) -> repository-level registration endpoint
+        #   "ORG"      (no slash)    -> organization-level registration endpoint
+        url_path="${REPO_URL#https://github.com/}"
+        url_path="${url_path%/}"          # tolerate a trailing slash
+        if [[ "${url_path}" == */* ]]; then
+            reg_api="https://api.github.com/repos/${url_path}/actions/runners/registration-token"
+            echo "Fetching repo-level registration token for ${url_path}..."
+        else
+            reg_api="https://api.github.com/orgs/${url_path}/actions/runners/registration-token"
+            echo "Fetching org-level registration token for ${url_path}..."
+        fi
         RUNNER_TOKEN=$(curl -fsSL -X POST \
             -H "Authorization: Bearer ${GH_PAT}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${owner_repo}/actions/runners/registration-token" \
+            "${reg_api}" \
             | jq -r .token)
     else
         echo "ERROR: provide RUNNER_TOKEN or GH_PAT" >&2

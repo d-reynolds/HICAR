@@ -15,25 +15,18 @@
 #
 # Usage:
 #   test_snowpack_compare.sh <hicar_repo> <cpp_exe> <fortran_exe> [np]
-#   test_snowpack_compare.sh <hicar_repo> --bless [--snowpack-dir DIR] [--reason TEXT] [--force]
+#   test_snowpack_compare.sh <hicar_repo> --build <ref_build_dir> [np]
 #
 #   <hicar_repo>  repo root
 #   <cpp_exe>     HICAR executable built with the C++ SNOWPACK   (reference)
 #   <fortran_exe> HICAR executable built with the Fortran SNOWPACK (candidate)
 #   [np]          MPI ranks for each run (default 10; both runs use the same)
 #
-#   --bless       instead of running the comparison, post the
-#                 `hicar-snowpack-parity-blessed=success` commit status to HEAD.
-#                 The status DESCRIPTION records the upstream SNOWPACK commit
-#                 (snowpack=<sha>) resolved from the fetched checkout, which is
-#                 the diff anchor for tests/snowpack/snowpack_divergence_report.sh: when
-#                 a later comparison run diverges, `git diff <blessed-sha>..HEAD`
-#                 in the SNOWPACK repo lists the upstream C++ changes that still
-#                 need porting to the Fortran driver. Bless only commits whose
-#                 comparison run actually PASSED.
-#   --snowpack-dir DIR  fetched SNOWPACK checkout to read the SHA from
-#                       (default: <hicar_repo>/build/external/SNOWPACK)
-#   --reason TEXT       short audit note appended to the status description
+#   --build <ref_build_dir>  compile BOTH exes fresh from the CURRENT source
+#                 (C++ = -DSNOWPACK_CPP=ON, Fortran = the default port; both CPU)
+#                 into sub-build trees under <ref_build_dir>, inheriting the
+#                 compiler/library config from that build's CMakeCache.txt. This
+#                 is what `make test_snowpack` uses, so it is self-contained.
 #
 # Exit 0 = within tolerance; 1 = a run failed or outputs diverged.
 # ===========================================================================
@@ -43,7 +36,7 @@ BLUE='\033[0;36m'; GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
 
 if [ $# -lt 2 ]; then
     echo "Usage: $0 <hicar_repo> <cpp_exe> <fortran_exe> [np]"
-    echo "       $0 <hicar_repo> --bless [--snowpack-dir DIR] [--reason TEXT]"
+    echo "       $0 <hicar_repo> --build <ref_build_dir> [np]"
     exit 2
 fi
 
@@ -54,146 +47,75 @@ hicar_repo="$(cd "$1" && pwd)"
 # helpers/example_namelists/set_nml_var.py.
 set_var() { "${PYTHON:-python3}" "$hicar_repo/helpers/example_namelists/set_nml_var.py" "$1" "$2" "$3" --group "$4" --insert || exit 1; }
 
-# --- bless mode: post the parity-blessed status (with the SNOWPACK SHA) -----
-if [ "$2" = "--bless" ]; then
-    shift 2
-    snowpack_dir="$hicar_repo/build/external/SNOWPACK"
-    reason=""
-    force=false
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --snowpack-dir) snowpack_dir="$2"; shift 2;;
-            --reason)       reason="$2"; shift 2;;
-            --force)        force=true; shift;;
-            *) echo "Unknown bless option: $1"; exit 2;;
-        esac
+# Default build trees for --build mode. The snowpack-compare workflow stages its
+# pre-built exes here so the comparison step reuses them; a local run builds them.
+# Removed on exit (see the trap below) so the next run always builds fresh.
+BUILD_REF=""
+SNOWPACK_CPP_BUILD="${hicar_repo}/build_snowpack_cpp"
+SNOWPACK_FORTRAN_BUILD="${hicar_repo}/build_snowpack_fortran"
+
+# find_hicar_exe <build_tree>: print the HICAR exe in <build_tree> (any MODE
+# variant), or return 1 if none is present.
+find_hicar_exe() {
+    local tree="$1" n
+    for n in HICAR_debug_gpu HICAR_debug HICAR_gpu HICAR_profile HICAR; do
+        [ -x "$tree/$n" ] && { echo "$tree/$n"; return 0; }
     done
-    report_dir="${hicar_repo}/tests/figures/snowpack_compare"
-    meta="${report_dir}/parity_meta.txt"
+    return 1
+}
 
-    # SNOWPACK anchor SHA: from the fetched checkout when present (local bless
-    # after a build), else from the comparison run's own provenance stamp (the
-    # CI bless job runs without a build dir — the evidence artifact carries the
-    # SHA the comparison actually used).
-    sp_sha=$(git -C "$snowpack_dir" rev-parse HEAD 2>/dev/null || true)
-    if [ -z "$sp_sha" ]; then
-        sp_sha=$(sed -n 's/^snowpack_commit=//p' "$meta" 2>/dev/null)
+# build_hicar_variant <out_tree> <label> [extra -D...]: print the HICAR exe in
+# <out_tree>, building it first ONLY if it is not already there — so an exe the
+# snowpack-compare workflow already staged is reused (skip compiling). Config is
+# inherited from the reference build's cache ($BUILD_REF/CMakeCache.txt); cmake
+# chatter goes to <out_tree>.{cfg,build}.log.
+build_hicar_variant() {
+    local out_tree="$1" label="$2"; shift 2
+    local existing
+    if existing=$(find_hicar_exe "$out_tree"); then
+        echo -e "${GREEN}Reusing pre-built ${label} exe: ${existing}${NC}" >&2
+        echo "$existing"; return 0
     fi
-    if [ -z "$sp_sha" ] || [ "$sp_sha" = "unknown" ]; then
-        echo -e "${RED}Cannot determine the SNOWPACK anchor SHA: no git checkout at${NC}"
-        echo -e "${RED}${snowpack_dir} and no snowpack_commit in ${meta}.${NC}"
-        echo "Build SNOWPACK or run the comparison first, or pass --snowpack-dir."
-        exit 1
+    local args=() v val
+    if [ -f "$BUILD_REF/CMakeCache.txt" ]; then
+        for v in MODE FC NETCDF_DIR FFTW_DIR MPI_DIR PETSC_DIR FSM FSM_DIR ASSERTIONS NCCL SNOWPACK_DIR; do
+            val=$(grep "^${v}:" "$BUILD_REF/CMakeCache.txt" 2>/dev/null | head -n1 | sed 's/^[^=]*=//')
+            [ -n "$val" ] && args+=("-D${v}=${val}")
+        done
     fi
-    head_sha=$(git -C "$hicar_repo" rev-parse HEAD)
+    args+=("$@")
+    echo -e "${BLUE}Building HICAR (${label}) in ${out_tree} ...${NC}" >&2
+    cmake -S "$hicar_repo" -B "$out_tree" "${args[@]}" >"${out_tree}.cfg.log" 2>&1 \
+        || { echo -e "${RED}configure failed (${label}); tail ${out_tree}.cfg.log:${NC}" >&2; tail -n 25 "${out_tree}.cfg.log" >&2; return 1; }
+    cmake --build "$out_tree" --target HICAR --parallel >"${out_tree}.build.log" 2>&1 \
+        || { echo -e "${RED}build failed (${label}); tail ${out_tree}.build.log:${NC}" >&2; tail -n 25 "${out_tree}.build.log" >&2; return 1; }
+    find_hicar_exe "$out_tree" || { echo -e "${RED}no HICAR exe produced in ${out_tree}${NC}" >&2; return 1; }
+}
 
-    # --- authorization gate: admins/maintainers only -------------------------
-    # Blessing moves the parity anchor for everyone, so it is restricted to
-    # repo admin/maintain roles (the CI path enforces the same on the workflow
-    # actor). NOT bypassable by --force: --force only overrides the evidence
-    # checks below, never authorization.
-    slug="${GITHUB_REPOSITORY:-$(cd "$hicar_repo" && gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)}"
-    [ -n "$slug" ] || { echo -e "${RED}Cannot determine owner/repo for gh${NC}"; exit 1; }
-    actor=$(gh api user --jq .login 2>/dev/null || true)
-    role=$(gh api "/repos/$slug/collaborators/${actor}/permission" \
-             --jq '.role_name // .permission' 2>/dev/null || echo unknown)
-    case "$role" in
-        admin|maintain) : ;;
-        *)
-            echo -e "${RED}Parity bless is restricted to repo admins/maintainers.${NC}"
-            echo "  gh user: ${actor:-unknown}, role on ${slug}: ${role}"
-            exit 1
-            ;;
-    esac
-
-    # --- pass gate: only bless what the comparison actually certified -------
-    # Every comparison run stamps tests/figures/snowpack_compare/parity_meta.txt
-    # with its PASS/FAIL verdict, the HICAR commit it ran on, and the SNOWPACK
-    # SHA it compared. Refuse to bless unless that evidence (a) exists,
-    # (b) says PASS, and (c) was produced from THIS commit — so a bless always
-    # certifies a real, current, passing comparison. --force overrides (e.g.
-    # evidence regenerated on a dirty tree), and is logged in the status text.
-    if [ "$force" != true ]; then
-        [ -f "$meta" ] || {
-            echo -e "${RED}No comparison evidence (${meta}).${NC}"
-            echo "Run the comparison first; bless certifies a passing run. (--force to override)"
-            exit 1
-        }
-        meta_status=$(sed -n 's/^compare_status=//p' "$meta")
-        meta_hicar=$(sed -n 's/^hicar_commit=//p' "$meta")
-        meta_sp=$(sed -n 's/^snowpack_commit=//p' "$meta")
-        [ "$meta_status" = "PASS" ] || {
-            echo -e "${RED}Refusing to bless: last comparison was ${meta_status:-unknown}, not PASS.${NC} (--force to override)"
-            exit 1
-        }
-        [ "$meta_hicar" = "$head_sha" ] || {
-            echo -e "${RED}Refusing to bless: evidence is from commit ${meta_hicar:0:12}, HEAD is ${head_sha:0:12}.${NC}"
-            echo "Re-run the comparison on this commit. (--force to override)"
-            exit 1
-        }
-        [ "$meta_sp" = "$sp_sha" ] || {
-            echo -e "${RED}Refusing to bless: evidence compared SNOWPACK ${meta_sp:0:12}, checkout now at ${sp_sha:0:12}.${NC}"
-            echo "The fetched SNOWPACK changed since the run. (--force to override)"
-            exit 1
-        }
+# --build: reuse/compile both exes at the default trees; otherwise use the two
+# provided exe paths.
+if [ "$2" = "--build" ]; then
+    BUILD_REF="${3:?--build requires a reference build dir}"
+    np_in="${4:-}"
+    # Always clean the default build trees on exit (success OR failure) so the
+    # next `make test_snowpack` builds fresh exes.
+    trap 'rm -rf "$SNOWPACK_CPP_BUILD" "$SNOWPACK_FORTRAN_BUILD"' EXIT
+    cpp_exe=$(build_hicar_variant "$SNOWPACK_CPP_BUILD"     "C++ SNOWPACK"           -DSNOWPACK_CPP=ON  -DOPENACC=OFF) || exit 1
+    fortran_exe=$(build_hicar_variant "$SNOWPACK_FORTRAN_BUILD" "native-Fortran SNOWPACK" -DSNOWPACK_CPP=OFF -DOPENACC=OFF) || exit 1
+else
+    if [ $# -lt 3 ]; then
+        echo "Usage: $0 <hicar_repo> <cpp_exe> <fortran_exe> [np]"
+        echo "       $0 <hicar_repo> --build <ref_build_dir> [np]"
+        exit 2
     fi
-
-    desc="snowpack=${sp_sha}${reason:+; $reason}"
-    [ "$force" = true ] && desc="${desc}; FORCED"
-    desc="${desc:0:140}"
-    gh api -X POST "/repos/$slug/statuses/$head_sha" \
-        -f state=success -f context=hicar-snowpack-parity-blessed \
-        -f description="$desc" >/dev/null
-    echo -e "${GREEN}Blessed ${head_sha}${NC} (hicar-snowpack-parity-blessed=success)"
-    echo -e "  SNOWPACK parity anchor: ${BLUE}${sp_sha}${NC}"
-
-    # --- archive the comparison evidence as a permanent GitHub release ------
-    # Workflow artifacts expire (<=90 d); a release does not. Each bless gets a
-    # `snowpack-parity/<date>-<sha>` release carrying the per-variable stats
-    # JSON, the diff maps, and the provenance stamp, so the parity level can be
-    # tracked across blesses (compare reports with tests/snowpack/parity_trend.py).
-    if [ -f "${report_dir}/parity_report.json" ]; then
-        tag="snowpack-parity/$(date -u +%Y%m%d)-${head_sha:0:7}"
-        tarball="$(mktemp -d)/parity_diffmaps.tar.gz"
-        tar -czf "$tarball" -C "$report_dir" \
-            $(cd "$report_dir" && ls -d diffmaps *.png 2>/dev/null) 2>/dev/null || tarball=""
-        notes="SNOWPACK C++ vs Fortran parity bless.
-
-* HICAR commit: \`${head_sha}\`
-* SNOWPACK (fortran-bindings) anchor: \`${sp_sha}\`
-* $(grep -E 'date_utc|ranks|compare_status' "${report_dir}/parity_meta.txt" 2>/dev/null | tr '\n' ' ')
-${reason:+* Reason: $reason}
-
-Assets: per-variable comparison stats (parity_report.json), spatial difference
-maps (parity_diffmaps.tar.gz). Compare against an earlier bless with
-tests/snowpack/parity_trend.py <old.json> <new.json>."
-        if gh release create "$tag" --repo "$slug" --target "$head_sha" \
-              --title "SNOWPACK parity $(date -u +%Y-%m-%d) (${head_sha:0:7})" \
-              --notes "$notes" \
-              "${report_dir}/parity_report.json" \
-              "${report_dir}/parity_meta.txt" \
-              ${tarball:+"$tarball"} 2>/dev/null; then
-            echo -e "  Evidence archived: ${BLUE}release ${tag}${NC}"
-        else
-            echo -e "${RED}  Release archiving failed (no contents:write permission?) — bless status still posted.${NC}"
-        fi
-    else
-        echo -e "${RED}  No parity_report.json found in ${report_dir} — nothing archived.${NC}"
-        echo "  (Run the comparison first so the bless can archive its evidence.)"
-    fi
-    exit 0
+    cpp_exe="$2"
+    fortran_exe="$3"
+    np_in="${4:-}"
 fi
-
-if [ $# -lt 3 ]; then
-    echo "Usage: $0 <hicar_repo> <cpp_exe> <fortran_exe> [np]"
-    exit 2
-fi
-cpp_exe="$2"
-fortran_exe="$3"
 # Ranks per run. Default to min(10, available cores) so the run is fast on a
 # beefy machine but does NOT oversubscribe a small GitHub CI runner (2-4 cores).
-if [ -n "${4:-}" ]; then
-    np="$4"
+if [ -n "${np_in:-}" ]; then
+    np="$np_in"
 else
     if [[ "$OSTYPE" == "darwin"* ]]; then
         ncores=$(sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
@@ -216,9 +138,9 @@ fortran_exe="$(cd "$(dirname "$fortran_exe")" && pwd)/$(basename "$fortran_exe")
 input_dir="${hicar_repo}/tests/Test_Cases/input"
 domains_dir="${hicar_repo}/tests/Test_Cases/domains"
 nmlgen_dir="${input_dir}/nml_gen_scripts"
-compare_script="${hicar_repo}/tests/compare_outputs.py"
+compare_script="${hicar_repo}/tests/scripts/compare_outputs.py"
 tol_spec="${hicar_repo}/tests/tolerances/tolerances_snowpack.yaml"
-seeder="${hicar_repo}/tests/snowpack/make_snowpack_init.py"
+seeder="${hicar_repo}/tests/scripts/snowpack/make_snowpack_init.py"
 seeded_domain="${domains_dir}/Gaudergrat_250m_snowpack.nc"
 
 # --- MPI launcher (same heuristic as test_reproducibility.sh) ---------------
@@ -257,11 +179,6 @@ echo "======================================================="
 echo "  reference (C++):     $cpp_exe"
 echo "  candidate (Fortran): $fortran_exe"
 echo "  ranks each run:      $np"
-# Record the upstream SNOWPACK commit in the log: this is the SHA that becomes
-# the parity anchor if this run is blessed (see --bless), and the audit trail
-# for the divergence routine in tests/snowpack/snowpack_divergence_report.sh.
-sp_sha=$(git -C "$hicar_repo/build/external/SNOWPACK" rev-parse HEAD 2>/dev/null || echo "unknown")
-echo "  SNOWPACK commit:     $sp_sha"
 
 # --- forcing list + support files (mirror test_reproducibility.sh) ----------
 # Shift the shipped night-time forcing (00-03 UTC) to midday (10-13 UTC) so the
@@ -270,7 +187,7 @@ echo "  SNOWPACK commit:     $sp_sha"
 midday_forcing="${hicar_repo}/tests/Test_Cases/forcing_midday"
 echo
 echo -e "Shifting forcing +10 h (night -> midday) for the shortwave-on comparison..."
-"$python_exe" "${hicar_repo}/tests/shift_forcing_timestamps.py" \
+"$python_exe" "${hicar_repo}/tests/scripts/shift_forcing_timestamps.py" \
     "${hicar_repo}/tests/Test_Cases/forcing" "$midday_forcing" 10 \
     || { echo -e "${RED}forcing time-shift failed${NC}"; exit 1; }
 "${hicar_repo}/helpers/filelist_script.sh" \
@@ -338,8 +255,8 @@ cand_out="$RUN_OUT"
 echo
 echo "Comparing all output variables (tol spec: $(basename "$tol_spec")) ..."
 # The JSON report records max|abs|/max|rel|/violation counts for EVERY variable
-# (passing ones included) — at bless time it is archived to a GitHub release so
-# the parity level can be consulted over time (see --bless).
+# (passing ones included) — on a main-line pass the snowpack-compare workflow's
+# archive job publishes it as a GitHub release so the parity level can be tracked.
 report_dir="${hicar_repo}/tests/figures/snowpack_compare"
 mkdir -p "$report_dir"
 "$python_exe" "$compare_script" "$ref_out" "$cand_out" \
@@ -350,20 +267,12 @@ cmp_status=$?
 
 # Spatial difference maps for the key snow/surface fields, generated on PASS as
 # well as FAIL (compare_outputs only plots failures): these are the figures the
-# bless archives, and the visual baseline for "how did the residual change".
-"$python_exe" "${hicar_repo}/tests/snowpack/plot_snowpack_diff.py" \
+# archive job snapshots, and the visual baseline for "how did the residual change".
+"$python_exe" "${hicar_repo}/tests/scripts/snowpack/plot_snowpack_diff.py" \
     "$ref_out" "$cand_out" "${report_dir}/diffmaps" >/dev/null 2>&1 \
     && echo -e "Difference maps: ${BLUE}${report_dir}/diffmaps${NC}" \
     || echo -e "${RED}(diff-map generation failed — non-fatal)${NC}"
 
-# Provenance stamp for the archive.
-{
-    echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo "hicar_commit=$(git -C "$hicar_repo" rev-parse HEAD 2>/dev/null || echo unknown)"
-    echo "snowpack_commit=${sp_sha}"
-    echo "ranks=${np}"
-    echo "compare_status=$([ $cmp_status -eq 0 ] && echo PASS || echo FAIL)"
-} > "${report_dir}/parity_meta.txt"
 
 echo
 echo "======================================================="

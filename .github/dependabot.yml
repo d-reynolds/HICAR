@@ -1,0 +1,15 @@
+# Keeps the GitHub Actions used by our workflows current and patched. This is the
+# one ecosystem Dependabot can act on for HICAR — Fortran, CMake FetchContent
+# dependencies, and system libraries (NetCDF/HDF5/FFTW/MPI) are NOT tracked here
+# and must be updated manually.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /                 # scans .github/workflows and .github/actions
+    schedule:
+      interval: weekly
+    groups:
+      actions:                   # one grouped PR per week rather than many
+        patterns: ["*"]
+    commit-message:
+      prefix: ci

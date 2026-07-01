@@ -1,0 +1,85 @@
+name: Bug report
+description: Report a crash, wrong result, or build failure in HICAR
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please fill in the environment details below, which
+        help us to reproduce the problem. The more information you provide here,
+        the faster we can fix it. Feel free to attach any plots or screenshots that
+        show the problem.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+      description: Describe the wrong behaviour (crash, NaN, wrong values, build error) and what you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The commands you ran (configure/build and run)
+    validations:
+      required: true
+  - type: textarea
+    id: namelist
+    attributes:
+      label: Namelist used to run
+      description: Attach the namelist used to run your case, and a description of the forcing/domain data
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: HICAR version / commit
+      description: Output of `git rev-parse HEAD`, or the release tag
+    validations:
+      required: true
+  - type: dropdown
+    id: compiler
+    attributes:
+      label: Compiler
+      options:
+        - GNU Fortran (gfortran)
+        - NVFortran / NVHPC
+        - Other (state in the version field)
+    validations:
+      required: true
+  - type: input
+    id: compiler-version
+    attributes:
+      label: Compiler version
+      description: e.g. "gfortran 12.3.0" or "nvfortran 24.5"
+    validations:
+      required: true
+  - type: input
+    id: mpi
+    attributes:
+      label: MPI implementation + version
+      description: e.g. MPICH 4.1, OpenMPI 5.0.x, Cray MPICH
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS / platform
+      description: e.g. Ubuntu 22.04 (x86_64), macOS 14 (arm64), or the HPC system name
+    validations:
+      required: true
+  - type: textarea
+    id: build-config
+    attributes:
+      label: Build configuration
+      description: CMake flags — MODE (debug/release), -DOPENACC, -DSNOWPACK_CPP, -DFSM, etc. — and how NetCDF/HDF5/FFTW/MPI were provided (system, conda, built from source).
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / error output
+      description: The error message, or optimally attach the run's full .out/.err
+      render: shell
+    validations:
+      required: true

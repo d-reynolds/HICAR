@@ -162,8 +162,6 @@ contains
         integer :: i, line_start, str_len, eq_pos, slash_pos
 
         call this%add_attribute("comment",options%general%comment)
-        call this%add_attribute("source","HICAR version:"//trim(options%general%version))
-
 
 
         call this%add_attribute("ids",str(1))
@@ -533,6 +531,7 @@ contains
                     "Gutmann et al. 2016: The Intermediate Complexity Atmospheric Model (ICAR). J.Hydrometeor. doi:10.1175/JHM-D-15-0155.1, 2016.\n"//&
                     "Reynolds et al. 2023: The High-resolution Intermediate Complexity Atmospheric Research (HICAR v1.1) model enables fast dynamic downscaling to the hectometer scale. GMD. https://doi.org/10.5194/gmd-16-5049-2023, 2023"), trim(err))
         call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"git",VERSION), trim(err))
+        call check_ncdf( nf90_put_att(ncid,NF90_GLOBAL,"git_tag",GIT_TAG), trim(err))
 
         if (this%n_attrs > 0) then
             do i=1,this%n_attrs

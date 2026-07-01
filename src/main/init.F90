@@ -447,6 +447,11 @@ contains
     subroutine welcome_message()
         implicit none
 
+        character(len=38) :: tag_field, commit_field
+
+        tag_field    = GIT_TAG
+        commit_field = GIT_COMMIT
+
         write(*,*) ""
         write(*,*) "============================================================"
         write(*,*) "|                                                          |"
@@ -459,7 +464,8 @@ contains
         write(*,*) "|   HICAR Developed at SLF:                                |"
         write(*,*) "|     The Swiss Institute for Snow and Avalanche Research  |"
         write(*,*) "|                                                          |"
-        write(*,*) "|   Version: ",kVERSION_STRING,"                                         |"
+        write(*,*) "|   Version (tag): " // tag_field // "  |"
+        write(*,*) "|   Git commit:    " // commit_field // "  |"
         write(*,*) "|                                                          |"
         write(*,*) "============================================================"
         write(*,*) ""

@@ -3,7 +3,7 @@
 ## Example
 
 ```bash
-mpiexec -np 2 ./HICAR/bin/HICAR HICAR_Test_Case.nml
+mpiexec -np 2 ./bin/HICAR your_namelist.nml
 ```
 In the above example, the number of MPI ranks is set with `-np 2`. The number of ranks must always be greater than 1, as at least 1 processor is needed for I/O. An even number of ranks may lead to inefficient domain decomposition, since an odd number of ranks are used in the domain decomposition (i.e. `-np 6` results in 1 I/O task and 5 compute tasks).
 
@@ -25,7 +25,7 @@ mpiexec -np 64 ./bin/HICAR your_namelist.nml
 The value is validated at startup, and the following rules apply:
 
 - `HICAR_IO_PER_NODE` must **evenly divide the number of MPI ranks per node**. If it does not, HICAR decrements it to the next value that does and prints a warning.
-- It is capped at the number of ranks per node; a larger value is reduced to that number (with a warning).
+- It is capped at the number of ranks per node; a larger value is reduced to that number (with a warning). But remember to leave something for the compute tasks...
 - Every I/O task replaces a compute task, so increasing `HICAR_IO_PER_NODE` reduces the number of compute ranks. At least one compute rank must remain, or the run aborts at startup.
 
 ## Running on GPUs

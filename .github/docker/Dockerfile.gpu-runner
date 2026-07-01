@@ -115,7 +115,7 @@ ENV NETCDF_DIR=${INSTALLDIR} \
     LD_LIBRARY_PATH=${INSTALLDIR}/lib:${LD_LIBRARY_PATH}
 
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod a+rx /entrypoint.sh
 
 USER runner
 ENTRYPOINT ["/entrypoint.sh"]
