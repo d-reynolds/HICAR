@@ -1,3 +1,17 @@
+# ============================================================================
+# HICAR root build — organized as dependency-ordered phases:
+#   A Project & toolchain
+#   B Options & config
+#   C Sources & metadata
+#   D Compiler identity & flags
+#   E Dependencies
+#   F Targets
+#   G Finalize
+# ============================================================================
+
+# ============================================================================
+# PHASE A — Project & toolchain
+# ============================================================================
 # Always set the cmake min version.
 cmake_minimum_required(VERSION 3.20)
 
@@ -12,6 +26,8 @@ if(DEFINED ENV{CONDA_PREFIX})
   message(STATUS "Ignoring Conda environment path: $ENV{CONDA_PREFIX}")
 endif()
 
+# Resolve FC to an absolute path BEFORE enable_language(Fortran) so FetchContent
+# subprojects (rte-rrtmgp) get an absolute CMAKE_Fortran_COMPILER.
 set(_fc_request "")
 if (DEFINED FC AND NOT FC STREQUAL "")
 	set(_fc_request "${FC}")
@@ -33,10 +49,12 @@ enable_language (Fortran)
 # Put all fetched external dependencies (noah_mp, rte-rrtmgp, rrtmgp_data,
 # icar_supporting_files, test-drive, ...) under build/external — alongside
 # SNOWPACK/MeteoIO — instead of CMake's default build/_deps. Must be set before
-# any FetchContent use (incl. the tests subdirectory's test-drive finder).
+# any FetchContent use (incl. phase E and the phase-G tests test-drive finder).
 set(FETCHCONTENT_BASE_DIR "${CMAKE_BINARY_DIR}/external")
 
-#########################################
+# ============================================================================
+# PHASE B — Build options & configuration
+# ============================================================================
 ####### Set up the user variables #######
 set(MODE "release" CACHE STRING "Set compilation flags, useful for debugging")
 set(FC "" CACHE STRING "Set the fortran compiler to use (can be auto-detected for most cases)")
@@ -105,15 +123,11 @@ if(DEFINED SNOWPACK_FORTRAN)
 endif()
 #########################################
 
-#Set constants for project
 add_subdirectory(${PROJECT_SOURCE_DIR}/tests EXCLUDE_FROM_ALL)
-#######################################
 
-
-#########################################################
-######## Set up compiler options for the build ##########
-
-#######################################
+# ============================================================================
+# PHASE C — Sources & build metadata
+# ============================================================================
 ########## Set up the sources #########
 FILE(GLOB_RECURSE SOURCE_FILES  ${PROJECT_SOURCE_DIR}/src/*.F90)
 
@@ -168,7 +182,9 @@ if(NOT GIT_DESCRIBE_TAG)
 	set(GIT_DESCRIBE_TAG "untagged")
 endif()
 
-############################################
+# ============================================================================
+# PHASE D — Compiler identity & flags
+# ============================================================================
 ############## Auto-detect  ################
 message(STATUS "")
 message(STATUS "Trying to auto-detect the environment...")
@@ -269,12 +285,10 @@ endif()
 string(REPLACE ";" " " HICAR_Fortran_FLAGS_STR "${HICAR_Fortran_FLAGS}")
 message(STATUS "Fortran compiler flags: ${HICAR_Fortran_FLAGS_STR}")
 message(STATUS "...done setting up compiler flags")
-###########################################################
 
-
-
-
-###########################################################
+# ============================================================================
+# PHASE E — Dependencies (find_package + FetchContent)
+# ============================================================================
 ############### Find or install dependencies ##############
 message(STATUS "")
 message(STATUS "Searching for dependencies...")
@@ -437,10 +451,46 @@ else()
 	message(STATUS "Using precompiled Noah-MP library specified by NOAHMP_LIBRARY environment variable: ${NOAHMP_LIBRARY}")
 endif()
 
+############### Download supporting run files ##############
+# (data-only fetches; grouped with the other FetchContent here in phase E — they
+# only need their Declare + FETCHCONTENT_BASE_DIR, no flags or targets.)
 
-###########################################################
+# Download the repo but don't build it
+FetchContent_MakeAvailable(icar_supporting_files)
 
+# Copy only specific folders to the run directory
+file(COPY "${icar_supporting_files_SOURCE_DIR}/mp_support" DESTINATION "${PROJECT_SOURCE_DIR}/run")
+file(COPY "${icar_supporting_files_SOURCE_DIR}/rrtmg_support" DESTINATION "${PROJECT_SOURCE_DIR}/run")
 
+# Clean up downloaded repo to save space
+file(REMOVE_RECURSE "${icar_supporting_files_SOURCE_DIR}")
+file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/icar_supporting_files-subbuild")
+file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/icar_supporting_files-build")
+
+# if we are using RTE_RRTMGP, copy supporting files from the git repository: https://github.com/earth-system-radiation/rrtmgp-data
+message(STATUS "Fetching rte-rrtmgp data files...")
+
+# Download the repo but don't build it
+FetchContent_MakeAvailable(rrtmgp_data)
+
+# Copy rrtmgp data files to the run directory
+file(COPY "${rrtmgp_data_SOURCE_DIR}/" DESTINATION "${PROJECT_SOURCE_DIR}/run/rrtmgp_support")
+
+# Clean up downloaded repo to save space
+file(REMOVE_RECURSE "${rrtmgp_data_SOURCE_DIR}")
+file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/rrtmgp_data-subbuild")
+file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/rrtmgp_data-build")
+
+message(STATUS "RTE-RRTMGP data files copied to run/rrtmgp_support")
+
+list(POP_BACK CMAKE_MESSAGE_INDENT)
+message(STATUS "...done searching for dependencies")
+
+# ============================================================================
+# PHASE F — Targets (hicar_lib + HICAR: definitions, links, options)
+# ============================================================================
+# SOURCE_FILES is final here (globs + FSM removes + SNOWPACK-native append + ra_mo
+# re-append all happened in phases C/E); create the targets from it.
 list(REMOVE_ITEM SOURCE_FILES ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
 add_library(hicar_lib STATIC ${SOURCE_FILES})
 add_executable(HICAR ${PROJECT_SOURCE_DIR}/src/main/driver.F90)
@@ -665,6 +715,10 @@ target_link_libraries(HICAR PUBLIC hicar_lib)
 
 ##########################################################
 ############## Set up the compiler options ###############
+target_compile_options(hicar_lib INTERFACE ${HICAR_Fortran_FLAGS})
+
+# Executable name: debug/debugslow -> HICAR_debug, profile -> HICAR_profile,
+# release -> HICAR; nvfortran GPU (OPENACC) builds get a _gpu suffix (not for profile).
 
 if(MODE MATCHES "debug")
 	set(_hicar_name "HICAR_debug")
@@ -706,54 +760,9 @@ if(COMPILER STREQUAL "nvfortran" AND OPENACC)
 	endif()
 endif()
 
-
-
-##########################################################
-
-
-###########################################################
-############### Download supporting run files ##############
-
-# Download the repo but don't build it
-FetchContent_MakeAvailable(icar_supporting_files)
-
-# Copy only specific folders to the run directory
-file(COPY "${icar_supporting_files_SOURCE_DIR}/mp_support" DESTINATION "${PROJECT_SOURCE_DIR}/run")
-file(COPY "${icar_supporting_files_SOURCE_DIR}/rrtmg_support" DESTINATION "${PROJECT_SOURCE_DIR}/run")
-
-# Clean up downloaded repo to save space
-file(REMOVE_RECURSE "${icar_supporting_files_SOURCE_DIR}")
-file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/icar_supporting_files-subbuild")
-file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/icar_supporting_files-build")
-
-# if we are using RTE_RRTMGP, copy supporting files from the git repository: https://github.com/earth-system-radiation/rrtmgp-data
-message(STATUS "Fetching rte-rrtmgp data files...")
-
-# Download the repo but don't build it
-FetchContent_MakeAvailable(rrtmgp_data)
-
-# Copy rrtmgp data files to the run directory
-file(COPY "${rrtmgp_data_SOURCE_DIR}/" DESTINATION "${PROJECT_SOURCE_DIR}/run/rrtmgp_support")
-	
-# Clean up downloaded repo to save space
-file(REMOVE_RECURSE "${rrtmgp_data_SOURCE_DIR}")
-file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/rrtmgp_data-subbuild")
-file(REMOVE_RECURSE "${FETCHCONTENT_BASE_DIR}/rrtmgp_data-build")
-
-message(STATUS "RTE-RRTMGP data files copied to run/rrtmgp_support")
-
-
-list(POP_BACK CMAKE_MESSAGE_INDENT)
-message(STATUS "...done searching for dependencies")
-
-###########################################################
-
-
-
-
-
-
-#######################################################
+# ============================================================================
+# PHASE G — Finalize (banner, install, tooling)
+# ============================================================================
 ############## Print User Information #################
 set(MAIN_CFLAGS "${HICAR_Fortran_FLAGS_STR}")
 
@@ -808,9 +817,6 @@ set(CMAKE_Fortran_MODULE_DIRECTORY  ${CMAKE_BINARY_DIR})
 
 # this is to copy the library to the diseired directory
 install(TARGETS HICAR  DESTINATION  ${CMAKE_INSTALL_EXEDIR})
-
-
-    
 
 ADD_CUSTOM_TARGET( distclean make clean
 				   COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/CMakeFiles
